@@ -54,6 +54,19 @@
             </intent-filter>
         </activity>
 
+        <!-- Dedicated Separate Admin App Launcher Entry -->
+        <activity
+            android:name=".admin.AdminActivity"
+            android:exported="true"
+            android:label="Kingo Admin"
+            android:icon="@mipmap/ic_launcher_round"
+            android:theme="@style/Theme.MyApplication">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
         <!-- Foreground Service for ongoing timer notification -->
         <service
             android:name=".service.WatchTimerService"

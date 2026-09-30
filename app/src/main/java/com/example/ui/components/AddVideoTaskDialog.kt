@@ -187,10 +187,15 @@ fun AddVideoTaskDialog(
                 // URL Input Field + Paste Action
                 OutlinedTextField(
                     value = urlInput,
-                    onValueChange = {
-                        urlInput = it
-                        if (it.contains("youtu", ignoreCase = true)) {
-                            fetchDetails(it)
+                    onValueChange = { raw ->
+                        val cleaned = TitleMatcher.extractCleanYouTubeUrl(raw)
+                        urlInput = cleaned
+                        val sharedTitle = TitleMatcher.extractSharedTitle(raw)
+                        if (!sharedTitle.isNullOrBlank() && titleInput.isBlank()) {
+                            titleInput = sharedTitle
+                        }
+                        if (cleaned.contains("youtu", ignoreCase = true)) {
+                            fetchDetails(cleaned)
                         }
                     },
                     label = { Text("YouTube Video URL") },
@@ -205,8 +210,15 @@ fun AddVideoTaskDialog(
                                 val clip = clipboard.primaryClip
                                 if (clip != null && clip.itemCount > 0) {
                                     val pasteText = clip.getItemAt(0).text?.toString() ?: ""
-                                    urlInput = pasteText
-                                    fetchDetails(pasteText)
+                                    val cleaned = TitleMatcher.extractCleanYouTubeUrl(pasteText)
+                                    urlInput = cleaned
+                                    val sharedTitle = TitleMatcher.extractSharedTitle(pasteText)
+                                    if (!sharedTitle.isNullOrBlank() && titleInput.isBlank()) {
+                                        titleInput = sharedTitle
+                                    }
+                                    if (cleaned.isNotEmpty()) {
+                                        fetchDetails(cleaned)
+                                    }
                                 }
                             }
                         ) {

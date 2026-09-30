@@ -65,6 +65,7 @@ fun ActiveWatchTimerBanner(
 ) {
     val context = LocalContext.current
     val sessionState by viewModel.sessionState.collectAsState()
+    val playbackState by viewModel.playbackState.collectAsState()
     val watchedMillis by viewModel.watchedMillis.collectAsState()
     val requiredMillis by viewModel.requiredMillis.collectAsState()
     val targetTitle by viewModel.targetTaskTitle.collectAsState()
@@ -113,20 +114,21 @@ fun ActiveWatchTimerBanner(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.weight(1f)
                     ) {
+                        val isPlaying = sessionState == SessionState.ACTIVE && playbackState == com.example.data.VideoPlaybackState.PLAYING
                         Box(
                             modifier = Modifier
                                 .size(10.dp)
                                 .background(
-                                    if (sessionState == SessionState.ACTIVE) SuccessGreen else AmberPrimary,
+                                    if (isPlaying) SuccessGreen else AmberPrimary,
                                     CircleShape
                                 )
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (sessionState == SessionState.ACTIVE) "WATCHING LIVE" else "READY / WAITING",
+                            text = if (isPlaying) "WATCHING LIVE ▶" else if (sessionState == SessionState.ACTIVE) "PAUSED ⏸ (OPEN YOUTUBE)" else "READY / WAITING",
                             fontWeight = FontWeight.ExtraBold,
                             fontSize = 11.sp,
-                            color = if (sessionState == SessionState.ACTIVE) SuccessGreen else AmberPrimary,
+                            color = if (isPlaying) SuccessGreen else AmberPrimary,
                             letterSpacing = 0.5.sp
                         )
                         Spacer(modifier = Modifier.width(8.dp))

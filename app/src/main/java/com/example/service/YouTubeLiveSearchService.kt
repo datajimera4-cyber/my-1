@@ -26,6 +26,12 @@ class YouTubeLiveSearchService : AccessibilityService() {
             private set
 
         @Volatile
+        var isYouTubeInForeground: Boolean = false
+
+        @Volatile
+        var isVideoExplicitlyPaused: Boolean = false
+
+        @Volatile
         var targetSearchTitle: String? = null
 
         @Volatile
@@ -56,6 +62,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
             hasClickedTarget = false
             scrollAttempts = 0
             lastClickTime = 0L
+            isVideoExplicitlyPaused = false
             currentPhase = LiveSearchPhase.OPEN_SEARCH_BAR
             WatchSessionRepository.addLog("Live Human Search armed for: \"$title\"", LogType.INFO)
         }
@@ -68,6 +75,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
             hasClickedTarget = false
             scrollAttempts = 0
             lastClickTime = 0L
+            isVideoExplicitlyPaused = false
             currentPhase = LiveSearchPhase.IDLE
         }
     }
@@ -79,7 +87,51 @@ class YouTubeLiveSearchService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event == null || hasClickedTarget || currentPhase == LiveSearchPhase.IDLE || currentPhase == LiveSearchPhase.COMPLETED) {
+        if (event == null) return
+
+        val pkg = event.packageName?.toString() ?: ""
+        val myPkg = packageName ?: "com.example"
+
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+            event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
+            if (pkg == "com.google.android.youtube") {
+                isYouTubeInForeground = true
+            } else if (pkg.isNotBlank() &&
+                pkg != myPkg &&
+                !pkg.contains("systemui") &&
+                !pkg.contains("accessibility") &&
+                !pkg.contains("inputmethod")
+            ) {
+                isYouTubeInForeground = false
+                WatchSessionRepository.setPlaybackPlaying(false)
+            }
+        } else if (pkg == "com.google.android.youtube") {
+            isYouTubeInForeground = true
+        }
+
+        // Detect user interactions on YouTube like and comment buttons
+        if (isYouTubeInForeground && event.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+            try {
+                val node = event.source
+                if (node != null) {
+                    val desc = node.contentDescription?.toString() ?: ""
+                    val text = node.text?.toString() ?: ""
+                    val combined = "$desc $text".lowercase()
+                    if ((combined.contains("like this video") || combined.contains("like")) && !combined.contains("dislike")) {
+                        WatchSessionRepository.onTaskLikeDetected?.invoke()
+                    } else if (combined.contains("comment") || combined.contains("add a comment") || combined.contains("send comment") || combined.contains("post")) {
+                        WatchSessionRepository.onTaskCommentDetected?.invoke()
+                    }
+                    node.recycle()
+                }
+            } catch (_: Exception) {}
+        }
+
+        // If target was already clicked or idle, monitor playback controls in YouTube
+        if (hasClickedTarget || currentPhase == LiveSearchPhase.IDLE || currentPhase == LiveSearchPhase.COMPLETED) {
+            if (isYouTubeInForeground && event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+                checkPlaybackControls(event.source ?: rootInActiveWindow)
+            }
             return
         }
 
@@ -386,49 +438,43 @@ class YouTubeLiveSearchService : AccessibilityService() {
                     val cardRect = android.graphics.Rect()
                     toClick.getBoundsInScreen(cardRect)
 
-                    // Calculate real screen coordinates to simulate a human finger tap
+                    // Calculate real screen coordinates to simulate a human finger tap on the TITLE
                     val tapX = if (nodeRect.width() > 0) nodeRect.centerX() else cardRect.centerX()
-                    val tapY = if (cardRect.height() > 100) {
-                        // Tapping the thumbnail (upper 35% of card) opens the full video player
-                        cardRect.top + (cardRect.height() * 0.35f).toInt()
-                    } else if (nodeRect.height() > 0) {
+                    val tapY = if (nodeRect.height() > 0) {
                         nodeRect.centerY()
+                    } else if (cardRect.height() > 100) {
+                        // Tapping lower half (title/info area) opens the full video player page
+                        cardRect.top + (cardRect.height() * 0.70f).toInt()
                     } else {
                         cardRect.centerY()
                     }
 
-                    // 1. Dispatch real human touch tap on video thumbnail/card
+                    // 1. Dispatch real human touch tap on video title text
                     dispatchTapGesture(tapX, tapY)
 
-                    // 2. Perform accessibility click on both the title node and card container
-                    val clicked = toClick.performAction(AccessibilityNodeInfo.ACTION_CLICK) ||
-                            node.performAction(AccessibilityNodeInfo.ACTION_CLICK) ||
-                            (node.parent?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true)
+                    // 2. Perform accessibility click on the title node and card container
+                    toClick.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    node.parent?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
 
                     hasClickedTarget = true
                     lastClickTime = System.currentTimeMillis()
                     currentPhase = LiveSearchPhase.COMPLETED
                     WatchSessionRepository.addLog(
-                        "🎉 Human search: Tapped target video thumbnail ($tapX, $tapY)! Opening full watch player.",
+                        "🎉 Human search: Clicked video title at ($tapX, $tapY)! Opening full watch player...",
                         LogType.SUCCESS
                     )
 
-                    // Fallback insurance: If YouTube still remains in search feed 1.2s later (playing inline without opening full watch screen),
-                    // launch video directly so user is guaranteed to get the full video player!
-                    val fallbackUrl = targetVideoUrl
-                    if (!fallbackUrl.isNullOrBlank()) {
+                    // Ensure the full watch player opens (not inline list preview)
+                    val fallbackUrl = targetVideoUrl ?: if (!targetVideoId.isNullOrBlank()) "https://www.youtube.com/watch?v=$targetVideoId" else ""
+                    if (fallbackUrl.isNotBlank()) {
                         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                             try {
-                                val currentRoot = rootInActiveWindow
-                                val searchBoxStillVisible = currentRoot?.let { findSearchEditText(it) != null } ?: false
-                                currentRoot?.recycle()
-                                if (searchBoxStillVisible) {
-                                    WatchSessionRepository.addLog("Ensuring full player view: Opening video in YouTube player", LogType.INFO)
-                                    val openIntent = com.example.util.PermissionHelper.openVideoIntent(applicationContext, fallbackUrl, targetTitle)
-                                    applicationContext.startActivity(openIntent)
-                                }
+                                WatchSessionRepository.addLog("Opening full video player in YouTube", LogType.INFO)
+                                val openIntent = com.example.util.PermissionHelper.openVideoIntent(applicationContext, fallbackUrl, targetTitle)
+                                applicationContext.startActivity(openIntent)
                             } catch (_: Exception) {}
-                        }, 1200L)
+                        }, 400L)
                     }
 
                     return true
@@ -444,6 +490,35 @@ class YouTubeLiveSearchService : AccessibilityService() {
         }
 
         return false
+    }
+
+    private fun checkPlaybackControls(node: AccessibilityNodeInfo?) {
+        if (node == null) return
+        try {
+            val desc = node.contentDescription?.toString() ?: ""
+            if (desc.contains("Play video", ignoreCase = true) || desc.equals("Play", ignoreCase = true)) {
+                // Video is currently paused in YouTube
+                isVideoExplicitlyPaused = true
+                WatchSessionRepository.setPlaybackPlaying(false)
+                return
+            } else if (desc.contains("Pause video", ignoreCase = true) || desc.equals("Pause", ignoreCase = true)) {
+                // Video is actively playing in YouTube
+                isVideoExplicitlyPaused = false
+                WatchSessionRepository.setPlaybackPlaying(true)
+                return
+            } else if (desc.contains("Replay video", ignoreCase = true) || desc.equals("Replay", ignoreCase = true)) {
+                // Video ended
+                isVideoExplicitlyPaused = true
+                WatchSessionRepository.setPlaybackPlaying(false)
+                return
+            }
+
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i) ?: continue
+                checkPlaybackControls(child)
+                child.recycle()
+            }
+        } catch (_: Exception) {}
     }
 
     private fun scrollForward(node: AccessibilityNodeInfo): Boolean {

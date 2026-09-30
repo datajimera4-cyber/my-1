@@ -136,14 +136,15 @@ object PermissionHelper {
      */
     fun openVideoIntent(context: Context, videoUrl: String, searchTitle: String? = null): Intent {
         val videoId = TitleMatcher.extractVideoId(videoUrl)
-        val uri = if (!videoId.isNullOrBlank() && isYouTubeAppInstalled(context)) {
-            Uri.parse("vnd.youtube:$videoId")
+        val targetUrl = if (!videoId.isNullOrBlank()) {
+            "https://www.youtube.com/watch?v=$videoId"
         } else {
-            Uri.parse(videoUrl)
+            videoUrl
         }
+        val uri = Uri.parse(targetUrl)
 
         val intent = Intent(Intent.ACTION_VIEW, uri).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(Intent.EXTRA_REFERRER, Uri.parse("android-app://com.google.android.youtube/search"))
             if (!searchTitle.isNullOrBlank()) {
                 putExtra("query", searchTitle)

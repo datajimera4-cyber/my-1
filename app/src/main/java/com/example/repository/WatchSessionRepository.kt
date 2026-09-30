@@ -29,6 +29,10 @@ object WatchSessionRepository {
     private val _sessionState = MutableStateFlow(SessionState.IDLE)
     val sessionState: StateFlow<SessionState> = _sessionState.asStateFlow()
 
+    @Volatile
+    var isAppInForeground: Boolean = false
+        private set
+
     private val _matchResult = MutableStateFlow(MatchResult.UNKNOWN)
     val matchResult: StateFlow<MatchResult> = _matchResult.asStateFlow()
 
@@ -89,11 +93,24 @@ object WatchSessionRepository {
     private var lastTickRealtime: Long = 0L
     private var graceJob: Job? = null
     private var waitingTimeoutJob: Job? = null
+    private var isMilestoneAwarded: Boolean = false
 
     // Listener for service notification triggers
     var onRedAlertTriggered: ((title: String, message: String) -> Unit)? = null
     var onCompletionTriggered: ((coins: Int, title: String) -> Unit)? = null
     var onSaveProgressNeeded: ((millis: Long) -> Unit)? = null
+    var onTaskLikeDetected: (() -> Unit)? = null
+    var onTaskCommentDetected: (() -> Unit)? = null
+    var onSessionInterrupted: ((reason: String) -> Unit)? = null
+    var onMilestoneCoinsAwarded: ((coins: Int, title: String) -> Unit)? = null
+
+    fun triggerTaskLike() {
+        onTaskLikeDetected?.invoke()
+    }
+
+    fun triggerTaskComment() {
+        onTaskCommentDetected?.invoke()
+    }
 
     init {
         addLog("WatchEarn engine initialized", LogType.INFO)
@@ -139,14 +156,17 @@ object WatchSessionRepository {
         taskTitle: String,
         taskAuthor: String,
         requiredSeconds: Int,
-        initialWatchedMillis: Long,
+        initialWatchedMillis: Long = 0L,
         rewardCoins: Int = 10,
         taskId: String? = null
     ) {
         _targetTaskTitle.value = taskTitle
         _targetTaskAuthor.value = taskAuthor
         _requiredMillis.value = requiredSeconds * 1000L
-        _watchedMillis.value = initialWatchedMillis
+        // Strict Continuous Watch Rule: Every session starts strictly from 0!
+        _watchedMillis.value = 0L
+        _currentMilestoneTier.value = null
+        isMilestoneAwarded = false
         _rewardCoins.value = rewardCoins
         _activeTaskId.value = taskId
         _redAlertMessage.value = null
@@ -154,11 +174,11 @@ object WatchSessionRepository {
         _currentMediaTitle.value = taskTitle
         _currentMediaArtist.value = taskAuthor
         _matchResult.value = MatchResult.MATCH
-        _playbackState.value = VideoPlaybackState.PLAYING
+        _playbackState.value = VideoPlaybackState.PAUSED
         _mediaSessionDetected.value = true
         _sessionState.value = SessionState.ACTIVE
 
-        addLog("Task started. Target: \"$taskTitle\" ($requiredSeconds s for $rewardCoins coins). Watching session ACTIVE!", LogType.SUCCESS)
+        addLog("Task started. Target: \"$taskTitle\". Continuous watch session initialized from 00:00!", LogType.SUCCESS)
 
         waitingTimeoutJob?.cancel()
     }
@@ -321,18 +341,64 @@ object WatchSessionRepository {
         addLog(reason, LogType.INFO)
     }
 
+    fun setAppInForeground(inForeground: Boolean) {
+        if (isAppInForeground != inForeground) {
+            isAppInForeground = inForeground
+            if (inForeground) {
+                com.example.service.YouTubeLiveSearchService.isYouTubeInForeground = false
+                _playbackState.value = VideoPlaybackState.PAUSED
+                lastTickRealtime = 0L
+
+                val watchedSecs = (_watchedMillis.value / 1000).toInt()
+                val requiredSecs = (_requiredMillis.value / 1000).toInt()
+                if (_sessionState.value == SessionState.ACTIVE) {
+                    if (watchedSecs < 180 || _watchedMillis.value < _requiredMillis.value) {
+                        addLog(
+                            "⚠️ Continuous watch broken: Left YouTube after ${watchedSecs}s (required ${requiredSecs}s). Task not completed, progress reset to 00:00 (no coins rewarded).",
+                            LogType.WARNING
+                        )
+                        _sessionState.value = SessionState.IDLE
+                        _watchedMillis.value = 0L
+                        _currentMilestoneTier.value = null
+                        onSaveProgressNeeded?.invoke(0L)
+                        onSessionInterrupted?.invoke(
+                            "Continuous watch requirement not met: You returned to the app before completing the ${requiredSecs / 60}m milestone (${watchedSecs}s watched). The session has reset to 00:00 without coins."
+                        )
+                    }
+                } else {
+                    addLog("App opened in foreground", LogType.INFO)
+                }
+            } else {
+                addLog("Switched out of app: Ready for video watch tracking", LogType.INFO)
+            }
+        }
+    }
+
+    fun setPlaybackPlaying(isPlaying: Boolean) {
+        val newState = if (isPlaying) VideoPlaybackState.PLAYING else VideoPlaybackState.PAUSED
+        if (_playbackState.value != newState) {
+            _playbackState.value = newState
+            if (!isPlaying) {
+                lastTickRealtime = 0L
+            }
+        }
+    }
+
     /**
      * Timer tick loop called from foreground service or ViewModel every ~500ms
      */
     fun processTimerTick() {
         val state = _sessionState.value
-        if (state != SessionState.ACTIVE) {
+        if (state != SessionState.ACTIVE || isAppInForeground) {
             lastTickRealtime = 0L
+            if (isAppInForeground && _playbackState.value == VideoPlaybackState.PLAYING) {
+                _playbackState.value = VideoPlaybackState.PAUSED
+            }
             return
         }
 
         val isPlaying = _playbackState.value == VideoPlaybackState.PLAYING
-        val isMatched = _matchResult.value == MatchResult.MATCH
+        val isMatched = _matchResult.value != MatchResult.MISMATCH
 
         if (isPlaying && isMatched && !_isGracePeriodActive.value) {
             val now = SystemClock.elapsedRealtime()
@@ -352,6 +418,7 @@ object WatchSessionRepository {
                         _currentMilestoneTier.value = achieved
                         if (achieved != null) {
                             addLog("🎉 Milestone Reached: ${achieved.minutes}m continuous watch (+${achieved.coins} coins unlocked)!", LogType.SUCCESS)
+                            onMilestoneCoinsAwarded?.invoke(achieved.coins, "${achieved.minutes}m Milestone (+${achieved.coins}c)")
                         }
                     }
 
@@ -369,15 +436,51 @@ object WatchSessionRepository {
     }
 
     private fun completeTask() {
+        val watchedSecs = (_watchedMillis.value / 1000).toInt()
+        val goalSecs = (_requiredMillis.value / 1000).toInt()
+        val milestone = _currentMilestoneTier.value ?: com.example.data.calculateContinuousWatchMilestone(watchedSecs, goalSecs)
+
+        // Strict milestone validation: must have watched for at least 180 continuous seconds
+        if (watchedSecs < 180 || milestone == null) {
+            addLog("Task stopped: Watched $watchedSecs s (less than 3 continuous minutes required). No coins rewarded.", LogType.WARNING)
+            _sessionState.value = SessionState.IDLE
+            _watchedMillis.value = 0L
+            _currentMilestoneTier.value = null
+            lastTickRealtime = 0L
+            onSaveProgressNeeded?.invoke(0L)
+            return
+        }
+
+        if (isMilestoneAwarded) {
+            return // Prevent duplicate coin addition
+        }
+        isMilestoneAwarded = true
+
         _sessionState.value = SessionState.COMPLETED
         _isGracePeriodActive.value = false
         lastTickRealtime = 0L
         waitingTimeoutJob?.cancel()
         graceJob?.cancel()
 
-        val earned = _currentMilestoneTier.value?.coins ?: _rewardCoins.value
-        addLog("Task complete! Continuous watch goal reached. +$earned coins rewarded.", LogType.SUCCESS)
+        val earned = milestone.coins
+        addLog("🎉 Task complete! Milestone reached: ${milestone.minutes}m continuous watch. +$earned coins rewarded.", LogType.SUCCESS)
+        onMilestoneCoinsAwarded?.invoke(earned, "Task Completed (+${earned}c)")
         onCompletionTriggered?.invoke(earned, _targetTaskTitle.value ?: "Video Task")
+    }
+
+    fun abortOrStopSession() {
+        val watchedSecs = (_watchedMillis.value / 1000).toInt()
+        if (watchedSecs < 180) {
+            addLog("Session aborted: Watched $watchedSecs s (did not reach 3 min continuous milestone). Reset to 00:00.", LogType.WARNING)
+            _watchedMillis.value = 0L
+            _currentMilestoneTier.value = null
+            onSaveProgressNeeded?.invoke(0L)
+        }
+        _sessionState.value = SessionState.IDLE
+        lastTickRealtime = 0L
+        isMilestoneAwarded = false
+        waitingTimeoutJob?.cancel()
+        graceJob?.cancel()
     }
 
     fun invalidateSession(reason: String) {

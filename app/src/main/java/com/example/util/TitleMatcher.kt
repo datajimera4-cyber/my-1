@@ -72,10 +72,11 @@ object TitleMatcher {
     fun extractVideoId(url: String?): String? {
         if (url.isNullOrBlank()) return null
         val patterns = listOf(
-            Regex("(?:https?:\\/\\/)?(?:www\\.)?youtube\\.com\\/watch\\?v=([a-zA-Z0-9_-]{11})"),
-            Regex("(?:https?:\\/\\/)?(?:www\\.)?youtu\\.be\\/([a-zA-Z0-9_-]{11})"),
-            Regex("(?:https?:\\/\\/)?(?:www\\.)?youtube\\.com\\/embed\\/([a-zA-Z0-9_-]{11})"),
-            Regex("(?:https?:\\/\\/)?(?:www\\.)?youtube\\.com\\/shorts\\/([a-zA-Z0-9_-]{11})"),
+            Regex("(?:https?:\\/\\/)?(?:www\\.|m\\.)?youtube\\.com\\/watch\\?v=([a-zA-Z0-9_-]{11})"),
+            Regex("(?:https?:\\/\\/)?(?:www\\.|m\\.)?youtu\\.be\\/([a-zA-Z0-9_-]{11})"),
+            Regex("(?:https?:\\/\\/)?(?:www\\.|m\\.)?youtube\\.com\\/embed\\/([a-zA-Z0-9_-]{11})"),
+            Regex("(?:https?:\\/\\/)?(?:www\\.|m\\.)?youtube\\.com\\/shorts\\/([a-zA-Z0-9_-]{11})"),
+            Regex("(?:https?:\\/\\/)?(?:www\\.|m\\.)?youtube\\.com\\/live\\/([a-zA-Z0-9_-]{11})"),
             Regex("^[a-zA-Z0-9_-]{11}$")
         )
 
@@ -86,6 +87,43 @@ object TitleMatcher {
             }
         }
         return null
+    }
+
+    /**
+     * Cleans raw pasted text (e.g. from YouTube share button containing title + link)
+     * and extracts ONLY the clean canonical YouTube video URL.
+     */
+    fun extractCleanYouTubeUrl(text: String?): String {
+        if (text.isNullOrBlank()) return ""
+        val trimmed = text.trim()
+        val urlRegex = Regex("""https?://(?:www\.|m\.)?(?:youtube\.com|youtu\.be)[^\s]+""")
+        val match = urlRegex.find(trimmed)
+        val candidate = match?.value ?: trimmed
+        val videoId = extractVideoId(candidate)
+        return if (!videoId.isNullOrBlank()) {
+            "https://www.youtube.com/watch?v=$videoId"
+        } else {
+            candidate
+        }
+    }
+
+    /**
+     * If user pasted shared text that contained a title before the link,
+     * extract the title prefix so it can be auto-filled.
+     */
+    fun extractSharedTitle(text: String?): String? {
+        if (text.isNullOrBlank()) return null
+        val trimmed = text.trim()
+        val urlRegex = Regex("""https?://[^\s]+""")
+        val match = urlRegex.find(trimmed) ?: return null
+        val beforeUrl = trimmed.substring(0, match.range.first).trim()
+        val cleaned = beforeUrl
+            .removePrefix("Watch \"")
+            .removeSuffix("\" on YouTube:")
+            .removeSuffix("on YouTube:")
+            .removeSuffix(":")
+            .trim()
+        return if (cleaned.length >= 3) cleaned else null
     }
 
     /**

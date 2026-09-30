@@ -117,6 +117,10 @@ fun TaskScreen(
     val liveSearchMode by viewModel.liveSearchMode.collectAsState()
     val selectedTierSeconds by viewModel.selectedTierSeconds.collectAsState()
     val selectedTierCoins by viewModel.selectedTierCoins.collectAsState()
+    val likedTasks by viewModel.likedTasks.collectAsState()
+    val commentCounts by viewModel.commentCounts.collectAsState()
+    val sessionInterruptedMessage by viewModel.sessionInterruptedMessage.collectAsState()
+    val selectedTaskId by viewModel.selectedTaskId.collectAsState()
 
     var showChangeLinkDialog by remember { mutableStateOf(false) }
     var showDurationDialog by remember { mutableStateOf(false) }
@@ -648,6 +652,154 @@ fun TaskScreen(
                 }
             }
 
+            // 4d. Like & Comment Bonus Rewards Card (+5 Coins each)
+            val currentActiveTaskId = selectedTaskId ?: "default_rick"
+            val isTaskLiked = likedTasks.contains(currentActiveTaskId)
+            val currentComments = commentCounts[currentActiveTaskId] ?: 0
+            val targetVideoTitle = when (val state = oEmbedState) {
+                is OEmbedResult.Success -> state.title
+                else -> "YouTube Video Task"
+            }
+
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("task_bonus_activities_card")
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "EXTRA TASK BONUSES",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            letterSpacing = 1.sp
+                        )
+                        Text(
+                            text = "+15 COINS POSSIBLE",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = AmberPrimary
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Like Bonus Row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Like Video (+5 Coins)",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = if (isTaskLiked) "✓ Earned +5 coins for liking" else "Like on YouTube or tap here (max 1)",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (isTaskLiked) SuccessGreen else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Button(
+                            onClick = {
+                                viewModel.likeTask(currentActiveTaskId, targetVideoTitle)
+                            },
+                            enabled = !isTaskLiked,
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isTaskLiked) SuccessGreen.copy(alpha = 0.2f) else AmberPrimary,
+                                contentColor = if (isTaskLiked) SuccessGreen else Color.Black
+                            ),
+                            modifier = Modifier.height(34.dp).testTag("task_like_bonus_btn")
+                        ) {
+                            Text(
+                                text = if (isTaskLiked) "✓ Liked" else "👍 +5c",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Comment Bonus Row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Comment on Video (+5 Coins each)",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = if (currentComments >= 2)
+                                    "✓ Maximum 2 comments completed (+10c)"
+                                else
+                                    "Comment on YouTube ($currentComments/2 done, max 2 = +10c)",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (currentComments >= 2) SuccessGreen else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Button(
+                            onClick = {
+                                viewModel.commentTask(currentActiveTaskId, targetVideoTitle)
+                            },
+                            enabled = currentComments < 2,
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (currentComments >= 2) SuccessGreen.copy(alpha = 0.2f) else AmberPrimary,
+                                contentColor = if (currentComments >= 2) SuccessGreen else Color.Black
+                            ),
+                            modifier = Modifier.height(34.dp).testTag("task_comment_bonus_btn")
+                        ) {
+                            Text(
+                                text = if (currentComments >= 2) "✓ Done (2/2)" else "💬 +5c ($currentComments/2)",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Continuous Watch Rule Warning Card
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = AmberPrimary.copy(alpha = 0.12f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = null,
+                        tint = AmberPrimary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "Strict Continuous Watch: You must watch uninterrupted in YouTube until the milestone is reached. Exiting YouTube or returning to the app before reaching the milestone resets watch progress to 00:00 without coins.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        lineHeight = 16.sp
+                    )
+                }
+            }
+
             // 4d. Floating Side Timer Overlay Status Card
             val isOverlayGranted = remember(sessionState) { PermissionHelper.isOverlayPermissionGranted(context) }
             Card(
@@ -953,6 +1105,39 @@ fun TaskScreen(
                     }
                 ) {
                     Text("Continue Without Overlay")
+                }
+            }
+        )
+    }
+
+    if (sessionInterruptedMessage != null) {
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissInterruptedMessage() },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = AmberPrimary,
+                    modifier = Modifier.size(36.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "Continuous Watch Interrupted",
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = sessionInterruptedMessage ?: ""
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = { viewModel.dismissInterruptedMessage() },
+                    colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary)
+                ) {
+                    Text("Understood", color = Color.Black, fontWeight = FontWeight.Bold)
                 }
             }
         )

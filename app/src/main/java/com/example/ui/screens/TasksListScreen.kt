@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material3.Button
@@ -82,6 +83,7 @@ import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
 import com.example.ui.theme.SuccessGreen
+import com.example.util.PermissionHelper
 import com.example.util.TimeFormatter
 import com.example.util.TitleMatcher
 import com.example.viewmodel.AppScreen
@@ -102,9 +104,14 @@ fun TasksListScreen(
     val sessionState by viewModel.sessionState.collectAsState()
     val currentWatchedMillis by viewModel.watchedMillis.collectAsState()
     val activeTaskId by com.example.repository.WatchSessionRepository.activeTaskId.collectAsState()
+    val likedTasks by viewModel.likedTasks.collectAsState()
+    val commentCounts by viewModel.commentCounts.collectAsState()
+    val sessionInterruptedMessage by viewModel.sessionInterruptedMessage.collectAsState()
 
     var showAddDialog by remember { mutableStateOf(false) }
     var taskForDurationSelection by remember { mutableStateOf<VideoTaskItem?>(null) }
+    var pendingTaskAndTier by remember { mutableStateOf<Pair<VideoTaskItem, com.example.data.WatchDurationTier>?>(null) }
+    var showOverlayPromptDialog by remember { mutableStateOf(false) }
     var selectedFilter by remember { mutableStateOf("All") }
 
     val filteredTasks = remember(videoTasks, selectedFilter) {
@@ -335,12 +342,22 @@ fun TasksListScreen(
             // Task Items
             items(filteredTasks, key = { it.id }) { task ->
                 val isCurrentlyActive = activeTaskId == task.id && sessionState == SessionState.ACTIVE
+                val isLiked = likedTasks.contains(task.id)
+                val comments = commentCounts[task.id] ?: 0
 
                 VideoTaskCard(
                     task = task,
                     isCurrentlyActive = isCurrentlyActive,
+                    isLiked = isLiked,
+                    commentsCount = comments,
                     activeWatchedMillis = if (isCurrentlyActive) currentWatchedMillis else task.watchedMillis,
                     onStartClick = { taskForDurationSelection = task },
+                    onLikeClick = {
+                        viewModel.likeTask(task.id, task.title)
+                    },
+                    onCommentClick = {
+                        viewModel.commentTask(task.id, task.title)
+                    },
                     onCardClick = {
                         viewModel.selectTask(task)
                         viewModel.navigateTo(AppScreen.TASK)
@@ -404,8 +421,87 @@ fun TasksListScreen(
             initialTierSeconds = task.selectedDurationSeconds,
             onDismiss = { taskForDurationSelection = null },
             onConfirmSelection = { tier ->
+                val chosenTask = task
                 taskForDurationSelection = null
-                viewModel.startTaskWithTier(task, tier, context)
+                if (!PermissionHelper.isOverlayPermissionGranted(context)) {
+                    pendingTaskAndTier = Pair(chosenTask, tier)
+                    showOverlayPromptDialog = true
+                } else {
+                    viewModel.startTaskWithTier(chosenTask, tier, context)
+                }
+            }
+        )
+    }
+
+    if (showOverlayPromptDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showOverlayPromptDialog = false },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Tv,
+                    contentDescription = null,
+                    tint = AmberPrimary,
+                    modifier = Modifier.size(36.dp)
+                )
+            },
+            title = {
+                Text("Enable Floating Timer Overlay", fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Text("To see the live floating timer and like/comment buttons on the side of YouTube while watching, please enable 'Display over other apps' for Kingo King.")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showOverlayPromptDialog = false
+                        try {
+                            context.startActivity(PermissionHelper.createOverlaySettingsIntent(context))
+                        } catch (_: Exception) {}
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary)
+                ) {
+                    Text("Enable in Settings", color = Color.Black, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        showOverlayPromptDialog = false
+                        pendingTaskAndTier?.let { (task, tier) ->
+                            viewModel.startTaskWithTier(task, tier, context)
+                        }
+                    }
+                ) {
+                    Text("Continue Without Overlay")
+                }
+            }
+        )
+    }
+
+    if (sessionInterruptedMessage != null) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { viewModel.dismissInterruptedMessage() },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = AmberPrimary,
+                    modifier = Modifier.size(36.dp)
+                )
+            },
+            title = {
+                Text("Continuous Watch Interrupted", fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Text(sessionInterruptedMessage ?: "")
+            },
+            confirmButton = {
+                Button(
+                    onClick = { viewModel.dismissInterruptedMessage() },
+                    colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary)
+                ) {
+                    Text("Understood", color = Color.Black, fontWeight = FontWeight.Bold)
+                }
             }
         )
     }
@@ -425,8 +521,12 @@ fun TasksListScreen(
 fun VideoTaskCard(
     task: VideoTaskItem,
     isCurrentlyActive: Boolean,
+    isLiked: Boolean,
+    commentsCount: Int,
     activeWatchedMillis: Long,
     onStartClick: () -> Unit,
+    onLikeClick: () -> Unit,
+    onCommentClick: () -> Unit,
     onCardClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -576,6 +676,49 @@ fun VideoTaskCard(
                             }
                         }
                     }
+                }
+            }
+
+            // Bonus actions strip: Like (+5c) & Comment (+5c, max 2)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .background(
+                            if (isLiked) SuccessGreen.copy(alpha = 0.15f) else AmberPrimary.copy(alpha = 0.15f),
+                            RoundedCornerShape(8.dp)
+                        )
+                        .clickable(enabled = !isLiked) { onLikeClick() }
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = if (isLiked) "✓ Liked (+5c)" else "👍 Like (+5c)",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isLiked) SuccessGreen else AmberDark,
+                        fontSize = 11.sp
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .background(
+                            if (commentsCount >= 2) SuccessGreen.copy(alpha = 0.15f) else Color(0xFF0284C7).copy(alpha = 0.15f),
+                            RoundedCornerShape(8.dp)
+                        )
+                        .clickable(enabled = commentsCount < 2) { onCommentClick() }
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = if (commentsCount >= 2) "✓ Comments (+10c)" else "💬 Comment (+5c, $commentsCount/2)",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = if (commentsCount >= 2) SuccessGreen else Color(0xFF0284C7),
+                        fontSize = 11.sp
+                    )
                 }
             }
 

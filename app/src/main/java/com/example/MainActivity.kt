@@ -46,6 +46,15 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    override fun onResume() {
+        super.onResume()
+        com.example.repository.WatchSessionRepository.setAppInForeground(true)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        com.example.repository.WatchSessionRepository.setAppInForeground(false)
+    }
 }
 
 @Composable

@@ -31,6 +31,38 @@ class DataStoreManager(private val context: Context) {
         private val KEY_USERS = stringPreferencesKey("users_json")
         private val KEY_CURRENT_USER_EMAIL = stringPreferencesKey("current_user_email")
         private val KEY_PAYOUT_REQUESTS = stringPreferencesKey("payout_requests_json")
+        private val KEY_LIKED_TASKS = stringPreferencesKey("liked_tasks_json")
+        private val KEY_COMMENT_COUNTS = stringPreferencesKey("comment_counts_json")
+    }
+
+    val likedTasksFlow: Flow<Set<String>> = context.dataStore.data.map { prefs ->
+        val json = prefs[KEY_LIKED_TASKS] ?: "[]"
+        try {
+            val arr = JSONArray(json)
+            val set = mutableSetOf<String>()
+            for (i in 0 until arr.length()) {
+                set.add(arr.getString(i))
+            }
+            set
+        } catch (_: Exception) {
+            emptySet()
+        }
+    }
+
+    val commentCountsFlow: Flow<Map<String, Int>> = context.dataStore.data.map { prefs ->
+        val json = prefs[KEY_COMMENT_COUNTS] ?: "{}"
+        try {
+            val obj = JSONObject(json)
+            val map = mutableMapOf<String, Int>()
+            val keys = obj.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                map[k] = obj.optInt(k, 0)
+            }
+            map
+        } catch (_: Exception) {
+            emptyMap()
+        }
     }
 
     val liveSearchModeFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
@@ -160,6 +192,91 @@ class DataStoreManager(private val context: Context) {
             )
             prefs[KEY_TRANSACTIONS] = serializeTransactionsJson(list)
         }
+    }
+
+    suspend fun clearContinuousWatchSession() {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_WATCHED_MILLIS] = 0L
+        }
+    }
+
+    suspend fun recordTaskLike(taskId: String, taskTitle: String = "YouTube Video"): Pair<Boolean, String> {
+        var added = false
+        var message = ""
+        context.dataStore.edit { prefs ->
+            val json = prefs[KEY_LIKED_TASKS] ?: "[]"
+            val arr = try { JSONArray(json) } catch (_: Exception) { JSONArray() }
+            var alreadyLiked = false
+            for (i in 0 until arr.length()) {
+                if (arr.getString(i) == taskId) {
+                    alreadyLiked = true
+                    break
+                }
+            }
+            if (alreadyLiked) {
+                message = "Already earned like reward for this video."
+                added = false
+            } else {
+                arr.put(taskId)
+                prefs[KEY_LIKED_TASKS] = arr.toString()
+
+                val currentBalance = prefs[KEY_WALLET_BALANCE] ?: 0
+                prefs[KEY_WALLET_BALANCE] = currentBalance + 5
+
+                val currentTxJson = prefs[KEY_TRANSACTIONS] ?: "[]"
+                val list = parseTransactionsJson(currentTxJson).toMutableList()
+                list.add(
+                    0,
+                    WalletTransaction(
+                        id = UUID.randomUUID().toString(),
+                        title = "👍 Video Like Bonus: $taskTitle",
+                        coins = 5,
+                        timestampMillis = System.currentTimeMillis()
+                    )
+                )
+                prefs[KEY_TRANSACTIONS] = serializeTransactionsJson(list)
+                added = true
+                message = "🎉 +5 Coins added for Liking the video!"
+            }
+        }
+        return Pair(added, message)
+    }
+
+    suspend fun recordTaskComment(taskId: String, taskTitle: String = "YouTube Video"): Pair<Boolean, String> {
+        var added = false
+        var message = ""
+        context.dataStore.edit { prefs ->
+            val json = prefs[KEY_COMMENT_COUNTS] ?: "{}"
+            val obj = try { JSONObject(json) } catch (_: Exception) { JSONObject() }
+            val currentCount = obj.optInt(taskId, 0)
+            if (currentCount >= 2) {
+                message = "Maximum 2 comments reached for this task (+10 coins limit)."
+                added = false
+            } else {
+                val newCount = currentCount + 1
+                obj.put(taskId, newCount)
+                prefs[KEY_COMMENT_COUNTS] = obj.toString()
+
+                val currentBalance = prefs[KEY_WALLET_BALANCE] ?: 0
+                prefs[KEY_WALLET_BALANCE] = currentBalance + 5
+
+                val currentTxJson = prefs[KEY_TRANSACTIONS] ?: "[]"
+                val list = parseTransactionsJson(currentTxJson).toMutableList()
+                list.add(
+                    0,
+                    WalletTransaction(
+                        id = UUID.randomUUID().toString(),
+                        title = "💬 Video Comment #$newCount Bonus: $taskTitle",
+                        coins = 5,
+                        timestampMillis = System.currentTimeMillis()
+                    )
+                )
+                prefs[KEY_TRANSACTIONS] = serializeTransactionsJson(list)
+                added = true
+                message = "🎉 +5 Coins added for Comment #$newCount on video!"
+            }
+        }
+        return Pair(added, message)
     }
 
     suspend fun withdrawCoins(coins: Int, method: String, destination: String): Boolean {

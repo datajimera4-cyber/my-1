@@ -14,6 +14,7 @@ import androidx.core.app.NotificationCompat
 import com.example.MainActivity
 import com.example.data.DataStoreManager
 import com.example.data.SessionState
+import com.example.data.VideoPlaybackState
 import com.example.repository.WatchSessionRepository
 import com.example.util.TimeFormatter
 import kotlinx.coroutines.CoroutineScope
@@ -75,12 +76,30 @@ class WatchTimerService : Service() {
 
         WatchSessionRepository.onCompletionTriggered = { coins, title ->
             serviceScope.launch {
-                dataStoreManager.addRewardTransaction(title, coins)
-                floatingOverlayManager.hideOverlay()
+                val activeId = WatchSessionRepository.activeTaskId.value
+                dataStoreManager.addRewardTransaction("Watched: $title", coins)
+                if (activeId != null) {
+                    dataStoreManager.markTaskCompleted(activeId, coins)
+                }
+                floatingOverlayManager.showCoinAddedCelebration(coins, "+$coins COINS ADDED!")
                 postCompletionNotification(coins, title)
+
+                // Keep celebratory overlay on screen for ~3.5 seconds so user sees the reward animation
+                delay(3500L)
+                floatingOverlayManager.hideOverlay()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
+        }
+
+        WatchSessionRepository.onMilestoneCoinsAwarded = { coins, _ ->
+            floatingOverlayManager.showCoinAddedCelebration(coins, "+$coins COINS ADDED!")
+        }
+
+        WatchSessionRepository.onSessionInterrupted = {
+            floatingOverlayManager.hideOverlay()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
         }
 
         WatchSessionRepository.onSaveProgressNeeded = { millis ->
@@ -100,7 +119,6 @@ class WatchTimerService : Service() {
             }
             ACTION_START, null -> {
                 startForegroundWithNotification()
-                floatingOverlayManager.showOverlay()
                 startTimerLoop()
                 observeSessionState()
             }
@@ -124,21 +142,51 @@ class WatchTimerService : Service() {
 
     private fun startTimerLoop() {
         timerLoopJob?.cancel()
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
         timerLoopJob = serviceScope.launch {
             var lastNotificationUpdateSec = -1
             while (isActive) {
+                val isAppForeground = WatchSessionRepository.isAppInForeground
+                val isAudioPlaying = audioManager?.isMusicActive == true
+                val isYtForeground = if (YouTubeLiveSearchService.isServiceConnected) {
+                    YouTubeLiveSearchService.isYouTubeInForeground
+                } else {
+                    !isAppForeground
+                }
+
+                // Strict rule: Time counts ONLY when user is NOT in our app,
+                // YouTube is actively in the foreground, AND video is not explicitly paused
+                val sessionActive = WatchSessionRepository.sessionState.value == SessionState.ACTIVE
+                val isPlaying = !isAppForeground && isYtForeground && sessionActive &&
+                        (isAudioPlaying || WatchSessionRepository.playbackState.value == VideoPlaybackState.PLAYING || !YouTubeLiveSearchService.isVideoExplicitlyPaused)
+
+                WatchSessionRepository.setPlaybackPlaying(isPlaying)
                 WatchSessionRepository.processTimerTick()
 
                 val watchedMillis = WatchSessionRepository.watchedMillis.value
                 val requiredMillis = WatchSessionRepository.requiredMillis.value
                 val currentSec = (watchedMillis / 1000).toInt()
 
-                // Update floating WindowManager overlay over YouTube
-                floatingOverlayManager.updateProgress(
-                    watchedMillis = watchedMillis,
-                    requiredMillis = requiredMillis,
-                    milestone = WatchSessionRepository.currentMilestoneTier.value
-                )
+                // Overlay MUST strictly show ONLY when YouTube is in foreground and user is NOT in our app!
+                val shouldShowOverlay = !isAppForeground && isYtForeground && (sessionActive || WatchSessionRepository.sessionState.value == SessionState.WAITING)
+
+                if (shouldShowOverlay) {
+                    if (!floatingOverlayManager.isOverlayAttached()) {
+                        floatingOverlayManager.showOverlay()
+                    }
+                    floatingOverlayManager.updateProgress(
+                        watchedMillis = watchedMillis,
+                        requiredMillis = requiredMillis,
+                        milestone = WatchSessionRepository.currentMilestoneTier.value,
+                        isPaused = !isPlaying
+                    )
+                } else {
+                    // When user returns to our app or minimizes/switches to any other app,
+                    // floating overlay MUST DISAPPEAR immediately!
+                    if (floatingOverlayManager.isOverlayAttached()) {
+                        floatingOverlayManager.hideOverlay()
+                    }
+                }
 
                 // Update notification text every second
                 if (currentSec != lastNotificationUpdateSec) {

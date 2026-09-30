@@ -142,15 +142,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val eventLogs = WatchSessionRepository.eventLogs
     val searchProgress = WatchSessionRepository.searchProgress
 
+    val likedTasks: StateFlow<Set<String>> = dataStoreManager.likedTasksFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+
+    val commentCounts: StateFlow<Map<String, Int>> = dataStoreManager.commentCountsFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
+    private val _sessionInterruptedMessage = MutableStateFlow<String?>(null)
+    val sessionInterruptedMessage: StateFlow<String?> = _sessionInterruptedMessage.asStateFlow()
+
+    fun dismissInterruptedMessage() {
+        _sessionInterruptedMessage.value = null
+    }
+
     init {
-        // Observe persisted watchedMillis on launch to restore progress
-        viewModelScope.launch {
-            dataStoreManager.watchedMillisFlow.collectLatest { persistedMillis ->
-                if (WatchSessionRepository.sessionState.value == SessionState.IDLE) {
-                    WatchSessionRepository.setWatchedMillis(persistedMillis)
-                }
-            }
-        }
+        // Enforce Strict Continuous Watch: Every session must start at 00:00!
+        // No incomplete session is accumulated across multiple days or returns.
+        WatchSessionRepository.setWatchedMillis(0L)
 
         // Observe completion flag from DataStore
         viewModelScope.launch {
@@ -159,6 +167,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     WatchSessionRepository.setCompletedState()
                 }
             }
+        }
+
+        // Listen for session interruption when user returns to app before milestone
+        WatchSessionRepository.onSessionInterrupted = { message ->
+            _sessionInterruptedMessage.value = message
         }
 
         // Observe session state changes to show dialog upon completion
@@ -385,6 +398,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun likeTask(taskId: String, taskTitle: String, onResult: ((Boolean, String) -> Unit)? = null) {
+        viewModelScope.launch {
+            val res = dataStoreManager.recordTaskLike(taskId, taskTitle)
+            onResult?.invoke(res.first, res.second)
+            if (res.first) {
+                WatchSessionRepository.addLog("Liked video \"$taskTitle\": +5 coins rewarded!", LogType.SUCCESS)
+            }
+        }
+    }
+
+    fun commentTask(taskId: String, taskTitle: String, onResult: ((Boolean, String) -> Unit)? = null) {
+        viewModelScope.launch {
+            val res = dataStoreManager.recordTaskComment(taskId, taskTitle)
+            onResult?.invoke(res.first, res.second)
+            if (res.first) {
+                WatchSessionRepository.addLog("Comment on \"$taskTitle\": +5 coins rewarded!", LogType.SUCCESS)
+            }
+        }
+    }
+
     private fun startTaskInternal(
         context: Context,
         videoUrl: String,
@@ -397,6 +430,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
+            // Strict Continuous Watch Rule: Every session starts strictly at 00:00!
+            dataStoreManager.setWatchedMillis(0L)
+            WatchSessionRepository.setWatchedMillis(0L)
+
             val effectiveUrl = if (videoUrl == "PASTE_MY_YOUTUBE_LINK_HERE" || !videoUrl.startsWith("http")) {
                 SampleTask.fallbackDemoUrl
             } else {
@@ -421,19 +458,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             val targetVideoId = TitleMatcher.extractVideoId(effectiveUrl)
-            val currentWatched = watchedMillis.value
 
             if (liveSearchMode.value) {
                 // LIVE MODE: Directly opens YouTube with the target title searched!
                 WatchSessionRepository.updateSearchProgress(com.example.data.SearchProgressState(isSearching = false))
                 WatchSessionRepository.addLog("Live Mode: Opening YouTube search for \"$title\"", LogType.INFO)
-
-                // Copy title to clipboard so it is instantly available for quick paste or system
-                try {
-                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
-                    val clip = android.content.ClipData.newPlainText("YouTube Search Query", title)
-                    clipboard?.setPrimaryClip(clip)
-                } catch (_: Exception) {}
 
                 // Arm the accessibility trigger to auto-type in search bar and click target video card
                 YouTubeLiveSearchService.armSearchTrigger(title, author, effectiveUrl, targetVideoId)
@@ -442,7 +471,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     taskTitle = title,
                     taskAuthor = author,
                     requiredSeconds = requiredSeconds,
-                    initialWatchedMillis = currentWatched,
+                    initialWatchedMillis = 0L,
                     rewardCoins = rewardCoins,
                     taskId = taskId
                 )
@@ -475,7 +504,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     taskTitle = title,
                     taskAuthor = author,
                     requiredSeconds = requiredSeconds,
-                    initialWatchedMillis = currentWatched,
+                    initialWatchedMillis = 0L,
                     rewardCoins = rewardCoins,
                     taskId = taskId
                 )
