@@ -31,22 +31,37 @@ import com.example.ui.theme.WatchEarnTheme
 import com.example.viewmodel.AppScreen
 import com.example.viewmodel.MainViewModel
 
+import androidx.compose.foundation.layout.WindowInsets
+import com.example.admin.AdminWebServer
+import com.example.data.DataStoreManager
+import com.example.ui.screens.AdminDashboardScreen
+
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         NotificationChannels.createChannels(this)
-        com.example.admin.AdminWebServer.startServer(this, com.example.data.DataStoreManager(this)) { _, _ -> }
+
+        val isAdmin = BuildConfig.APP_ROLE == "ADMIN"
+        if (isAdmin) {
+            AdminWebServer.startServer(this, DataStoreManager(this)) { _, _ -> }
+        }
 
         setContent {
             WatchEarnTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    WatchEarnApp()
+                    val viewModel: MainViewModel = viewModel()
+                    if (isAdmin) {
+                        AdminDashboardScreen(viewModel = viewModel)
+                    } else {
+                        WatchEarnApp(viewModel = viewModel)
+                    }
                 }
             }
         }
     }
+
     override fun onResume() {
         super.onResume()
         com.example.repository.WatchSessionRepository.setAppInForeground(true)
@@ -91,9 +106,14 @@ fun WatchEarnApp(viewModel: MainViewModel = viewModel()) {
                     activeTaskCount = activeTaskCount
                 )
             }
-        }
+        },
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { innerPadding ->
-        Box(modifier = Modifier.padding(innerPadding)) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(bottom = innerPadding.calculateBottomPadding())
+        ) {
             when (currentScreen) {
                 AppScreen.HOME -> HomeScreen(viewModel = viewModel)
                 AppScreen.TASKS -> TasksListScreen(viewModel = viewModel)
@@ -102,7 +122,13 @@ fun WatchEarnApp(viewModel: MainViewModel = viewModel()) {
                 AppScreen.TASK, AppScreen.TASK_DETAIL -> TaskScreen(viewModel = viewModel)
                 AppScreen.SETUP -> SetupScreen(viewModel = viewModel)
                 AppScreen.DIAGNOSTICS -> DiagnosticsScreen(viewModel = viewModel)
-                AppScreen.ADMIN -> com.example.ui.screens.AdminDashboardScreen(viewModel = viewModel)
+                AppScreen.ADMIN -> {
+                    if (BuildConfig.APP_ROLE == "ADMIN") {
+                        AdminDashboardScreen(viewModel = viewModel)
+                    } else {
+                        HomeScreen(viewModel = viewModel)
+                    }
+                }
             }
         }
     }

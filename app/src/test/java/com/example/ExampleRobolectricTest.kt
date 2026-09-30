@@ -20,7 +20,8 @@ class ExampleRobolectricTest {
     fun `read string from context`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val appName = context.getString(R.string.app_name)
-        assertEquals("Kingo King", appName)
+        val expectedName = if (BuildConfig.APP_ROLE == "ADMIN") "Kingo Admin" else "Kingo King"
+        assertEquals(expectedName, appName)
     }
 
     @Test

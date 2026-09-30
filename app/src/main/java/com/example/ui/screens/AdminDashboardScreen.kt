@@ -107,7 +107,9 @@ fun AdminDashboardScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    BackHandler { viewModel.navigateBack() }
+    if (com.example.BuildConfig.APP_ROLE != "ADMIN") {
+        BackHandler { viewModel.navigateBack() }
+    }
 
     val videoTasks by viewModel.videoTasks.collectAsState()
     val payoutRequests by viewModel.payoutRequests.collectAsState()
@@ -168,14 +170,16 @@ fun AdminDashboardScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(
-                        onClick = { viewModel.navigateBack() },
-                        modifier = Modifier.testTag("admin_back_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back"
-                        )
+                    if (com.example.BuildConfig.APP_ROLE != "ADMIN") {
+                        IconButton(
+                            onClick = { viewModel.navigateBack() },
+                            modifier = Modifier.testTag("admin_back_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back"
+                            )
+                        }
                     }
                 },
                 actions = {

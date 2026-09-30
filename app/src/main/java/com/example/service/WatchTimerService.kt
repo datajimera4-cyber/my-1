@@ -171,10 +171,12 @@ class WatchTimerService : Service() {
                 }
 
                 val sessionActive = WatchSessionRepository.sessionState.value == SessionState.ACTIVE
+                val elapsedSinceLaunch = System.currentTimeMillis() - WatchSessionRepository.taskLaunchTimestampMillis
 
                 // If user minimized YouTube, switched to another app, or returned to our app while session was active:
                 // Strictly mark task incomplete, reset time, lock task for 12 hours, and stop service!
-                if (sessionActive && (!isYtForeground || isAppForeground)) {
+                // We provide an initial 6-second transition window so YouTube has time to launch and buffer.
+                if (elapsedSinceLaunch > 6000L && sessionActive && (!isYtForeground || isAppForeground)) {
                     WatchSessionRepository.onAppSwitchedOrMinimized()
                     if (floatingOverlayManager.isOverlayAttached()) {
                         floatingOverlayManager.hideOverlay()
@@ -200,8 +202,9 @@ class WatchTimerService : Service() {
                 val requiredMillis = WatchSessionRepository.requiredMillis.value
                 val currentSec = (watchedMillis / 1000).toInt()
 
-                // Overlay MUST strictly show ONLY when YouTube is in foreground and user is NOT in our app!
-                val shouldShowOverlay = !isAppForeground && isYtForeground && (sessionActive || WatchSessionRepository.sessionState.value == SessionState.WAITING)
+                // Overlay shows when task is running and either YouTube is in foreground or during the initial launch transition
+                val shouldShowOverlay = (sessionActive || WatchSessionRepository.sessionState.value == SessionState.WAITING) &&
+                        (!isAppForeground || elapsedSinceLaunch < 6000L)
 
                 if (shouldShowOverlay) {
                     if (!floatingOverlayManager.isOverlayAttached()) {
@@ -215,7 +218,7 @@ class WatchTimerService : Service() {
                     )
                 } else {
                     // When user returns to our app or minimizes/switches to any other app,
-                    // floating overlay MUST DISAPPEAR immediately!
+                    // floating overlay disappears immediately
                     if (floatingOverlayManager.isOverlayAttached()) {
                         floatingOverlayManager.hideOverlay()
                     }

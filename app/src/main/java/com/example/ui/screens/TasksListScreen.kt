@@ -220,9 +220,9 @@ fun TasksListScreen(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .padding(top = innerPadding.calculateTopPadding())
                 .padding(horizontal = 16.dp),
-            contentPadding = PaddingValues(top = 10.dp, bottom = 88.dp),
+            contentPadding = PaddingValues(top = 10.dp, bottom = 20.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             // Live Real-time Watch Session Floating Bar
@@ -758,16 +758,21 @@ fun VideoTaskCard(
                 // Tier range info
                 Text(
                     text = when {
-                        task.isLocked -> "🔒 Locked for 12 hours after early exit"
+                        task.isLocked -> "🔒 Locked (12h)"
                         task.isLive -> "Live Stream • Goals: 3m - 30m"
-                        task.durationSeconds >= 1800 -> "Full Video • Goals: 3m, 5m, 10m, 20m, 30m"
+                        task.durationSeconds >= 1800 -> "Goals: 3m, 5m, 10m, 20m, 30m"
                         task.durationSeconds >= 600 -> "Goals: 3m, 5m, 10m"
                         else -> "Goals: 3m"
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = if (task.isLocked) Color(0xFFEF4444) else MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 11.sp
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
                 )
+
+                Spacer(modifier = Modifier.width(8.dp))
 
                 // Start / Watch Button
                 Button(

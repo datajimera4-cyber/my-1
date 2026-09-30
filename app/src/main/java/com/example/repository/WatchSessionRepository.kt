@@ -90,6 +90,7 @@ object WatchSessionRepository {
     private val logIdGenerator = AtomicLong(0)
 
     // Internal timing
+    var taskLaunchTimestampMillis: Long = 0L
     private var lastTickRealtime: Long = 0L
     private var graceJob: Job? = null
     private var waitingTimeoutJob: Job? = null
@@ -162,6 +163,7 @@ object WatchSessionRepository {
         rewardCoins: Int = 10,
         taskId: String? = null
     ) {
+        taskLaunchTimestampMillis = System.currentTimeMillis()
         _targetTaskTitle.value = taskTitle
         _targetTaskAuthor.value = taskAuthor
         _requiredMillis.value = requiredSeconds * 1000L
@@ -376,6 +378,12 @@ object WatchSessionRepository {
         if (isAppInForeground != inForeground) {
             isAppInForeground = inForeground
             if (inForeground) {
+                // If the user just launched the task in the last 6 seconds, the app was still transitioning to YouTube, do not interrupt!
+                val elapsedSinceLaunch = System.currentTimeMillis() - taskLaunchTimestampMillis
+                if (elapsedSinceLaunch < 6000L) {
+                    return
+                }
+
                 com.example.service.YouTubeLiveSearchService.isYouTubeInForeground = false
                 _playbackState.value = VideoPlaybackState.PAUSED
                 lastTickRealtime = 0L
