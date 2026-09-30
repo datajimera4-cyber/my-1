@@ -143,8 +143,27 @@ data class VideoTaskItem(
     val watchedMillis: Long = 0L,
     val selectedDurationSeconds: Int = 180,
     val rewardCoins: Int = 10,
-    val createdAt: Long = System.currentTimeMillis()
-)
+    val createdAt: Long = System.currentTimeMillis(),
+    val lockedUntilMillis: Long = 0L
+) {
+    val isLocked: Boolean
+        get() = System.currentTimeMillis() < lockedUntilMillis
+
+    val remainingLockMillis: Long
+        get() = (lockedUntilMillis - System.currentTimeMillis()).coerceAtLeast(0L)
+
+    fun getLockRemainingFormatted(): String {
+        val totalSecs = remainingLockMillis / 1000
+        val hours = totalSecs / 3600
+        val mins = (totalSecs % 3600) / 60
+        val secs = totalSecs % 60
+        return when {
+            hours > 0 -> "${hours}h ${mins}m"
+            mins > 0 -> "${mins}m ${secs}s"
+            else -> "${secs}s"
+        }
+    }
+}
 
 /**
  * User Account Profile for Email Authentication.

@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.HourglassTop
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Accessibility
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MonetizationOn
@@ -111,7 +112,7 @@ fun TaskScreen(
     val graceSeconds by viewModel.graceSecondsRemaining.collectAsState()
     val redAlertMessage by viewModel.redAlertMessage.collectAsState()
     val currentPlayingTitle by viewModel.currentMediaTitle.collectAsState()
-    val isCompleted by viewModel.isTaskCompleted.collectAsState()
+    val videoTasks by viewModel.videoTasks.collectAsState()
     val currentUrl by viewModel.currentVideoUrl.collectAsState()
     val searchProgress by viewModel.searchProgress.collectAsState()
     val liveSearchMode by viewModel.liveSearchMode.collectAsState()
@@ -121,6 +122,12 @@ fun TaskScreen(
     val commentCounts by viewModel.commentCounts.collectAsState()
     val sessionInterruptedMessage by viewModel.sessionInterruptedMessage.collectAsState()
     val selectedTaskId by viewModel.selectedTaskId.collectAsState()
+
+    val currentSelectedTask = remember(videoTasks, selectedTaskId) {
+        videoTasks.find { it.id == selectedTaskId }
+    }
+    val isTaskLocked = currentSelectedTask?.isLocked == true
+    val isTaskCompletedEffective = currentSelectedTask?.isCompleted == true || sessionState == SessionState.COMPLETED
 
     var showChangeLinkDialog by remember { mutableStateOf(false) }
     var showDurationDialog by remember { mutableStateOf(false) }
@@ -141,7 +148,11 @@ fun TaskScreen(
 
     // Determine Big Status Text
     val (statusText, statusColor, statusIcon) = when {
-        isCompleted || sessionState == SessionState.COMPLETED -> {
+        isTaskLocked -> {
+            val remainStr = currentSelectedTask?.getLockRemainingFormatted() ?: "12h"
+            Triple("Task Locked ($remainStr)", AlertRed, Icons.Default.Lock)
+        }
+        isTaskCompletedEffective -> {
             Triple("Completed", SuccessGreen, Icons.Default.CheckCircle)
         }
         sessionState == SessionState.INVALID || matchResult == MatchResult.MISMATCH && !isGraceActive -> {
@@ -470,7 +481,7 @@ fun TaskScreen(
                             .height(10.dp)
                             .clip(RoundedCornerShape(5.dp))
                             .testTag("watch_progress_bar"),
-                        color = if (isCompleted) SuccessGreen else AmberPrimary,
+                        color = if (isTaskCompletedEffective) SuccessGreen else AmberPrimary,
                         trackColor = MaterialTheme.colorScheme.surfaceVariant
                     )
 
@@ -892,7 +903,10 @@ fun TaskScreen(
             // 5. "Start Task" Button
             Button(
                 onClick = {
-                    if (!PermissionHelper.isOverlayPermissionGranted(context)) {
+                    if (isTaskLocked) {
+                        val remainStr = currentSelectedTask?.getLockRemainingFormatted() ?: "12h"
+                        viewModel.lockTask(currentSelectedTask?.id ?: "", 0L)
+                    } else if (!PermissionHelper.isOverlayPermissionGranted(context)) {
                         showOverlayPromptDialog = true
                     } else if (liveSearchMode && !PermissionHelper.isAccessibilityServiceEnabled(context)) {
                         showAccessibilityPromptDialog = true
@@ -900,26 +914,31 @@ fun TaskScreen(
                         viewModel.startTask(context)
                     }
                 },
-                enabled = !isCompleted && sessionState != SessionState.COMPLETED,
+                enabled = !isTaskLocked && !isTaskCompletedEffective,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp)
                     .testTag("start_task_button"),
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = AmberPrimary,
-                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant
+                    containerColor = if (isTaskLocked) Color(0xFF334155) else AmberPrimary,
+                    disabledContainerColor = Color(0xFF334155)
                 )
             ) {
                 Icon(
-                    imageVector = if (isCompleted) Icons.Default.CheckCircle else Icons.Default.PlayArrow,
+                    imageVector = when {
+                        isTaskLocked -> Icons.Default.Lock
+                        isTaskCompletedEffective -> Icons.Default.CheckCircle
+                        else -> Icons.Default.PlayArrow
+                    },
                     contentDescription = null,
-                    tint = if (isCompleted) MaterialTheme.colorScheme.onSurfaceVariant else Color.Black
+                    tint = if (isTaskCompletedEffective || isTaskLocked) MaterialTheme.colorScheme.onSurfaceVariant else Color.Black
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = when {
-                        isCompleted -> "Task Already Completed"
+                        isTaskLocked -> "Task Locked (${currentSelectedTask?.getLockRemainingFormatted()})"
+                        isTaskCompletedEffective -> "Task Already Completed"
                         sessionState == SessionState.ACTIVE -> "Resume in YouTube"
                         sessionState == SessionState.WAITING -> "Re-open YouTube"
                         sessionState == SessionState.INVALID -> "Restart Task"
@@ -927,7 +946,7 @@ fun TaskScreen(
                     },
                     fontWeight = FontWeight.Bold,
                     fontSize = 16.sp,
-                    color = if (isCompleted) MaterialTheme.colorScheme.onSurfaceVariant else Color.Black
+                    color = if (isTaskCompletedEffective || isTaskLocked) MaterialTheme.colorScheme.onSurfaceVariant else Color.Black
                 )
             }
         }

@@ -30,6 +30,7 @@ import com.example.util.TimeFormatter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 class FloatingTimerOverlayManager(private val context: Context) {
@@ -64,7 +65,15 @@ class FloatingTimerOverlayManager(private val context: Context) {
     @SuppressLint("ClickableViewAccessibility", "SetTextI18n")
     fun showOverlay() {
         runOnMain {
-            if (isAttached) return@runOnMain
+            // Clean up any stale view before re-attaching
+            if (isAttached || overlayRootView != null) {
+                try {
+                    overlayRootView?.let { windowManager.removeView(it) }
+                } catch (_: Exception) {}
+                overlayRootView = null
+                isAttached = false
+            }
+
             if (!Settings.canDrawOverlays(context)) {
                 WatchSessionRepository.addLog(
                     "Floating timer overlay not displayed: 'Display over other apps' permission required.",
@@ -334,12 +343,54 @@ class FloatingTimerOverlayManager(private val context: Context) {
             WatchSessionRepository.onTaskCommentDetected = {
                 handleCommentAction()
             }
+            WatchSessionRepository.onVideoAlreadyLikedDetected = {
+                runOnMain {
+                    isTaskLiked = true
+                    likeButtonView?.text = "✓ Liked"
+                    likeButtonView?.setTextColor(Color.parseColor("#10B981"))
+                    triggerCelebration("Video already liked! (0 coins)")
+                }
+            }
+
+            // Check if current active task is already liked or commented
+            val activeId = WatchSessionRepository.activeTaskId.value ?: "default_task"
+            overlayScope.launch {
+                try {
+                    val likedSet = dataStoreManager.likedTasksFlow.first()
+                    val alreadyLiked = likedSet.contains(activeId)
+                    val commentMap = dataStoreManager.commentCountsFlow.first()
+                    val cCount = commentMap[activeId] ?: 0
+
+                    runOnMain {
+                        if (alreadyLiked) {
+                            isTaskLiked = true
+                            likeButtonView?.text = "✓ Liked"
+                            likeButtonView?.setTextColor(Color.parseColor("#10B981"))
+                        }
+                        currentCommentCount = cCount
+                        if (cCount >= 2) {
+                            commentButtonView?.text = "✓ +10c"
+                            commentButtonView?.setTextColor(Color.parseColor("#10B981"))
+                        } else if (cCount > 0) {
+                            commentButtonView?.text = "💬 +5c ($cCount/2)"
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
         }
     }
 
     private fun handleLikeAction() {
         val taskId = WatchSessionRepository.activeTaskId.value ?: "default_task"
         val taskTitle = WatchSessionRepository.targetTaskTitle.value ?: "YouTube Video"
+
+        if (isTaskLiked) {
+            runOnMain {
+                triggerCelebration("Video already liked! (0 coins)")
+            }
+            return
+        }
+
         overlayScope.launch {
             val result = dataStoreManager.recordTaskLike(taskId, taskTitle)
             runOnMain {
@@ -350,6 +401,9 @@ class FloatingTimerOverlayManager(private val context: Context) {
                     triggerCelebration(result.second)
                     WatchSessionRepository.addLog("Like reward awarded: +5 coins", LogType.SUCCESS)
                 } else {
+                    isTaskLiked = true
+                    likeButtonView?.text = "✓ Liked"
+                    likeButtonView?.setTextColor(Color.parseColor("#10B981"))
                     triggerCelebration(result.second)
                 }
             }
@@ -473,10 +527,11 @@ class FloatingTimerOverlayManager(private val context: Context) {
 
     fun hideOverlay() {
         runOnMain {
-            if (!isAttached || overlayRootView == null) return@runOnMain
-            try {
-                windowManager.removeView(overlayRootView)
-            } catch (_: Exception) {}
+            overlayRootView?.let { root ->
+                try {
+                    windowManager.removeView(root)
+                } catch (_: Exception) {}
+            }
             overlayRootView = null
             isAttached = false
             lastCelebratedTier = null

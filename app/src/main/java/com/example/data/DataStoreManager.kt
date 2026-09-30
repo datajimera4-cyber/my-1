@@ -33,6 +33,16 @@ class DataStoreManager(private val context: Context) {
         private val KEY_PAYOUT_REQUESTS = stringPreferencesKey("payout_requests_json")
         private val KEY_LIKED_TASKS = stringPreferencesKey("liked_tasks_json")
         private val KEY_COMMENT_COUNTS = stringPreferencesKey("comment_counts_json")
+        private val KEY_CLOUD_SERVER_URL = stringPreferencesKey("cloud_server_url")
+        private val KEY_CLOUD_SERVER_STATUS = stringPreferencesKey("cloud_server_status")
+    }
+
+    val cloudServerUrlFlow: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_CLOUD_SERVER_URL] ?: ""
+    }
+
+    val cloudServerStatusFlow: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_CLOUD_SERVER_STATUS] ?: "Not Connected (Local Mode)"
     }
 
     val likedTasksFlow: Flow<Set<String>> = context.dataStore.data.map { prefs ->
@@ -177,7 +187,6 @@ class DataStoreManager(private val context: Context) {
             val currentBalance = prefs[KEY_WALLET_BALANCE] ?: 0
             val newBalance = currentBalance + coins
             prefs[KEY_WALLET_BALANCE] = newBalance
-            prefs[KEY_TASK_COMPLETED] = true
 
             val currentJson = prefs[KEY_TRANSACTIONS] ?: "[]"
             val list = parseTransactionsJson(currentJson).toMutableList()
@@ -240,6 +249,63 @@ class DataStoreManager(private val context: Context) {
             }
         }
         return Pair(added, message)
+    }
+
+    suspend fun markTaskAlreadyLiked(taskId: String) {
+        context.dataStore.edit { prefs ->
+            val json = prefs[KEY_LIKED_TASKS] ?: "[]"
+            val arr = try { JSONArray(json) } catch (_: Exception) { JSONArray() }
+            var alreadyLiked = false
+            for (i in 0 until arr.length()) {
+                if (arr.getString(i) == taskId) {
+                    alreadyLiked = true
+                    break
+                }
+            }
+            if (!alreadyLiked) {
+                arr.put(taskId)
+                prefs[KEY_LIKED_TASKS] = arr.toString()
+            }
+        }
+    }
+
+    suspend fun setCloudServerUrl(url: String) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_CLOUD_SERVER_URL] = url.trim()
+        }
+    }
+
+    suspend fun setCloudServerStatus(status: String) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_CLOUD_SERVER_STATUS] = status
+        }
+    }
+
+    suspend fun lockTask(taskId: String, durationMillis: Long = 12 * 60 * 60 * 1000L) {
+        context.dataStore.edit { prefs ->
+            val json = prefs[KEY_VIDEO_TASKS]
+            val currentList = if (json.isNullOrBlank()) getDefaultTasks().toMutableList() else parseVideoTasksJson(json).toMutableList()
+            val index = currentList.indexOfFirst { it.id == taskId }
+            val lockTime = System.currentTimeMillis() + durationMillis
+            if (index != -1) {
+                val t = currentList[index]
+                currentList[index] = t.copy(lockedUntilMillis = lockTime)
+                prefs[KEY_VIDEO_TASKS] = serializeVideoTasksJson(currentList)
+            }
+        }
+    }
+
+    suspend fun unlockTask(taskId: String) {
+        context.dataStore.edit { prefs ->
+            val json = prefs[KEY_VIDEO_TASKS]
+            val currentList = if (json.isNullOrBlank()) getDefaultTasks().toMutableList() else parseVideoTasksJson(json).toMutableList()
+            val index = currentList.indexOfFirst { it.id == taskId }
+            if (index != -1) {
+                val t = currentList[index]
+                currentList[index] = t.copy(lockedUntilMillis = 0L)
+                prefs[KEY_VIDEO_TASKS] = serializeVideoTasksJson(currentList)
+            }
+        }
     }
 
     suspend fun recordTaskComment(taskId: String, taskTitle: String = "YouTube Video"): Pair<Boolean, String> {
@@ -545,7 +611,13 @@ class DataStoreManager(private val context: Context) {
             val index = currentList.indexOfFirst { it.id == taskId }
             if (index != -1) {
                 val t = currentList[index]
-                currentList[index] = t.copy(isCompleted = true, rewardCoins = rewardCoins)
+                val lockDuration = 12 * 60 * 60 * 1000L
+                val lockUntil = System.currentTimeMillis() + lockDuration
+                currentList[index] = t.copy(
+                    isCompleted = true,
+                    rewardCoins = rewardCoins,
+                    lockedUntilMillis = lockUntil
+                )
                 prefs[KEY_VIDEO_TASKS] = serializeVideoTasksJson(currentList)
             }
         }
@@ -623,7 +695,8 @@ class DataStoreManager(private val context: Context) {
                         watchedMillis = obj.optLong("watchedMillis", 0L),
                         selectedDurationSeconds = obj.optInt("selectedDurationSeconds", 180),
                         rewardCoins = obj.optInt("rewardCoins", 10),
-                        createdAt = obj.optLong("createdAt", System.currentTimeMillis())
+                        createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
+                        lockedUntilMillis = obj.optLong("lockedUntilMillis", 0L)
                     )
                 )
             }
@@ -649,6 +722,7 @@ class DataStoreManager(private val context: Context) {
                 put("selectedDurationSeconds", item.selectedDurationSeconds)
                 put("rewardCoins", item.rewardCoins)
                 put("createdAt", item.createdAt)
+                put("lockedUntilMillis", item.lockedUntilMillis)
             }
             array.put(obj)
         }

@@ -88,7 +88,9 @@ fun HomeScreen(
 ) {
     val context = LocalContext.current
     val walletBalance by viewModel.walletBalance.collectAsState()
-    val isCompleted by viewModel.isTaskCompleted.collectAsState()
+    val videoTasks by viewModel.videoTasks.collectAsState()
+    val featuredTask = remember(videoTasks) { videoTasks.firstOrNull() }
+    val isCompleted = featuredTask?.isCompleted == true
     val oEmbedState by viewModel.oEmbedState.collectAsState()
     val activeUrl by viewModel.currentVideoUrl.collectAsState()
     val searchProgress by viewModel.searchProgress.collectAsState()

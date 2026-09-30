@@ -21,15 +21,19 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Laptop
 import androidx.compose.material.icons.filled.MonetizationOn
@@ -38,12 +42,14 @@ import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -108,6 +114,8 @@ fun AdminDashboardScreen(
     val allUsers by viewModel.allUsers.collectAsState()
     val serverRunning by viewModel.adminServerRunning.collectAsState()
     val serverUrl by viewModel.adminServerUrl.collectAsState()
+    val cloudServerUrl by viewModel.cloudServerUrl.collectAsState()
+    val cloudServerStatus by viewModel.cloudServerStatus.collectAsState()
     val walletBalance by viewModel.walletBalance.collectAsState()
 
     var selectedTabIndex by remember { mutableIntStateOf(0) }
@@ -266,6 +274,12 @@ fun AdminDashboardScreen(
                     text = { Text("PC / Laptop", fontWeight = FontWeight.Bold) },
                     icon = { Icon(Icons.Default.Laptop, contentDescription = null, modifier = Modifier.size(18.dp)) }
                 )
+                Tab(
+                    selected = selectedTabIndex == 4,
+                    onClick = { selectedTabIndex = 4 },
+                    text = { Text("Google Drive Server", fontWeight = FontWeight.Bold) },
+                    icon = { Icon(Icons.Default.Cloud, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                )
             }
 
             // Tab Content
@@ -293,6 +307,14 @@ fun AdminDashboardScreen(
                     serverRunning = serverRunning,
                     serverUrl = serverUrl,
                     onToggleServer = { enabled -> viewModel.toggleAdminServer(context, enabled) }
+                )
+                4 -> GoogleDriveServerTabContent(
+                    context = context,
+                    cloudServerUrl = cloudServerUrl,
+                    cloudServerStatus = cloudServerStatus,
+                    onSaveUrl = { viewModel.saveCloudServerUrl(it) },
+                    onTestConnection = { onResult -> viewModel.testGoogleDriveConnection(onResult) },
+                    onSyncNow = { onResult -> viewModel.syncWithGoogleDriveServer(onResult) }
                 )
             }
         }
@@ -771,6 +793,309 @@ private fun LaptopAccessTabContent(
                 Text("• 💸 View live incoming payout requests and approve / pay with 1 click.", fontSize = 13.sp)
                 Text("• 👥 View all registered user accounts and modify coin balances.", fontSize = 13.sp)
                 Text("• ⏱️ Realtime WebSocket/Polling automatically keeps phone and laptop in sync.", fontSize = 13.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun GoogleDriveServerTabContent(
+    context: Context,
+    cloudServerUrl: String,
+    cloudServerStatus: String,
+    onSaveUrl: (String) -> Unit,
+    onTestConnection: ((Boolean, String) -> Unit) -> Unit,
+    onSyncNow: ((Boolean, String) -> Unit) -> Unit
+) {
+    var urlInput by remember(cloudServerUrl) { mutableStateOf(cloudServerUrl) }
+    var isTesting by remember { mutableStateOf(false) }
+    var isSyncing by remember { mutableStateOf(false) }
+    var statusMessage by remember { mutableStateOf<String?>(null) }
+    var isSuccessStatus by remember { mutableStateOf(true) }
+
+    val isConnected = cloudServerStatus.contains("Connected", ignoreCase = true) ||
+            cloudServerStatus.contains("Synced", ignoreCase = true)
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        // Status Card
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Slate800)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(
+                                    if (isConnected) SuccessGreen.copy(alpha = 0.2f) else AmberPrimary.copy(alpha = 0.2f),
+                                    CircleShape
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Cloud,
+                                contentDescription = null,
+                                tint = if (isConnected) SuccessGreen else AmberPrimary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "Google Drive 24/7 Cloud Server",
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                fontSize = 15.sp
+                            )
+                            Text(
+                                text = if (isConnected) "Online • Synced" else "Setup / Disconnected",
+                                fontSize = 11.sp,
+                                color = if (isConnected) SuccessGreen else AmberPrimary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .background(
+                                if (isConnected) SuccessGreen.copy(alpha = 0.15f) else AmberPrimary.copy(alpha = 0.15f),
+                                RoundedCornerShape(8.dp)
+                            )
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = if (isConnected) "ACTIVE" else "LOCAL ONLY",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = if (isConnected) SuccessGreen else AmberPrimary
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Text(
+                    text = "Status: $cloudServerStatus",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White.copy(alpha = 0.85f),
+                    fontSize = 12.sp
+                )
+            }
+        }
+
+        // URL Input & Configuration Card
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "Google Drive Web App URL",
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleSmall
+                )
+
+                Text(
+                    text = "User app kisi bhi internet connection se aapke Google Drive mein data save karegi.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 16.sp
+                )
+
+                OutlinedTextField(
+                    value = urlInput,
+                    onValueChange = { urlInput = it },
+                    placeholder = { Text("https://script.google.com/macros/s/.../exec", fontSize = 12.sp) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    singleLine = false,
+                    maxLines = 3,
+                    trailingIcon = {
+                        IconButton(
+                            onClick = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                val clip = clipboard.primaryClip
+                                if (clip != null && clip.itemCount > 0) {
+                                    val text = clip.getItemAt(0).text?.toString() ?: ""
+                                    if (text.isNotBlank()) {
+                                        urlInput = text.trim()
+                                    }
+                                }
+                            }
+                        ) {
+                            Icon(Icons.Default.ContentPaste, contentDescription = "Paste", tint = AmberPrimary)
+                        }
+                    }
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            onSaveUrl(urlInput.trim())
+                            Toast.makeText(context, "Server URL Saved!", Toast.LENGTH_SHORT).show()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Check, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Save URL", color = Color.Black, fontWeight = FontWeight.Bold)
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            isTesting = true
+                            statusMessage = "Testing Google Drive connection..."
+                            onTestConnection { success, msg ->
+                                isTesting = false
+                                isSuccessStatus = success
+                                statusMessage = msg
+                            }
+                        },
+                        enabled = !isTesting,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        if (isTesting) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Test Link")
+                    }
+                }
+
+                // Two-way sync button
+                Button(
+                    onClick = {
+                        isSyncing = true
+                        statusMessage = "Syncing with Google Drive..."
+                        onSyncNow { success, msg ->
+                            isSyncing = false
+                            isSuccessStatus = success
+                            statusMessage = msg
+                        }
+                    },
+                    enabled = !isSyncing && urlInput.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (isSyncing) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Default.Sync, contentDescription = null, tint = Color.White)
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Sync Now (Two-Way Sync)", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+
+                statusMessage?.let { msg ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                if (isSuccessStatus) SuccessGreen.copy(alpha = 0.12f) else AlertRed.copy(alpha = 0.12f),
+                                RoundedCornerShape(8.dp)
+                            )
+                            .padding(10.dp)
+                    ) {
+                        Text(
+                            text = msg,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (isSuccessStatus) SuccessGreen else AlertRed
+                        )
+                    }
+                }
+            }
+        }
+
+        // 1-Click Copy Apps Script Code Card
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Google Apps Script Server Code",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleSmall
+                    )
+
+                    Button(
+                        onClick = {
+                            val script = com.example.admin.CloudDriveServerManager.getGoogleAppsScriptTemplate()
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            clipboard.setPrimaryClip(ClipData.newPlainText("Google Apps Script", script))
+                            Toast.makeText(context, "Full Server Script Copied to Clipboard!", Toast.LENGTH_LONG).show()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Copy Script (1-Click)", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
+                }
+
+                Text(
+                    text = "Yeh Google Apps Script aapke Google Drive mein 'KingoKing_Server' folder banayega jisme tasks.json, users.json, aur payouts.json auto-store honge.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 16.sp
+                )
+            }
+        }
+
+        // Step by Step Setup Instructions Card
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Google Drive Server Setup Guide (2 Minutes):",
+                    fontWeight = FontWeight.Bold,
+                    color = AmberPrimary
+                )
+                Text(
+                    text = "1. Apne phone ya computer mein https://script.google.com open karein.\n" +
+                            "2. 'New project' par click karein.\n" +
+                            "3. Upar diye gaye 'Copy Script (1-Click)' button se poora code copy karke wahan paste karein.\n" +
+                            "4. Top-right mein 'Deploy' -> 'New deployment' par click karein.\n" +
+                            "5. Gear icon ⚙️ par click karke 'Web app' choose karein.\n" +
+                            "6. 'Execute as': 'Me' aur 'Who has access': 'Anyone' rakhein.\n" +
+                            "7. 'Deploy' par click karein aur permission allow karein.\n" +
+                            "8. Jo Web App URL milega, use copy karke yahan paste karein aur 'Save URL' dabayein!\n\n" +
+                            "🎉 Ab aapka Google Drive ek 24/7 free cloud server ban gaya hai! Normal users jo bhi task karenge ya payout mangenge, wo automatically aapke drive par folder banakar sync hota rahega!",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 18.sp
+                )
             }
         }
     }

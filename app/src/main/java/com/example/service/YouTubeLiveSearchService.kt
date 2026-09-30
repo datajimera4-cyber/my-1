@@ -104,6 +104,9 @@ class YouTubeLiveSearchService : AccessibilityService() {
             ) {
                 isYouTubeInForeground = false
                 WatchSessionRepository.setPlaybackPlaying(false)
+                if (WatchSessionRepository.sessionState.value == com.example.data.SessionState.ACTIVE) {
+                    WatchSessionRepository.onAppSwitchedOrMinimized()
+                }
             }
         } else if (pkg == "com.google.android.youtube") {
             isYouTubeInForeground = true
@@ -117,7 +120,10 @@ class YouTubeLiveSearchService : AccessibilityService() {
                     val desc = node.contentDescription?.toString() ?: ""
                     val text = node.text?.toString() ?: ""
                     val combined = "$desc $text".lowercase()
-                    if ((combined.contains("like this video") || combined.contains("like")) && !combined.contains("dislike")) {
+                    if (combined.contains("unlike") || combined.contains("remove like") || node.isSelected) {
+                        val taskId = WatchSessionRepository.activeTaskId.value
+                        WatchSessionRepository.onVideoAlreadyLikedDetected?.invoke(taskId ?: "")
+                    } else if ((combined.contains("like this video") || combined.contains("like")) && !combined.contains("dislike")) {
                         WatchSessionRepository.onTaskLikeDetected?.invoke()
                     } else if (combined.contains("comment") || combined.contains("add a comment") || combined.contains("send comment") || combined.contains("post")) {
                         WatchSessionRepository.onTaskCommentDetected?.invoke()
@@ -127,10 +133,12 @@ class YouTubeLiveSearchService : AccessibilityService() {
             } catch (_: Exception) {}
         }
 
-        // If target was already clicked or idle, monitor playback controls in YouTube
+        // If target was already clicked or idle, monitor playback controls & like status in YouTube
         if (hasClickedTarget || currentPhase == LiveSearchPhase.IDLE || currentPhase == LiveSearchPhase.COMPLETED) {
             if (isYouTubeInForeground && event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
-                checkPlaybackControls(event.source ?: rootInActiveWindow)
+                val activeNode = event.source ?: rootInActiveWindow
+                checkPlaybackControls(activeNode)
+                checkVideoLikeState(activeNode)
             }
             return
         }
@@ -516,6 +524,32 @@ class YouTubeLiveSearchService : AccessibilityService() {
             for (i in 0 until node.childCount) {
                 val child = node.getChild(i) ?: continue
                 checkPlaybackControls(child)
+                child.recycle()
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun checkVideoLikeState(node: AccessibilityNodeInfo?) {
+        if (node == null) return
+        try {
+            val desc = node.contentDescription?.toString() ?: ""
+            val text = node.text?.toString() ?: ""
+            val combined = "$desc $text".lowercase()
+
+            // In YouTube, a video that is already liked has an "unlike" action,
+            // or the like button has isSelected == true, or description says "liked"
+            if (combined.contains("unlike") || combined.contains("remove like") || 
+                (combined.contains("like") && !combined.contains("dislike") && (node.isSelected || combined.contains("liked")))) {
+                val taskId = WatchSessionRepository.activeTaskId.value
+                if (!taskId.isNullOrBlank()) {
+                    WatchSessionRepository.onVideoAlreadyLikedDetected?.invoke(taskId)
+                }
+                return
+            }
+
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i) ?: continue
+                checkVideoLikeState(child)
                 child.recycle()
             }
         } catch (_: Exception) {}

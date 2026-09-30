@@ -19,6 +19,7 @@ import com.example.data.SampleTask
 import com.example.service.NotificationChannels
 import com.example.ui.components.AppBottomNavBar
 import com.example.ui.components.SuccessDialog
+import com.example.ui.components.TaskIncompleteDialog
 import com.example.ui.screens.DiagnosticsScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.MeScreen
@@ -63,6 +64,7 @@ fun WatchEarnApp(viewModel: MainViewModel = viewModel()) {
     val showSuccessDialog by viewModel.showSuccessDialog.collectAsState()
     val activeRewardCoins by viewModel.activeRewardCoins.collectAsState()
     val videoTasks by viewModel.videoTasks.collectAsState()
+    val taskIncompleteMessage by viewModel.taskIncompleteMessage.collectAsState()
 
     val isPrimaryTab = currentScreen == AppScreen.TASKS ||
             currentScreen == AppScreen.HOME ||
@@ -109,6 +111,13 @@ fun WatchEarnApp(viewModel: MainViewModel = viewModel()) {
         SuccessDialog(
             rewardCoins = activeRewardCoins,
             onDismiss = { viewModel.dismissSuccessDialog() }
+        )
+    }
+
+    taskIncompleteMessage?.let { msg ->
+        TaskIncompleteDialog(
+            message = msg,
+            onDismiss = { viewModel.dismissTaskIncompleteMessage() }
         )
     }
 }

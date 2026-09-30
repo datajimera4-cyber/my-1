@@ -29,26 +29,26 @@ object YouTubeSearchEngine {
     ): SearchResultItem? = withContext(Dispatchers.IO) {
         val random = Random(System.currentTimeMillis())
 
-        // Step 1: Open Search Box (Human pause 400-600ms)
+        // Step 1: Open Search Box (Human pause 150ms)
         onProgressUpdate(
             SearchProgressState(
                 isSearching = true,
                 stepText = "Opening YouTube search bar...",
                 typedQuery = "",
                 isTyping = true,
-                progress = 0.08f
+                progress = 0.15f
             )
         )
-        delay(450L + random.nextLong(200))
+        delay(150L)
 
-        // Step 2: Human Typing Simulation (letter-by-letter with variable keystroke delay)
+        // Step 2: Human Typing Simulation (letter-by-letter with quick keystroke delay)
         val sb = StringBuilder()
         val totalChars = targetTitle.length
-        val maxSimulatedChars = totalChars.coerceAtMost(35) // Don't delay too long on very long titles
+        val maxSimulatedChars = totalChars.coerceAtMost(18)
 
         for (i in 0 until maxSimulatedChars) {
             sb.append(targetTitle[i])
-            val typingFraction = 0.08f + (0.28f * (i.toFloat() / maxSimulatedChars.toFloat()))
+            val typingFraction = 0.15f + (0.35f * (i.toFloat() / maxSimulatedChars.toFloat()))
 
             onProgressUpdate(
                 SearchProgressState(
@@ -59,14 +59,7 @@ object YouTubeSearchEngine {
                     progress = typingFraction
                 )
             )
-
-            // Realistic keystroke timing: 40ms to 110ms with occasional pauses on spaces
-            val charDelay = if (targetTitle[i] == ' ') {
-                120L + random.nextLong(100)
-            } else {
-                45L + random.nextLong(60)
-            }
-            delay(charDelay)
+            delay(25L)
         }
 
         // If title was truncated for typing speed, fill the rest naturally
@@ -77,10 +70,10 @@ object YouTubeSearchEngine {
                     stepText = "Query entered: \"$targetTitle\"",
                     typedQuery = targetTitle,
                     isTyping = false,
-                    progress = 0.38f
+                    progress = 0.50f
                 )
             )
-            delay(250)
+            delay(80L)
         }
 
         // Step 3: Human presses Search -> query YouTube
@@ -90,12 +83,12 @@ object YouTubeSearchEngine {
                 stepText = "Searching YouTube for: \"$targetTitle\"...",
                 typedQuery = targetTitle,
                 isTyping = false,
-                progress = 0.45f
+                progress = 0.65f
             )
         )
 
         val searchResults = queryYouTubeSearchResults(targetTitle).toMutableList()
-        delay(700L + random.nextLong(300))
+        delay(180L)
 
         // Ensure target item is present in candidate list for visual verification
         val targetThumbnail = if (!targetVideoId.isNullOrBlank()) {
@@ -119,14 +112,15 @@ object YouTubeSearchEngine {
         onProgressUpdate(
             SearchProgressState(
                 isSearching = true,
-                stepText = "Browsing search results ($totalFound videos found)...",
+                stepText = "Target found! Verifying thumbnail...",
                 typedQuery = targetTitle,
-                progress = 0.65f,
+                progress = 0.85f,
                 totalFound = totalFound,
+                channelFilterApplied = true,
                 candidateVideos = searchResults.take(4)
             )
         )
-        delay(900L + random.nextLong(400))
+        delay(200L)
 
         // Step 5: Human inspects Channel Name & Thumbnail to pick the correct video
         onProgressUpdate(
@@ -140,7 +134,7 @@ object YouTubeSearchEngine {
                 candidateVideos = searchResults.take(4)
             )
         )
-        delay(850L + random.nextLong(300))
+        delay(150L)
 
         // Step 6: Target located and selected
         var matchedItem: SearchResultItem? = null
@@ -182,7 +176,7 @@ object YouTubeSearchEngine {
                 candidateVideos = listOf(matchedItem)
             )
         )
-        delay(750L + random.nextLong(250))
+        delay(200L)
 
         // Dismiss loading overlay smoothly
         onProgressUpdate(

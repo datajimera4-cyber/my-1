@@ -55,6 +55,7 @@ class WatchTimerService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var timerLoopJob: Job? = null
     private var stateObserverJob: Job? = null
+    private var completionJob: Job? = null
     private lateinit var dataStoreManager: DataStoreManager
     private lateinit var notificationManager: NotificationManager
     private lateinit var floatingOverlayManager: FloatingTimerOverlayManager
@@ -68,6 +69,7 @@ class WatchTimerService : Service() {
 
         // Setup repository callbacks
         WatchSessionRepository.onRedAlertTriggered = { title, message ->
+            completionJob?.cancel()
             floatingOverlayManager.hideOverlay()
             postRedAlertNotification(title, message)
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -75,7 +77,8 @@ class WatchTimerService : Service() {
         }
 
         WatchSessionRepository.onCompletionTriggered = { coins, title ->
-            serviceScope.launch {
+            completionJob?.cancel()
+            completionJob = serviceScope.launch {
                 val activeId = WatchSessionRepository.activeTaskId.value
                 dataStoreManager.addRewardTransaction("Watched: $title", coins)
                 if (activeId != null) {
@@ -97,6 +100,17 @@ class WatchTimerService : Service() {
         }
 
         WatchSessionRepository.onSessionInterrupted = {
+            completionJob?.cancel()
+            floatingOverlayManager.hideOverlay()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+        }
+
+        WatchSessionRepository.onTaskIncompleteAndLocked = { taskId, _, lockDuration ->
+            completionJob?.cancel()
+            serviceScope.launch {
+                dataStoreManager.lockTask(taskId, lockDuration)
+            }
             floatingOverlayManager.hideOverlay()
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
@@ -112,12 +126,14 @@ class WatchTimerService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
+                completionJob?.cancel()
                 floatingOverlayManager.hideOverlay()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
                 return START_NOT_STICKY
             }
             ACTION_START, null -> {
+                completionJob?.cancel()
                 startForegroundWithNotification()
                 startTimerLoop()
                 observeSessionState()
@@ -154,11 +170,28 @@ class WatchTimerService : Service() {
                     !isAppForeground
                 }
 
-                // Strict rule: Time counts ONLY when user is NOT in our app,
-                // YouTube is actively in the foreground, AND video is not explicitly paused
                 val sessionActive = WatchSessionRepository.sessionState.value == SessionState.ACTIVE
-                val isPlaying = !isAppForeground && isYtForeground && sessionActive &&
-                        (isAudioPlaying || WatchSessionRepository.playbackState.value == VideoPlaybackState.PLAYING || !YouTubeLiveSearchService.isVideoExplicitlyPaused)
+
+                // If user minimized YouTube, switched to another app, or returned to our app while session was active:
+                // Strictly mark task incomplete, reset time, lock task for 12 hours, and stop service!
+                if (sessionActive && (!isYtForeground || isAppForeground)) {
+                    WatchSessionRepository.onAppSwitchedOrMinimized()
+                    if (floatingOverlayManager.isOverlayAttached()) {
+                        floatingOverlayManager.hideOverlay()
+                    }
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                    return@launch
+                }
+
+                // Strict rule: Time counts ONLY when YouTube is actively playing the video!
+                // If user pauses video: timer stops at the exact current count.
+                val isVideoPaused = YouTubeLiveSearchService.isVideoExplicitlyPaused ||
+                        WatchSessionRepository.playbackState.value == VideoPlaybackState.PAUSED ||
+                        (!isAudioPlaying && WatchSessionRepository.playbackState.value != VideoPlaybackState.PLAYING)
+
+                val isPlaying = !isAppForeground && isYtForeground && sessionActive && !isVideoPaused &&
+                        (isAudioPlaying || WatchSessionRepository.playbackState.value == VideoPlaybackState.PLAYING)
 
                 WatchSessionRepository.setPlaybackPlaying(isPlaying)
                 WatchSessionRepository.processTimerTick()

@@ -100,8 +100,10 @@ object WatchSessionRepository {
     var onCompletionTriggered: ((coins: Int, title: String) -> Unit)? = null
     var onSaveProgressNeeded: ((millis: Long) -> Unit)? = null
     var onTaskLikeDetected: (() -> Unit)? = null
+    var onVideoAlreadyLikedDetected: ((taskId: String) -> Unit)? = null
     var onTaskCommentDetected: (() -> Unit)? = null
     var onSessionInterrupted: ((reason: String) -> Unit)? = null
+    var onTaskIncompleteAndLocked: ((taskId: String, reason: String, lockDurationMillis: Long) -> Unit)? = null
     var onMilestoneCoinsAwarded: ((coins: Int, title: String) -> Unit)? = null
 
     fun triggerTaskLike() {
@@ -177,10 +179,27 @@ object WatchSessionRepository {
         _playbackState.value = VideoPlaybackState.PAUSED
         _mediaSessionDetected.value = true
         _sessionState.value = SessionState.ACTIVE
+        com.example.service.YouTubeLiveSearchService.isYouTubeInForeground = true
 
         addLog("Task started. Target: \"$taskTitle\". Continuous watch session initialized from 00:00!", LogType.SUCCESS)
 
         waitingTimeoutJob?.cancel()
+    }
+
+    /**
+     * Resets any stale completed/error session state when switching to a different task
+     */
+    fun resetSessionForNewTask(taskId: String? = null) {
+        _sessionState.value = SessionState.IDLE
+        _watchedMillis.value = 0L
+        _currentMilestoneTier.value = null
+        isMilestoneAwarded = false
+        _activeTaskId.value = taskId
+        _redAlertMessage.value = null
+        _isGracePeriodActive.value = false
+        lastTickRealtime = 0L
+        waitingTimeoutJob?.cancel()
+        graceJob?.cancel()
     }
 
     /**
@@ -286,11 +305,33 @@ object WatchSessionRepository {
             }
 
             MatchResult.MISMATCH -> {
-                if (isPlaying) {
-                    // Start grace period if not already running
-                    if (!_isGracePeriodActive.value && currentState == SessionState.ACTIVE) {
-                        startGracePeriod()
+                val detected = _currentMediaTitle.value ?: ""
+                val isLikelyAd = detected.contains("Ad", ignoreCase = true) || 
+                                 detected.contains("Sponsored", ignoreCase = true) || 
+                                 detected.length < 4
+
+                if (isLikelyAd) {
+                    // Pre-roll ad or sponsor: pause timer progress so ad time is not counted
+                    lastTickRealtime = 0L
+                    addLog("Pre-roll ad or sponsor detected (\"$detected\"). Timer paused until target video plays.", LogType.INFO)
+                } else if (isPlaying && currentState == SessionState.ACTIVE) {
+                    // User played a DIFFERENT video!
+                    // Strictly cancel session, reset time to 0, and lock task for 12 hours!
+                    val wrongTitle = detected.ifBlank { "Doosra video" }
+                    val message = "⚠️ Wrong Video Detected: Aapne doosra video open kiya (\"$wrongTitle\"). Sirf task targeted video dekhne par hi coins milte hain. Continuous watch cancel ho gayi, time reset ho gaya aur task 12 ghante ke liye lock ho gaya."
+                    addLog(message, LogType.ERROR)
+
+                    _watchedMillis.value = 0L
+                    _currentMilestoneTier.value = null
+                    lastTickRealtime = 0L
+                    onSaveProgressNeeded?.invoke(0L)
+                    _sessionState.value = SessionState.INVALID
+
+                    val activeId = _activeTaskId.value
+                    if (activeId != null) {
+                        onTaskIncompleteAndLocked?.invoke(activeId, message, 12 * 60 * 60 * 1000L)
                     }
+                    onRedAlertTriggered?.invoke("Wrong Video Played", message)
                 }
             }
 
@@ -300,37 +341,27 @@ object WatchSessionRepository {
         }
     }
 
-    private fun startGracePeriod() {
-        _isGracePeriodActive.value = true
-        _graceSecondsRemaining.value = 10
-        val detected = _currentMediaTitle.value ?: ""
-        val isLikelyAd = detected.contains("Ad", ignoreCase = true) || 
-                         detected.contains("Sponsored", ignoreCase = true) || 
-                         detected.length < 4
-        if (isLikelyAd) {
-            addLog("Pre-roll ad or sponsor detected (\"$detected\"). Human tolerance grace active.", LogType.INFO)
-        } else {
-            addLog("Title mismatch detected (\"$detected\"). Human 10s grace period active.", LogType.WARNING)
-        }
+    /**
+     * Triggered immediately when user switches to another app or minimizes YouTube
+     */
+    fun onAppSwitchedOrMinimized() {
+        if (_sessionState.value == SessionState.ACTIVE) {
+            val watchedSecs = (_watchedMillis.value / 1000).toInt()
+            val requiredSecs = (_requiredMillis.value / 1000).toInt()
+            val activeId = _activeTaskId.value
+            val message = "⚠️ Task Incomplete: Aapne YouTube minimize ya doosri app mein switch kar diya (${watchedSecs}s / ${requiredSecs}s). Continuous watch break ho gayi aur yeh task 12 ghante ke liye lock ho gaya hai."
+            addLog(message, LogType.WARNING)
 
-        graceJob?.cancel()
-        graceJob = repositoryScope.launch {
-            for (sec in 9 downTo 0) {
-                delay(1000L)
-                if (!isActive || !_isGracePeriodActive.value) return@launch
-                _graceSecondsRemaining.value = sec
-            }
+            _sessionState.value = SessionState.INVALID
+            _watchedMillis.value = 0L
+            _currentMilestoneTier.value = null
+            lastTickRealtime = 0L
+            onSaveProgressNeeded?.invoke(0L)
 
-            // Grace period expired and still mismatched!
-            if (_matchResult.value == MatchResult.MISMATCH && _isGracePeriodActive.value) {
-                _isGracePeriodActive.value = false
-                val wrongTitle = _currentMediaTitle.value ?: "Different video"
-                invalidateSession("Wrong video detected: \"$wrongTitle\".")
-                onRedAlertTriggered?.invoke(
-                    "Red Alert: Wrong video detected",
-                    "Task cancelled because \"$wrongTitle\" was played."
-                )
+            if (activeId != null) {
+                onTaskIncompleteAndLocked?.invoke(activeId, message, 12 * 60 * 60 * 1000L)
             }
+            onSessionInterrupted?.invoke(message)
         }
     }
 
@@ -351,19 +382,24 @@ object WatchSessionRepository {
 
                 val watchedSecs = (_watchedMillis.value / 1000).toInt()
                 val requiredSecs = (_requiredMillis.value / 1000).toInt()
+                val activeId = _activeTaskId.value
                 if (_sessionState.value == SessionState.ACTIVE) {
                     if (watchedSecs < 180 || _watchedMillis.value < _requiredMillis.value) {
-                        addLog(
-                            "⚠️ Continuous watch broken: Left YouTube after ${watchedSecs}s (required ${requiredSecs}s). Task not completed, progress reset to 00:00 (no coins rewarded).",
-                            LogType.WARNING
-                        )
+                        val milestone = _currentMilestoneTier.value
+                        val message = if (milestone != null) {
+                            "⚠️ Milestone of ${milestone.minutes}m was reached (+${milestone.coins}c), but you returned before completing the full goal (${watchedSecs}s / ${requiredSecs}s). This task is now locked for 12 hours."
+                        } else {
+                            "⚠️ Task Incomplete: You watched only ${watchedSecs}s out of ${requiredSecs}s (minimum 3 minutes required). Continuous watch was broken. This task is now locked for 12 hours."
+                        }
+                        addLog(message, LogType.WARNING)
                         _sessionState.value = SessionState.IDLE
                         _watchedMillis.value = 0L
                         _currentMilestoneTier.value = null
                         onSaveProgressNeeded?.invoke(0L)
-                        onSessionInterrupted?.invoke(
-                            "Continuous watch requirement not met: You returned to the app before completing the ${requiredSecs / 60}m milestone (${watchedSecs}s watched). The session has reset to 00:00 without coins."
-                        )
+                        if (activeId != null) {
+                            onTaskIncompleteAndLocked?.invoke(activeId, message, 12 * 60 * 60 * 1000L)
+                        }
+                        onSessionInterrupted?.invoke(message)
                     }
                 } else {
                     addLog("App opened in foreground", LogType.INFO)

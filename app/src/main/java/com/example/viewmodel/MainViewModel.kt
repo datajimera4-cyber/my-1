@@ -86,6 +86,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val payoutRequests: StateFlow<List<PayoutRequest>> = dataStoreManager.payoutRequestsFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
+    val cloudServerUrl: StateFlow<String> = dataStoreManager.cloudServerUrlFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, "")
+
+    val cloudServerStatus: StateFlow<String> = dataStoreManager.cloudServerStatusFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, "Not Connected (Local Mode)")
+
+    private val _taskIncompleteMessage = MutableStateFlow<String?>(null)
+    val taskIncompleteMessage: StateFlow<String?> = _taskIncompleteMessage.asStateFlow()
+
+    fun dismissTaskIncompleteMessage() {
+        _taskIncompleteMessage.value = null
+    }
+
     private val _adminServerRunning = MutableStateFlow(com.example.admin.AdminWebServer.isRunning)
     val adminServerRunning: StateFlow<Boolean> = _adminServerRunning.asStateFlow()
 
@@ -160,26 +173,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // No incomplete session is accumulated across multiple days or returns.
         WatchSessionRepository.setWatchedMillis(0L)
 
-        // Observe completion flag from DataStore
-        viewModelScope.launch {
-            dataStoreManager.isTaskCompletedFlow.collectLatest { completed ->
-                if (completed) {
-                    WatchSessionRepository.setCompletedState()
-                }
-            }
-        }
-
         // Listen for session interruption when user returns to app before milestone
         WatchSessionRepository.onSessionInterrupted = { message ->
             _sessionInterruptedMessage.value = message
         }
 
-        // Observe session state changes to show dialog upon completion
-        viewModelScope.launch {
-            WatchSessionRepository.sessionState.collectLatest { state ->
-                if (state == SessionState.COMPLETED) {
-                    _showSuccessDialog.value = true
-                }
+        WatchSessionRepository.onTaskIncompleteAndLocked = { taskId, reason, lockDuration ->
+            viewModelScope.launch {
+                dataStoreManager.lockTask(taskId, lockDuration)
+            }
+            _taskIncompleteMessage.value = reason
+        }
+
+        WatchSessionRepository.onVideoAlreadyLikedDetected = { taskId ->
+            viewModelScope.launch {
+                dataStoreManager.markTaskAlreadyLiked(taskId)
             }
         }
 
@@ -199,15 +207,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Repository completion callback
+        // Repository completion callback - ONLY shown on genuine completion
         WatchSessionRepository.onCompletionTriggered = { coins, title ->
             viewModelScope.launch {
                 dataStoreManager.addRewardTransaction(title, coins)
-                dataStoreManager.setTaskCompleted(true)
                 val activeId = WatchSessionRepository.activeTaskId.value
                 if (activeId != null) {
                     dataStoreManager.markTaskCompleted(activeId, coins)
                 }
+                _activeRewardCoins.value = coins
+                _showSuccessDialog.value = true
             }
         }
 
@@ -227,6 +236,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _currentVideoUrl.value = task.videoUrl
         _selectedTierSeconds.value = task.selectedDurationSeconds
         _selectedTierCoins.value = task.rewardCoins
+        if (!task.isCompleted) {
+            WatchSessionRepository.resetSessionForNewTask(task.id)
+        }
         viewModelScope.launch {
             dataStoreManager.setSelectedTaskId(task.id)
             dataStoreManager.setActiveVideoUrl(task.videoUrl)
@@ -418,6 +430,63 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun lockTask(taskId: String, durationMillis: Long = 12 * 60 * 60 * 1000L) {
+        viewModelScope.launch {
+            dataStoreManager.lockTask(taskId, durationMillis)
+            WatchSessionRepository.addLog("Task #$taskId locked for 12 hours due to incomplete watch.", LogType.WARNING)
+        }
+    }
+
+    fun unlockTask(taskId: String) {
+        viewModelScope.launch {
+            dataStoreManager.unlockTask(taskId)
+            WatchSessionRepository.addLog("Task #$taskId unlocked.", LogType.SUCCESS)
+        }
+    }
+
+    fun saveCloudServerUrl(url: String) {
+        viewModelScope.launch {
+            dataStoreManager.setCloudServerUrl(url)
+            WatchSessionRepository.addLog("Saved Google Drive Server URL: $url", LogType.INFO)
+        }
+    }
+
+    fun syncWithGoogleDriveServer(onResult: (Boolean, String) -> Unit) {
+        val url = cloudServerUrl.value
+        if (url.isBlank()) {
+            onResult(false, "Please enter your Google Drive Web App URL first.")
+            return
+        }
+        viewModelScope.launch {
+            val res = com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager)
+            onResult(res.first, res.second)
+            if (res.first) {
+                WatchSessionRepository.addLog("Sync with Google Drive successful!", LogType.SUCCESS)
+            } else {
+                WatchSessionRepository.addLog("Drive sync error: ${res.second}", LogType.ERROR)
+            }
+        }
+    }
+
+    fun testGoogleDriveConnection(onResult: (Boolean, String) -> Unit) {
+        val url = cloudServerUrl.value
+        if (url.isBlank()) {
+            onResult(false, "Please enter your Google Drive Web App URL first.")
+            return
+        }
+        viewModelScope.launch {
+            val res = com.example.admin.CloudDriveServerManager.testConnection(url)
+            onResult(res.first, res.second)
+            if (res.first) {
+                dataStoreManager.setCloudServerStatus("Connected to Google Drive")
+                WatchSessionRepository.addLog("Google Drive connection verified!", LogType.SUCCESS)
+            } else {
+                dataStoreManager.setCloudServerStatus("Connection Failed")
+                WatchSessionRepository.addLog("Google Drive connection failed: ${res.second}", LogType.WARNING)
+            }
+        }
+    }
+
     private fun startTaskInternal(
         context: Context,
         videoUrl: String,
@@ -427,6 +496,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         if (searchProgress.value.isSearching) {
             return // Avoid duplicate search clicks
+        }
+
+        // Check if task is currently locked for 12 hours
+        val currentTask = videoTasks.value.find { it.id == taskId }
+        if (currentTask != null && currentTask.isLocked) {
+            val remainStr = currentTask.getLockRemainingFormatted()
+            _taskIncompleteMessage.value = "⚠️ Yeh task abhi locked hai ($remainStr remaining). Incomplete task 12 ghante ke liye lock ho gaya tha."
+            return
         }
 
         viewModelScope.launch {
