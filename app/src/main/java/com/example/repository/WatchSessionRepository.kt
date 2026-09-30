@@ -178,7 +178,8 @@ object WatchSessionRepository {
         _currentMediaTitle.value = taskTitle
         _currentMediaArtist.value = taskAuthor
         _matchResult.value = MatchResult.MATCH
-        _playbackState.value = VideoPlaybackState.PAUSED
+        _playbackState.value = VideoPlaybackState.PLAYING
+        lastTickRealtime = android.os.SystemClock.elapsedRealtime()
         _mediaSessionDetected.value = true
         _sessionState.value = SessionState.ACTIVE
         com.example.service.YouTubeLiveSearchService.isYouTubeInForeground = true

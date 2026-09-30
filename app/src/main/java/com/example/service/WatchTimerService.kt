@@ -174,9 +174,8 @@ class WatchTimerService : Service() {
                 val elapsedSinceLaunch = System.currentTimeMillis() - WatchSessionRepository.taskLaunchTimestampMillis
 
                 // If user minimized YouTube, switched to another app, or returned to our app while session was active:
-                // Strictly mark task incomplete, reset time, lock task for 12 hours, and stop service!
-                // We provide an initial 6-second transition window so YouTube has time to launch and buffer.
-                if (elapsedSinceLaunch > 6000L && sessionActive && (!isYtForeground || isAppForeground)) {
+                // We provide an initial 8-second transition window so YouTube has time to launch and buffer.
+                if (elapsedSinceLaunch > 8000L && sessionActive && (!isYtForeground || isAppForeground)) {
                     WatchSessionRepository.onAppSwitchedOrMinimized()
                     if (floatingOverlayManager.isOverlayAttached()) {
                         floatingOverlayManager.hideOverlay()
@@ -186,14 +185,12 @@ class WatchTimerService : Service() {
                     return@launch
                 }
 
-                // Strict rule: Time counts ONLY when YouTube is actively playing the video!
-                // If user pauses video: timer stops at the exact current count.
-                val isVideoPaused = YouTubeLiveSearchService.isVideoExplicitlyPaused ||
-                        WatchSessionRepository.playbackState.value == VideoPlaybackState.PAUSED ||
-                        (!isAudioPlaying && WatchSessionRepository.playbackState.value != VideoPlaybackState.PLAYING)
+                // Video is paused ONLY if explicitly paused by user in YouTube, or media session explicitly signaled paused
+                val isExplicitlyPaused = YouTubeLiveSearchService.isVideoExplicitlyPaused ||
+                        (WatchSessionRepository.mediaSessionDetected.value && WatchSessionRepository.playbackState.value == VideoPlaybackState.PAUSED)
 
-                val isPlaying = !isAppForeground && isYtForeground && sessionActive && !isVideoPaused &&
-                        (isAudioPlaying || WatchSessionRepository.playbackState.value == VideoPlaybackState.PLAYING)
+                // Timer ticks when YouTube is in foreground and not explicitly paused
+                val isPlaying = !isAppForeground && isYtForeground && sessionActive && !isExplicitlyPaused
 
                 WatchSessionRepository.setPlaybackPlaying(isPlaying)
                 WatchSessionRepository.processTimerTick()
@@ -204,7 +201,7 @@ class WatchTimerService : Service() {
 
                 // Overlay shows when task is running and either YouTube is in foreground or during the initial launch transition
                 val shouldShowOverlay = (sessionActive || WatchSessionRepository.sessionState.value == SessionState.WAITING) &&
-                        (!isAppForeground || elapsedSinceLaunch < 6000L)
+                        (!isAppForeground || elapsedSinceLaunch < 8000L)
 
                 if (shouldShowOverlay) {
                     if (!floatingOverlayManager.isOverlayAttached()) {

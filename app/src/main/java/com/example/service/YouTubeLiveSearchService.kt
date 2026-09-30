@@ -119,13 +119,25 @@ class YouTubeLiveSearchService : AccessibilityService() {
                 if (node != null) {
                     val desc = node.contentDescription?.toString() ?: ""
                     val text = node.text?.toString() ?: ""
-                    val combined = "$desc $text".lowercase()
-                    if (combined.contains("unlike") || combined.contains("remove like") || node.isSelected) {
-                        val taskId = WatchSessionRepository.activeTaskId.value
-                        WatchSessionRepository.onVideoAlreadyLikedDetected?.invoke(taskId ?: "")
-                    } else if ((combined.contains("like this video") || combined.contains("like")) && !combined.contains("dislike")) {
+                    val viewId = node.viewIdResourceName ?: ""
+                    val combined = "$desc $text $viewId".lowercase()
+
+                    val isDislike = combined.contains("dislike") || combined.contains("नापसंद")
+                    val isLike = !isDislike && (
+                            combined.contains("like") ||
+                            combined.contains("पसंद") ||
+                            combined.contains("thumbs up")
+                    )
+
+                    val isComment = combined.contains("comment") ||
+                            combined.contains("add a comment") ||
+                            combined.contains("send comment") ||
+                            combined.contains("post") ||
+                            combined.contains("टिप्पणी")
+
+                    if (isLike) {
                         WatchSessionRepository.onTaskLikeDetected?.invoke()
-                    } else if (combined.contains("comment") || combined.contains("add a comment") || combined.contains("send comment") || combined.contains("post")) {
+                    } else if (isComment) {
                         WatchSessionRepository.onTaskCommentDetected?.invoke()
                     }
                     node.recycle()

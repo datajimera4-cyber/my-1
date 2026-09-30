@@ -9,23 +9,24 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MonetizationOn
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.RadioButtonChecked
-import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -34,8 +35,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -62,9 +61,6 @@ import com.example.data.WATCH_DURATION_TIERS
 import com.example.data.WatchDurationTier
 import com.example.ui.theme.AmberDark
 import com.example.ui.theme.AmberPrimary
-import com.example.ui.theme.Slate700
-import com.example.ui.theme.Slate800
-import com.example.ui.theme.Slate900
 import com.example.ui.theme.SuccessGreen
 import com.example.util.TimeFormatter
 
@@ -102,75 +98,90 @@ fun DurationSelectionDialog(
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Surface(
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(20.dp),
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 6.dp,
             modifier = Modifier
                 .fillMaxWidth(0.92f)
-                .padding(vertical = 16.dp)
+                .heightIn(max = 580.dp)
+                .padding(vertical = 12.dp)
                 .testTag("duration_selection_dialog")
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                    .padding(16.dp)
             ) {
-                // Header
+                // Header Row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Select Watch Goal",
-                            style = MaterialTheme.typography.titleLarge,
+                            text = "Select Watch Duration",
+                            style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Choose watch duration to unlock coins",
+                            text = "Higher duration = more coins reward",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
 
-                    IconButton(onClick = onDismiss) {
-                        Icon(imageVector = Icons.Default.Close, contentDescription = "Close")
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
 
-                // Video info compact banner
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Compact Video Preview Banner
                 Card(
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    ),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(10.dp),
+                            .padding(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(width = 72.dp, height = 46.dp)
-                                .clip(RoundedCornerShape(8.dp))
+                                .size(width = 64.dp, height = 40.dp)
+                                .clip(RoundedCornerShape(6.dp))
                                 .background(Color.Black),
                             contentAlignment = Alignment.Center
                         ) {
                             if (thumbnailUrl.isNotBlank()) {
                                 AsyncImage(
-                                    model = ImageRequest.Builder(context).data(thumbnailUrl).crossfade(true).build(),
+                                    model = ImageRequest.Builder(context)
+                                        .data(thumbnailUrl)
+                                        .crossfade(true)
+                                        .build(),
                                     contentDescription = null,
                                     contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxWidth()
+                                    modifier = Modifier.fillMaxSize()
                                 )
                             } else {
                                 Icon(
                                     imageVector = Icons.Default.PlayArrow,
                                     contentDescription = null,
-                                    tint = Color.White
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
@@ -181,42 +192,37 @@ fun DurationSelectionDialog(
                             Text(
                                 text = videoTitle,
                                 style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.SemiBold,
+                                fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
                                 if (isLive) {
                                     Box(
                                         modifier = Modifier
-                                            .background(Color(0xFFE53935), RoundedCornerShape(4.dp))
-                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                            .background(Color(0xFFE53935), RoundedCornerShape(3.dp))
+                                            .padding(horizontal = 4.dp, vertical = 1.dp)
                                     ) {
                                         Text(
-                                            text = "LIVE STREAM",
+                                            text = "LIVE",
                                             color = Color.White,
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 9.sp
                                         )
                                     }
                                 } else {
-                                    Box(
-                                        modifier = Modifier
-                                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(4.dp))
-                                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                                    ) {
-                                        Text(
-                                            text = "Length: ${TimeFormatter.formatMillisToMmSs(durationSeconds * 1000L)}",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            fontSize = 10.sp
-                                        )
-                                    }
+                                    Text(
+                                        text = TimeFormatter.formatMillisToMmSs(durationSeconds * 1000L),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 10.sp
+                                    )
                                 }
-                                Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = videoChannel,
+                                    text = "• $videoChannel",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,
@@ -227,107 +233,102 @@ fun DurationSelectionDialog(
                     }
                 }
 
-                // Restriction / Live stream notice
-                if (isLive) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(AmberPrimary.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Tv,
-                            contentDescription = null,
-                            tint = AmberPrimary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Live Stream: Choose any duration tier for rewards!",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = AmberPrimary,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                } else if (availableTiers.size < WATCH_DURATION_TIERS.size) {
-                    Text(
-                        text = "Options capped by video length (${durationSeconds / 60}m)",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 2.dp)
-                    )
-                }
+                Spacer(modifier = Modifier.height(10.dp))
 
-                // List of selectable duration tiers
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Scrollable Tiers Section (Ensures Confirm button never gets pushed off screen)
+                Column(
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     availableTiers.forEach { tier ->
                         val isSelected = tier == selectedTier
 
-                        Card(
-                            shape = RoundedCornerShape(14.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (isSelected) AmberPrimary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (isSelected) AmberPrimary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                            border = androidx.compose.foundation.BorderStroke(
+                                width = if (isSelected) 1.5.dp else 1.dp,
+                                color = if (isSelected) AmberPrimary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
                             ),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .border(
-                                    width = if (isSelected) 2.dp else 1.dp,
-                                    color = if (isSelected) AmberPrimary else MaterialTheme.colorScheme.outlineVariant,
-                                    shape = RoundedCornerShape(14.dp)
-                                )
                                 .clickable { selectedTier = tier }
                                 .testTag("duration_tier_${tier.minutes}m")
                         ) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    RadioButton(
-                                        selected = isSelected,
-                                        onClick = { selectedTier = tier },
-                                        colors = RadioButtonDefaults.colors(
-                                            selectedColor = AmberPrimary
-                                        )
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
+                                    // Custom Radio / Check Indicator
+                                    Box(
+                                        modifier = Modifier
+                                            .size(20.dp)
+                                            .clip(CircleShape)
+                                            .background(if (isSelected) AmberPrimary else Color.Transparent)
+                                            .border(
+                                                width = 1.5.dp,
+                                                color = if (isSelected) AmberPrimary else MaterialTheme.colorScheme.outline,
+                                                shape = CircleShape
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (isSelected) {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = null,
+                                                tint = Color.Black,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.width(10.dp))
+
                                     Column {
                                         Text(
-                                            text = "${tier.minutes} Minutes Watch",
-                                            style = MaterialTheme.typography.titleMedium,
-                                            fontWeight = FontWeight.Bold
+                                            text = "${tier.minutes} Minutes",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isSelected) AmberPrimary else MaterialTheme.colorScheme.onSurface
                                         )
                                         Text(
-                                            text = "${tier.seconds} seconds verified play",
+                                            text = "${tier.seconds}s continuous play",
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontSize = 11.sp
                                         )
                                     }
                                 }
 
-                                // Coins Reward Badge
+                                // Coins Reward Tag
                                 Box(
                                     modifier = Modifier
-                                        .background(AmberPrimary, RoundedCornerShape(20.dp))
-                                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                                        .background(
+                                            if (isSelected) AmberPrimary else AmberPrimary.copy(alpha = 0.2f),
+                                            RoundedCornerShape(12.dp)
+                                        )
+                                        .padding(horizontal = 10.dp, vertical = 5.dp)
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Icon(
                                             imageVector = Icons.Default.MonetizationOn,
                                             contentDescription = null,
-                                            tint = Color.Black,
-                                            modifier = Modifier.size(16.dp)
+                                            tint = if (isSelected) Color.Black else AmberDark,
+                                            modifier = Modifier.size(14.dp)
                                         )
                                         Spacer(modifier = Modifier.width(4.dp))
                                         Text(
                                             text = "+${tier.coins} Coins",
                                             style = MaterialTheme.typography.labelMedium,
                                             fontWeight = FontWeight.ExtraBold,
-                                            color = Color.Black
+                                            color = if (isSelected) Color.Black else AmberDark,
+                                            fontSize = 12.sp
                                         )
                                     }
                                 }
@@ -336,29 +337,32 @@ fun DurationSelectionDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
-                // Confirm Button
+                // Bottom Anchored Confirm Button (ALWAYS visible and accessible)
                 Button(
                     onClick = { onConfirmSelection(selectedTier) },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(50.dp)
+                        .height(46.dp)
                         .testTag("confirm_duration_button"),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary)
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AmberPrimary,
+                        contentColor = Color.Black
+                    )
                 ) {
                     Icon(
                         imageVector = Icons.Default.PlayArrow,
                         contentDescription = null,
-                        tint = Color.Black
+                        tint = Color.Black,
+                        modifier = Modifier.size(18.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Watch for ${selectedTier.minutes} Min (+${selectedTier.coins} Coins)",
+                        text = "Watch ${selectedTier.minutes} Min (+${selectedTier.coins} Coins)",
                         fontWeight = FontWeight.Bold,
-                        color = Color.Black,
-                        fontSize = 15.sp
+                        fontSize = 14.sp
                     )
                 }
             }
