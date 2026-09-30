@@ -1,0 +1,148 @@
+package com.example.data
+
+/**
+ * State representing the lifecycle of a watch session.
+ */
+enum class SessionState {
+    IDLE,       // No task currently active
+    WAITING,    // Task started, waiting for YouTube playback to begin (up to 60s)
+    ACTIVE,     // Matching YouTube video actively tracking
+    INVALID,    // Session invalidated (e.g. wrong video detected after grace period or timeout)
+    COMPLETED   // Task requirement met, coins awarded
+}
+
+/**
+ * Result of comparing YouTube playing title against task title.
+ */
+enum class MatchResult {
+    UNKNOWN,
+    MATCH,
+    MISMATCH
+}
+
+/**
+ * Playback state derived from Android MediaController.
+ */
+enum class VideoPlaybackState {
+    NONE,
+    PLAYING,
+    PAUSED,
+    BUFFERING,
+    STOPPED
+}
+
+/**
+ * Result of oEmbed metadata fetch.
+ */
+sealed interface OEmbedResult {
+    data object Idle : OEmbedResult
+    data object Loading : OEmbedResult
+    data class Success(
+        val title: String,
+        val authorName: String,
+        val authorUrl: String = "",
+        val thumbnailUrl: String = ""
+    ) : OEmbedResult
+    data class Error(val message: String) : OEmbedResult
+}
+
+/**
+ * Transaction record for rewards stored locally.
+ */
+data class WalletTransaction(
+    val id: String,
+    val title: String,
+    val coins: Int,
+    val timestampMillis: Long
+)
+
+/**
+ * Diagnostic log event with human-readable timestamp.
+ */
+data class LogEvent(
+    val id: Long,
+    val timestamp: String,
+    val message: String,
+    val type: LogType = LogType.INFO
+)
+
+enum class LogType {
+    INFO,
+    SUCCESS,
+    WARNING,
+    ERROR
+}
+
+/**
+ * Live state of the YouTube title search & discovery process.
+ */
+data class SearchProgressState(
+    val isSearching: Boolean = false,
+    val stepText: String = "",
+    val typedQuery: String = "",
+    val isTyping: Boolean = false,
+    val progress: Float = 0f,
+    val foundRank: Int? = null,
+    val totalFound: Int = 0,
+    val channelFilterApplied: Boolean = false,
+    val thumbnailVerified: Boolean = false,
+    val candidateVideos: List<SearchResultItem> = emptyList()
+)
+
+/**
+ * Item discovered during YouTube search.
+ */
+data class SearchResultItem(
+    val videoId: String,
+    val title: String,
+    val channelName: String,
+    val thumbnailUrl: String
+)
+
+/**
+ * Watch duration tier with coin reward definition.
+ */
+data class WatchDurationTier(
+    val minutes: Int,
+    val seconds: Int,
+    val coins: Int,
+    val label: String
+)
+
+val WATCH_DURATION_TIERS = listOf(
+    WatchDurationTier(minutes = 3, seconds = 180, coins = 10, label = "3 Min"),
+    WatchDurationTier(minutes = 5, seconds = 300, coins = 15, label = "5 Min"),
+    WatchDurationTier(minutes = 10, seconds = 600, coins = 40, label = "10 Min"),
+    WatchDurationTier(minutes = 20, seconds = 1200, coins = 100, label = "20 Min"),
+    WatchDurationTier(minutes = 30, seconds = 1800, coins = 160, label = "30 Min")
+)
+
+/**
+ * Calculates highest reached milestone during continuous watch.
+ * If watched less than 3 minutes (180s), returns null (0 coins).
+ */
+fun calculateContinuousWatchMilestone(watchedSeconds: Int, selectedGoalSeconds: Int = Int.MAX_VALUE): WatchDurationTier? {
+    if (watchedSeconds < 180) return null
+    return WATCH_DURATION_TIERS
+        .filter { it.seconds <= watchedSeconds && it.seconds <= selectedGoalSeconds }
+        .maxByOrNull { it.seconds }
+}
+
+/**
+ * Multi-video Task Model representing a YouTube video task.
+ */
+data class VideoTaskItem(
+    val id: String,
+    val title: String,
+    val channelName: String,
+    val videoUrl: String,
+    val thumbnailUrl: String,
+    val durationSeconds: Int = 600, // <=0 means Live stream or unknown
+    val isLive: Boolean = false,
+    val isCompleted: Boolean = false,
+    val watchedMillis: Long = 0L,
+    val selectedDurationSeconds: Int = 180,
+    val rewardCoins: Int = 10,
+    val createdAt: Long = System.currentTimeMillis()
+)
+

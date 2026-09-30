@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Outer Watch / Timer Ring -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#F59E0B"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M 54,26 A 28,28 0 1,1 32,37" />
+    
+    <!-- Timer Stop Watch Top Button -->
+    <path
+        android:fillColor="#FBBF24"
+        android:pathData="M 50,21 H 58 V 24 H 50 Z" />
+    <path
+        android:fillColor="#FBBF24"
+        android:pathData="M 52.5,24 H 55.5 V 27 H 52.5 Z" />
+
+    <!-- Coin / Badge Inner Body -->
+    <path
+        android:fillColor="#D97706"
+        android:pathData="M 54,54 m -22,0 a 22,22 0 1,0 44,0 a 22,22 0 1,0 -44,0" />
+
+    <!-- Play Button Triangle (White) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M 48,43 L 64,54 L 48,65 Z" />
+
+    <!-- Coin Sparkle Accent -->
+    <path
+        android:fillColor="#FEF08A"
+        android:pathData="M 72,32 L 73.5,36.5 L 78,38 L 73.5,39.5 L 72,44 L 70.5,39.5 L 66,38 L 70.5,36.5 Z" />
+</vector>

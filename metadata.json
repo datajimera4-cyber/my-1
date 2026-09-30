@@ -1,0 +1,6 @@
+{
+  "name": "Kingo King",
+  "description": "Sit Back - Watch & Earn. Watch YouTube video tasks, track real watch time, and earn coins.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
