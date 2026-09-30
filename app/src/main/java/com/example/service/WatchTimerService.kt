@@ -66,7 +66,10 @@ class WatchTimerService : Service() {
         dataStoreManager = DataStoreManager(this)
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         floatingOverlayManager = FloatingTimerOverlayManager(this)
+        registerRepositoryCallbacks()
+    }
 
+    private fun registerRepositoryCallbacks() {
         // Setup repository callbacks
         WatchSessionRepository.onRedAlertTriggered = { title, message ->
             completionJob?.cancel()
@@ -141,6 +144,7 @@ class WatchTimerService : Service() {
                 return START_NOT_STICKY
             }
             ACTION_START, null -> {
+                registerRepositoryCallbacks()
                 completionJob?.cancel()
                 startForegroundWithNotification()
                 startTimerLoop()

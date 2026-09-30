@@ -39,7 +39,6 @@ object WatchSessionRepository {
 
     @Volatile
     var hasLeftAppForYouTube: Boolean = false
-        private set
 
     private val _taskIncompleteMessage = MutableStateFlow<String?>(null)
     val taskIncompleteMessage: StateFlow<String?> = _taskIncompleteMessage.asStateFlow()
@@ -155,7 +154,12 @@ object WatchSessionRepository {
         if (activeId != null) {
             onTaskIncompleteAndLocked?.invoke(activeId, reason, 12 * 60 * 60 * 1000L)
         }
-        onServiceTaskIncomplete?.invoke(activeId ?: "", reason, 12 * 60 * 60 * 1000L)
+        val serviceCallback = onServiceTaskIncomplete
+        if (serviceCallback != null) {
+            serviceCallback.invoke(activeId ?: "", reason, 12 * 60 * 60 * 1000L)
+        } else {
+            onRequestHideOverlay?.invoke()
+        }
     }
 
     fun triggerTaskLike() {

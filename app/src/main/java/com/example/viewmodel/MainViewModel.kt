@@ -569,8 +569,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return // Avoid duplicate search clicks
         }
 
+        val resolvedTaskId = taskId
+            ?: selectedTaskId.value
+            ?: videoTasks.value.find { it.videoUrl == videoUrl }?.id
+            ?: videoTasks.value.firstOrNull()?.id
+            ?: "default_task"
+
         // Check if task is currently locked (8h for completed, 12h for incomplete)
-        val currentTask = videoTasks.value.find { it.id == taskId }
+        val currentTask = videoTasks.value.find { it.id == resolvedTaskId }
         if (currentTask != null && currentTask.isLocked) {
             val remainStr = currentTask.getLockRemainingFormatted()
             if (currentTask.isCompleted) {
@@ -616,6 +622,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val title: String = oEmbedTitleCandidate ?: taskTitleCandidate ?: currentTask?.title ?: "YouTube Video Task"
             val author: String = oEmbedAuthorCandidate ?: taskChannelCandidate ?: currentTask?.channelName ?: ""
 
+            if (currentTask != null && oEmbedTitleCandidate != null && taskTitleCandidate == null) {
+                dataStoreManager.updateVideoTask(
+                    currentTask.copy(
+                        title = oEmbedTitleCandidate,
+                        channelName = oEmbedAuthorCandidate ?: currentTask.channelName
+                    )
+                )
+            }
+
             val targetVideoId = TitleMatcher.extractVideoId(effectiveUrl)
 
             if (liveSearchMode.value) {
@@ -632,7 +647,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     requiredSeconds = requiredSeconds,
                     initialWatchedMillis = 0L,
                     rewardCoins = rewardCoins,
-                    taskId = taskId
+                    taskId = resolvedTaskId
                 )
                 WatchTimerService.start(context)
 
@@ -659,22 +674,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     WatchSessionRepository.updateSearchProgress(progressState)
                 }
 
+                val targetUrlToLaunch = if (foundItem != null && foundItem.videoId.isNotEmpty()) {
+                    "https://www.youtube.com/watch?v=${foundItem.videoId}"
+                } else {
+                    effectiveUrl
+                }
+
+                YouTubeLiveSearchService.prepareForDirectWatch(
+                    title = title,
+                    channel = author,
+                    videoUrl = targetUrlToLaunch,
+                    videoId = targetVideoId
+                )
+
                 WatchSessionRepository.startTask(
                     taskTitle = title,
                     taskAuthor = author,
                     requiredSeconds = requiredSeconds,
                     initialWatchedMillis = 0L,
                     rewardCoins = rewardCoins,
-                    taskId = taskId
+                    taskId = resolvedTaskId
                 )
 
                 WatchTimerService.start(context)
-
-                val targetUrlToLaunch = if (foundItem != null && foundItem.videoId.isNotEmpty()) {
-                    "https://www.youtube.com/watch?v=${foundItem.videoId}"
-                } else {
-                    effectiveUrl
-                }
 
                 val openIntent = PermissionHelper.openVideoIntent(context, targetUrlToLaunch, title)
                 context.startActivity(openIntent)

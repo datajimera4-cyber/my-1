@@ -371,10 +371,18 @@ fun TasksListScreen(
                         }
                     },
                     onLikeClick = {
-                        viewModel.likeTask(task.id, task.title)
+                        android.widget.Toast.makeText(
+                            context,
+                            "Start Watch karein aur YouTube par asli video Like karein (+5 coins 1st time auto-add honge)!",
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
                     },
                     onCommentClick = {
-                        viewModel.commentTask(task.id, task.title)
+                        android.widget.Toast.makeText(
+                            context,
+                            "Start Watch karein aur YouTube par asli Comment post karein (+5 coins auto-add honge)!",
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
                     },
                     onCardClick = {
                         viewModel.selectTask(task)

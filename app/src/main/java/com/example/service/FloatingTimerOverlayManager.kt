@@ -217,7 +217,7 @@ class FloatingTimerOverlayManager(private val context: Context) {
             pillLayout.addView(milestoneTv)
             this.milestoneBadgeTextView = milestoneTv
 
-            // Auto Like Monitor Badge (NOT a manual clickable button - automatically detects YouTube like!)
+            // Auto Like Monitor Badge (Read-only status indicator - coins only awarded when liking inside YouTube!)
             val likeBadge = TextView(context).apply {
                 text = "👍 Like (+5c)"
                 setTextColor(Color.parseColor("#F59E0B"))
@@ -237,11 +237,18 @@ class FloatingTimerOverlayManager(private val context: Context) {
                 ).apply {
                     rightMargin = (5 * density).toInt()
                 }
+                setOnClickListener {
+                    if (isTaskLiked) {
+                        triggerCelebration("✓ Like bonus (+5c) already received once!")
+                    } else {
+                        triggerCelebration("👇 Tap YouTube's real Like button below video for +5c!")
+                    }
+                }
             }
             pillLayout.addView(likeBadge)
             this.likeBadgeView = likeBadge
 
-            // Auto Comment Monitor Badge (NOT a manual clickable button - automatically detects YouTube comment!)
+            // Auto Comment Monitor Badge (Read-only status indicator - coins only awarded when posting comment inside YouTube!)
             val commentBadge = TextView(context).apply {
                 text = "💬 +5c (0/2)"
                 setTextColor(Color.parseColor("#38BDF8")) // Sky blue
@@ -260,6 +267,13 @@ class FloatingTimerOverlayManager(private val context: Context) {
                     LinearLayout.LayoutParams.WRAP_CONTENT
                 ).apply {
                     rightMargin = (6 * density).toInt()
+                }
+                setOnClickListener {
+                    if (currentCommentCount >= 2) {
+                        triggerCelebration("✓ Max 2 Comment bonuses (+10c) already received!")
+                    } else {
+                        triggerCelebration("👇 Post a real comment inside YouTube for +5c!")
+                    }
                 }
             }
             pillLayout.addView(commentBadge)
@@ -312,12 +326,11 @@ class FloatingTimerOverlayManager(private val context: Context) {
             root.addView(pillLayout)
             root.addView(celebrationBox)
 
-            // Dragging & Tap Listener
+            // Dragging Listener (Does NOT switch app on tap so YouTube playback is never interrupted)
             var initialX = 0
             var initialY = 0
             var initialTouchX = 0f
             var initialTouchY = 0f
-            var isClick = true
 
             pillLayout.setOnTouchListener { _, event ->
                 when (event.action) {
@@ -326,15 +339,11 @@ class FloatingTimerOverlayManager(private val context: Context) {
                         initialY = params.y
                         initialTouchX = event.rawX
                         initialTouchY = event.rawY
-                        isClick = true
                         true
                     }
                     MotionEvent.ACTION_MOVE -> {
                         val deltaX = (event.rawX - initialTouchX).toInt()
                         val deltaY = (event.rawY - initialTouchY).toInt()
-                        if (Math.abs(deltaX) > 10 || Math.abs(deltaY) > 10) {
-                            isClick = false
-                        }
                         params.x = (initialX + deltaX).coerceAtLeast(0)
                         params.y = (initialY + deltaY).coerceAtLeast(30)
                         try {
@@ -343,13 +352,6 @@ class FloatingTimerOverlayManager(private val context: Context) {
                         true
                     }
                     MotionEvent.ACTION_UP -> {
-                        if (isClick) {
-                            // Tapping the overlay pill brings Kingo King app back to foreground
-                            val launchIntent = Intent(context, MainActivity::class.java).apply {
-                                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                            }
-                            context.startActivity(launchIntent)
-                        }
                         true
                     }
                     else -> false
@@ -372,7 +374,15 @@ class FloatingTimerOverlayManager(private val context: Context) {
                 handleLikeDetected()
             }
             WatchSessionRepository.onVideoAlreadyLikedDetected = { _ ->
-                handleLikeDetected()
+                // If video was already liked prior to this watch session, mark badge without awarding duplicate coins
+                val activeId = WatchSessionRepository.activeTaskId.value ?: "default_task"
+                overlayScope.launch {
+                    dataStoreManager.markTaskAlreadyLiked(activeId)
+                    runOnMain {
+                        isTaskLiked = true
+                        applyLikedBadgeStyle()
+                    }
+                }
             }
             WatchSessionRepository.onTaskCommentDetected = {
                 handleCommentDetected()
@@ -394,8 +404,8 @@ class FloatingTimerOverlayManager(private val context: Context) {
                     val cCount = commentMap[activeId] ?: 0
 
                     runOnMain {
+                        isTaskLiked = alreadyLiked
                         if (alreadyLiked) {
-                            isTaskLiked = true
                             applyLikedBadgeStyle()
                         }
                         currentCommentCount = cCount
@@ -408,11 +418,11 @@ class FloatingTimerOverlayManager(private val context: Context) {
 
     /**
      * Automatic Like Detection Handler:
-     * When user likes video in YouTube, accessibility detects it immediately.
-     * We instantly award +5 coins, update DataStore, update badge style to emerald "✓ Liked (+5c)",
-     * and trigger celebration!
+     * When user genuinely likes the target video in YouTube for the first time,
+     * award +5 coins ONCE, update DataStore, and update badge style to emerald "✓ Liked (+5c)".
      */
     private fun handleLikeDetected() {
+        if (isTaskLiked) return
         val taskId = WatchSessionRepository.activeTaskId.value ?: "default_task"
         val taskTitle = WatchSessionRepository.targetTaskTitle.value ?: "YouTube Video"
 
@@ -422,27 +432,26 @@ class FloatingTimerOverlayManager(private val context: Context) {
                 isTaskLiked = true
                 applyLikedBadgeStyle()
                 if (result.first) {
-                    triggerCelebration("🪙 +5 COINS ADDED FOR LIKE! 🎉")
-                    WatchSessionRepository.addLog("Auto-detected Like! +5 coins added.", LogType.SUCCESS)
-                } else {
-                    triggerCelebration("✓ Video Liked (+5c)")
+                    triggerCelebration("🪙 +5 COINS ADDED FOR YOUTUBE LIKE! 🎉")
+                    WatchSessionRepository.addLog("Auto-detected genuine YouTube Like! +5 coins added (1-time reward).", LogType.SUCCESS)
                 }
             }
         }
     }
 
     private fun handleCommentDetected() {
+        if (currentCommentCount >= 2) return
         val taskId = WatchSessionRepository.activeTaskId.value ?: "default_task"
         val taskTitle = WatchSessionRepository.targetTaskTitle.value ?: "YouTube Video"
 
         overlayScope.launch {
             val result = dataStoreManager.recordTaskComment(taskId, taskTitle)
             runOnMain {
-                currentCommentCount = (currentCommentCount + 1).coerceAtMost(2)
-                updateCommentBadge()
                 if (result.first) {
-                    triggerCelebration("🪙 +5 COINS ADDED FOR COMMENT! 🎉")
-                    WatchSessionRepository.addLog("Auto-detected Comment! +5 coins added (#$currentCommentCount).", LogType.SUCCESS)
+                    currentCommentCount = (currentCommentCount + 1).coerceAtMost(2)
+                    updateCommentBadge()
+                    triggerCelebration("🪙 +5 COINS ADDED FOR YOUTUBE COMMENT! 🎉")
+                    WatchSessionRepository.addLog("Auto-detected genuine YouTube Comment! +5 coins added (#$currentCommentCount).", LogType.SUCCESS)
                 }
             }
         }

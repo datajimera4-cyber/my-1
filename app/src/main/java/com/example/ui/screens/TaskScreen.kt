@@ -716,25 +716,29 @@ fun TaskScreen(
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = if (isTaskLiked) "✓ Earned +5 coins for liking" else "Like on YouTube or tap here (max 1)",
+                                text = if (isTaskLiked) "✓ Earned +5 coins for liking on YouTube" else "Like the video on YouTube while watching (1st time only)",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = if (isTaskLiked) SuccessGreen else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                         Button(
                             onClick = {
-                                viewModel.likeTask(currentActiveTaskId, targetVideoTitle)
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "YouTube par asli video Like karein (+5 coins 1st time auto-add honge)!",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
                             },
                             enabled = !isTaskLiked,
                             shape = RoundedCornerShape(8.dp),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isTaskLiked) SuccessGreen.copy(alpha = 0.2f) else AmberPrimary,
-                                contentColor = if (isTaskLiked) SuccessGreen else Color.Black
+                                containerColor = if (isTaskLiked) SuccessGreen.copy(alpha = 0.2f) else AmberPrimary.copy(alpha = 0.25f),
+                                contentColor = if (isTaskLiked) SuccessGreen else AmberPrimary
                             ),
                             modifier = Modifier.height(34.dp).testTag("task_like_bonus_btn")
                         ) {
                             Text(
-                                text = if (isTaskLiked) "✓ Liked" else "👍 +5c",
+                                text = if (isTaskLiked) "✓ Liked" else "👍 Auto +5c",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 11.sp
                             )
@@ -759,25 +763,29 @@ fun TaskScreen(
                                 text = if (currentComments >= 2)
                                     "✓ Maximum 2 comments completed (+10c)"
                                 else
-                                    "Comment on YouTube ($currentComments/2 done, max 2 = +10c)",
+                                    "Post a comment on YouTube ($currentComments/2 done, max 2 = +10c)",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = if (currentComments >= 2) SuccessGreen else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                         Button(
                             onClick = {
-                                viewModel.commentTask(currentActiveTaskId, targetVideoTitle)
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "YouTube par asli Comment post karein (+5 coins auto-add honge)!",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
                             },
                             enabled = currentComments < 2,
                             shape = RoundedCornerShape(8.dp),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (currentComments >= 2) SuccessGreen.copy(alpha = 0.2f) else AmberPrimary,
-                                contentColor = if (currentComments >= 2) SuccessGreen else Color.Black
+                                containerColor = if (currentComments >= 2) SuccessGreen.copy(alpha = 0.2f) else AmberPrimary.copy(alpha = 0.25f),
+                                contentColor = if (currentComments >= 2) SuccessGreen else AmberPrimary
                             ),
                             modifier = Modifier.height(34.dp).testTag("task_comment_bonus_btn")
                         ) {
                             Text(
-                                text = if (currentComments >= 2) "✓ Done (2/2)" else "💬 +5c ($currentComments/2)",
+                                text = if (currentComments >= 2) "✓ Done (2/2)" else "💬 Auto +5c ($currentComments/2)",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 11.sp
                             )
