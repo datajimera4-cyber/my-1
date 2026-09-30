@@ -225,6 +225,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 dataStoreManager.setWatchedMillis(millis)
             }
         }
+
+        viewModelScope.launch {
+            dataStoreManager.unlockAllTasks()
+        }
     }
 
     fun switchTab(screen: AppScreen) {

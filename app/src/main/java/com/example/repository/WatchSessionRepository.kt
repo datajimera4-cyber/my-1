@@ -103,6 +103,8 @@ object WatchSessionRepository {
     var onTaskLikeDetected: (() -> Unit)? = null
     var onVideoAlreadyLikedDetected: ((taskId: String) -> Unit)? = null
     var onTaskCommentDetected: (() -> Unit)? = null
+    var onRequestHideOverlay: (() -> Unit)? = null
+    var onRequestShowOverlay: (() -> Unit)? = null
     var onSessionInterrupted: ((reason: String) -> Unit)? = null
     var onTaskIncompleteAndLocked: ((taskId: String, reason: String, lockDurationMillis: Long) -> Unit)? = null
     var onMilestoneCoinsAwarded: ((coins: Int, title: String) -> Unit)? = null
@@ -351,20 +353,10 @@ object WatchSessionRepository {
         if (_sessionState.value == SessionState.ACTIVE) {
             val watchedSecs = (_watchedMillis.value / 1000).toInt()
             val requiredSecs = (_requiredMillis.value / 1000).toInt()
-            val activeId = _activeTaskId.value
-            val message = "⚠️ Task Incomplete: Aapne YouTube minimize ya doosri app mein switch kar diya (${watchedSecs}s / ${requiredSecs}s). Continuous watch break ho gayi aur yeh task 12 ghante ke liye lock ho gaya hai."
-            addLog(message, LogType.WARNING)
-
-            _sessionState.value = SessionState.INVALID
-            _watchedMillis.value = 0L
-            _currentMilestoneTier.value = null
+            addLog("Watching paused (${watchedSecs}s / ${requiredSecs}s). Re-open YouTube to resume.", LogType.INFO)
+            _playbackState.value = VideoPlaybackState.PAUSED
             lastTickRealtime = 0L
-            onSaveProgressNeeded?.invoke(0L)
-
-            if (activeId != null) {
-                onTaskIncompleteAndLocked?.invoke(activeId, message, 12 * 60 * 60 * 1000L)
-            }
-            onSessionInterrupted?.invoke(message)
+            onRequestHideOverlay?.invoke()
         }
     }
 
@@ -379,40 +371,11 @@ object WatchSessionRepository {
         if (isAppInForeground != inForeground) {
             isAppInForeground = inForeground
             if (inForeground) {
-                // If the user just launched the task in the last 6 seconds, the app was still transitioning to YouTube, do not interrupt!
-                val elapsedSinceLaunch = System.currentTimeMillis() - taskLaunchTimestampMillis
-                if (elapsedSinceLaunch < 6000L) {
-                    return
-                }
-
                 com.example.service.YouTubeLiveSearchService.isYouTubeInForeground = false
                 _playbackState.value = VideoPlaybackState.PAUSED
                 lastTickRealtime = 0L
-
-                val watchedSecs = (_watchedMillis.value / 1000).toInt()
-                val requiredSecs = (_requiredMillis.value / 1000).toInt()
-                val activeId = _activeTaskId.value
-                if (_sessionState.value == SessionState.ACTIVE) {
-                    if (watchedSecs < 180 || _watchedMillis.value < _requiredMillis.value) {
-                        val milestone = _currentMilestoneTier.value
-                        val message = if (milestone != null) {
-                            "⚠️ Milestone of ${milestone.minutes}m was reached (+${milestone.coins}c), but you returned before completing the full goal (${watchedSecs}s / ${requiredSecs}s). This task is now locked for 12 hours."
-                        } else {
-                            "⚠️ Task Incomplete: You watched only ${watchedSecs}s out of ${requiredSecs}s (minimum 3 minutes required). Continuous watch was broken. This task is now locked for 12 hours."
-                        }
-                        addLog(message, LogType.WARNING)
-                        _sessionState.value = SessionState.IDLE
-                        _watchedMillis.value = 0L
-                        _currentMilestoneTier.value = null
-                        onSaveProgressNeeded?.invoke(0L)
-                        if (activeId != null) {
-                            onTaskIncompleteAndLocked?.invoke(activeId, message, 12 * 60 * 60 * 1000L)
-                        }
-                        onSessionInterrupted?.invoke(message)
-                    }
-                } else {
-                    addLog("App opened in foreground", LogType.INFO)
-                }
+                onRequestHideOverlay?.invoke()
+                addLog("App opened in foreground - watching paused", LogType.INFO)
             } else {
                 addLog("Switched out of app: Ready for video watch tracking", LogType.INFO)
             }

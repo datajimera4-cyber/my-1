@@ -96,20 +96,23 @@ class YouTubeLiveSearchService : AccessibilityService() {
             event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
             if (pkg == "com.google.android.youtube") {
                 isYouTubeInForeground = true
+                WatchSessionRepository.setPlaybackPlaying(true)
+                WatchSessionRepository.onRequestShowOverlay?.invoke()
             } else if (pkg.isNotBlank() &&
                 pkg != myPkg &&
                 !pkg.contains("systemui") &&
                 !pkg.contains("accessibility") &&
-                !pkg.contains("inputmethod")
+                !pkg.contains("inputmethod") &&
+                !pkg.contains("overlay")
             ) {
                 isYouTubeInForeground = false
                 WatchSessionRepository.setPlaybackPlaying(false)
-                if (WatchSessionRepository.sessionState.value == com.example.data.SessionState.ACTIVE) {
-                    WatchSessionRepository.onAppSwitchedOrMinimized()
-                }
+                WatchSessionRepository.onRequestHideOverlay?.invoke()
             }
         } else if (pkg == "com.google.android.youtube") {
             isYouTubeInForeground = true
+            WatchSessionRepository.setPlaybackPlaying(true)
+            WatchSessionRepository.onRequestShowOverlay?.invoke()
         }
 
         // Detect user interactions on YouTube like and comment buttons

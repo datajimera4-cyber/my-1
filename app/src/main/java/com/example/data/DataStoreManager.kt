@@ -308,6 +308,15 @@ class DataStoreManager(private val context: Context) {
         }
     }
 
+    suspend fun unlockAllTasks() {
+        context.dataStore.edit { prefs ->
+            val json = prefs[KEY_VIDEO_TASKS]
+            val currentList = if (json.isNullOrBlank()) getDefaultTasks().toMutableList() else parseVideoTasksJson(json).toMutableList()
+            val updated = currentList.map { it.copy(lockedUntilMillis = 0L) }
+            prefs[KEY_VIDEO_TASKS] = serializeVideoTasksJson(updated)
+        }
+    }
+
     suspend fun recordTaskComment(taskId: String, taskTitle: String = "YouTube Video"): Pair<Boolean, String> {
         var added = false
         var message = ""

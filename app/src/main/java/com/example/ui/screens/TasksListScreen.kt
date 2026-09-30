@@ -352,7 +352,12 @@ fun TasksListScreen(
                     isLiked = isLiked,
                     commentsCount = comments,
                     activeWatchedMillis = if (isCurrentlyActive) currentWatchedMillis else task.watchedMillis,
-                    onStartClick = { taskForDurationSelection = task },
+                    onStartClick = {
+                        if (task.isLocked) {
+                            viewModel.unlockTask(task.id)
+                        }
+                        taskForDurationSelection = task
+                    },
                     onLikeClick = {
                         viewModel.likeTask(task.id, task.title)
                     },
@@ -360,6 +365,9 @@ fun TasksListScreen(
                         viewModel.commentTask(task.id, task.title)
                     },
                     onCardClick = {
+                        if (task.isLocked) {
+                            viewModel.unlockTask(task.id)
+                        }
                         viewModel.selectTask(task)
                         viewModel.navigateTo(AppScreen.TASK)
                     }
@@ -598,6 +606,32 @@ fun VideoTaskCard(
                             fontSize = 10.sp
                         )
                     }
+
+                    if (task.isLocked) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .padding(4.dp)
+                                .background(Color(0xDDDC2626), RoundedCornerShape(4.dp))
+                                .padding(horizontal = 5.dp, vertical = 2.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Lock,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(10.dp)
+                                )
+                                Spacer(modifier = Modifier.width(2.dp))
+                                Text(
+                                    text = "LOCKED",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 9.sp
+                                )
+                            }
+                        }
+                    }
                 }
 
                 Spacer(modifier = Modifier.width(12.dp))
@@ -626,7 +660,10 @@ fun VideoTaskCard(
                     Spacer(modifier = Modifier.height(6.dp))
 
                     // Coins reward tag
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
                         Box(
                             modifier = Modifier
                                 .background(AmberPrimary.copy(alpha = 0.2f), RoundedCornerShape(12.dp))
@@ -646,13 +683,14 @@ fun VideoTaskCard(
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.ExtraBold,
                                     color = AmberDark,
-                                    fontSize = 11.sp
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                             }
                         }
 
                         if (task.isCompleted) {
-                            Spacer(modifier = Modifier.width(6.dp))
                             Box(
                                 modifier = Modifier
                                     .background(SuccessGreen.copy(alpha = 0.2f), RoundedCornerShape(12.dp))
@@ -671,33 +709,9 @@ fun VideoTaskCard(
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Bold,
                                         color = SuccessGreen,
-                                        fontSize = 10.sp
-                                    )
-                                }
-                            }
-                        }
-
-                        if (task.isLocked) {
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Box(
-                                modifier = Modifier
-                                    .background(Color(0xFFEF4444).copy(alpha = 0.2f), RoundedCornerShape(12.dp))
-                                    .padding(horizontal = 8.dp, vertical = 3.dp)
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.Lock,
-                                        contentDescription = null,
-                                        tint = Color(0xFFEF4444),
-                                        modifier = Modifier.size(12.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(3.dp))
-                                    Text(
-                                        text = "Locked (${task.getLockRemainingFormatted()})",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFFEF4444),
-                                        fontSize = 10.sp
+                                        fontSize = 10.sp,
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
                                 }
                             }
@@ -758,14 +772,14 @@ fun VideoTaskCard(
                 // Tier range info
                 Text(
                     text = when {
-                        task.isLocked -> "🔒 Locked (12h)"
+                        task.isLocked -> "Tap Unlock & Watch to play"
                         task.isLive -> "Live Stream • Goals: 3m - 30m"
                         task.durationSeconds >= 1800 -> "Goals: 3m, 5m, 10m, 20m, 30m"
                         task.durationSeconds >= 600 -> "Goals: 3m, 5m, 10m"
                         else -> "Goals: 3m"
                     },
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (task.isLocked) Color(0xFFEF4444) else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 11.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -777,27 +791,25 @@ fun VideoTaskCard(
                 // Start / Watch Button
                 Button(
                     onClick = onStartClick,
-                    enabled = !task.isLocked,
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (task.isLocked) Color(0xFF334155) else if (task.isCompleted) MaterialTheme.colorScheme.surfaceVariant else AmberPrimary,
-                        disabledContainerColor = Color(0xFF334155)
+                        containerColor = if (task.isLocked) AmberPrimary else if (task.isCompleted) MaterialTheme.colorScheme.surfaceVariant else AmberPrimary
                     ),
                     modifier = Modifier
                         .height(36.dp)
                         .testTag("task_action_button_${task.id}")
                 ) {
                     Icon(
-                        imageVector = if (task.isLocked) Icons.Default.Lock else if (task.isCompleted) Icons.Default.CheckCircle else Icons.Default.PlayArrow,
+                        imageVector = if (task.isCompleted) Icons.Default.CheckCircle else Icons.Default.PlayArrow,
                         contentDescription = null,
-                        tint = if (task.isLocked) Color(0xFF94A3B8) else if (task.isCompleted) MaterialTheme.colorScheme.onSurfaceVariant else Color.Black,
+                        tint = if (task.isCompleted) MaterialTheme.colorScheme.onSurfaceVariant else Color.Black,
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = if (task.isLocked) "Locked (${task.getLockRemainingFormatted()})" else if (task.isCompleted) "Rewatch" else "Start Watch",
+                        text = if (task.isLocked) "Unlock & Watch" else if (task.isCompleted) "Rewatch" else "Start Watch",
                         fontWeight = FontWeight.Bold,
-                        color = if (task.isLocked) Color(0xFF94A3B8) else if (task.isCompleted) MaterialTheme.colorScheme.onSurfaceVariant else Color.Black,
+                        color = if (task.isCompleted) MaterialTheme.colorScheme.onSurfaceVariant else Color.Black,
                         fontSize = 12.sp
                     )
                 }

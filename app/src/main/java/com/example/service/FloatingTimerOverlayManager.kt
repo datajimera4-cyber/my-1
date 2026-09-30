@@ -342,6 +342,12 @@ class FloatingTimerOverlayManager(private val context: Context) {
             WatchSessionRepository.onTaskCommentDetected = {
                 handleCommentDetected()
             }
+            WatchSessionRepository.onRequestHideOverlay = {
+                hideOverlay()
+            }
+            WatchSessionRepository.onRequestShowOverlay = {
+                showOverlay()
+            }
 
             // Check if active task is already liked or commented
             val activeId = WatchSessionRepository.activeTaskId.value ?: "default_task"

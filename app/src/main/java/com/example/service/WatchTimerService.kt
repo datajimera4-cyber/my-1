@@ -173,23 +173,11 @@ class WatchTimerService : Service() {
                 val sessionActive = WatchSessionRepository.sessionState.value == SessionState.ACTIVE
                 val elapsedSinceLaunch = System.currentTimeMillis() - WatchSessionRepository.taskLaunchTimestampMillis
 
-                // If user minimized YouTube, switched to another app, or returned to our app while session was active:
-                // We provide an initial 8-second transition window so YouTube has time to launch and buffer.
-                if (elapsedSinceLaunch > 8000L && sessionActive && (!isYtForeground || isAppForeground)) {
-                    WatchSessionRepository.onAppSwitchedOrMinimized()
-                    if (floatingOverlayManager.isOverlayAttached()) {
-                        floatingOverlayManager.hideOverlay()
-                    }
-                    stopForeground(STOP_FOREGROUND_REMOVE)
-                    stopSelf()
-                    return@launch
-                }
-
                 // Video is paused ONLY if explicitly paused by user in YouTube, or media session explicitly signaled paused
                 val isExplicitlyPaused = YouTubeLiveSearchService.isVideoExplicitlyPaused ||
                         (WatchSessionRepository.mediaSessionDetected.value && WatchSessionRepository.playbackState.value == VideoPlaybackState.PAUSED)
 
-                // Timer ticks when YouTube is in foreground and not explicitly paused
+                // Timer ticks when YouTube is active in foreground and not explicitly paused
                 val isPlaying = !isAppForeground && isYtForeground && sessionActive && !isExplicitlyPaused
 
                 WatchSessionRepository.setPlaybackPlaying(isPlaying)
@@ -199,9 +187,8 @@ class WatchTimerService : Service() {
                 val requiredMillis = WatchSessionRepository.requiredMillis.value
                 val currentSec = (watchedMillis / 1000).toInt()
 
-                // Overlay shows when task is running and either YouTube is in foreground or during the initial launch transition
-                val shouldShowOverlay = (sessionActive || WatchSessionRepository.sessionState.value == SessionState.WAITING) &&
-                        (!isAppForeground || elapsedSinceLaunch < 8000L)
+                // Overlay shows ONLY when task is active and YouTube is in foreground
+                val shouldShowOverlay = sessionActive && isYtForeground && !isAppForeground
 
                 if (shouldShowOverlay) {
                     if (!floatingOverlayManager.isOverlayAttached()) {
@@ -214,8 +201,8 @@ class WatchTimerService : Service() {
                         isPaused = !isPlaying
                     )
                 } else {
-                    // When user returns to our app or minimizes/switches to any other app,
-                    // floating overlay disappears immediately
+                    // When user returns to our app, minimizes YouTube, or closes YouTube:
+                    // Floating overlay disappears immediately!
                     if (floatingOverlayManager.isOverlayAttached()) {
                         floatingOverlayManager.hideOverlay()
                     }
