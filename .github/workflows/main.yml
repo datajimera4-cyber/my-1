@@ -1,4 +1,4 @@
-name: Build APK
+name: Build APKs
 on: [push, workflow_dispatch]
 jobs:
   build:
@@ -13,5 +13,9 @@ jobs:
         run: |
           keytool -genkeypair -v -keystore debug.keystore -storepass android -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
       - run: gradle assembleDebug --stacktrace
-      - uses: actions/upload-artifact@v4
-        with: { name: all-apks, path: "**/build/outputs/apk/debug/*.apk" }
+      - name: Upload Admin APK
+        uses: actions/upload-artifact@v4
+        with: { name: Kingo-Admin-APK, path: "**/build/outputs/apk/admin/debug/*.apk" }
+      - name: Upload User APK
+        uses: actions/upload-artifact@v4
+        with: { name: Kingo-King-User-APK, path: "**/build/outputs/apk/user/debug/*.apk" }
