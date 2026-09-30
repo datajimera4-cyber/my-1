@@ -127,13 +127,14 @@ object CloudDriveServerManager {
             if (response.isSuccessful) {
                 val json = try { JSONObject(body) } catch (_: Exception) { null }
                 if (json != null && json.optBoolean("success", true)) {
-                    // Pull remote tasks into local dataStore
+                    // Pull remote tasks into local dataStore (skipping tasks deleted locally)
+                    val deletedIds = dataStoreManager.deletedTaskIdsFlow.first()
                     val remoteTasksArr = json.optJSONArray("tasks")
                     if (remoteTasksArr != null && remoteTasksArr.length() > 0) {
                         for (i in 0 until remoteTasksArr.length()) {
                             val obj = remoteTasksArr.getJSONObject(i)
                             val taskId = obj.optString("id")
-                            if (taskId.isNotBlank() && localTasks.none { it.id == taskId }) {
+                            if (taskId.isNotBlank() && !deletedIds.contains(taskId) && localTasks.none { it.id == taskId }) {
                                 val newTask = VideoTaskItem(
                                     id = taskId,
                                     title = obj.optString("title", "Remote Task"),

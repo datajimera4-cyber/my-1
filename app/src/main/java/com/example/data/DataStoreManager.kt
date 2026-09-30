@@ -35,6 +35,21 @@ class DataStoreManager(private val context: Context) {
         private val KEY_COMMENT_COUNTS = stringPreferencesKey("comment_counts_json")
         private val KEY_CLOUD_SERVER_URL = stringPreferencesKey("cloud_server_url")
         private val KEY_CLOUD_SERVER_STATUS = stringPreferencesKey("cloud_server_status")
+        private val KEY_DELETED_TASK_IDS = stringPreferencesKey("deleted_task_ids_json")
+    }
+
+    val deletedTaskIdsFlow: Flow<Set<String>> = context.dataStore.data.map { prefs ->
+        val json = prefs[KEY_DELETED_TASK_IDS] ?: "[]"
+        try {
+            val arr = JSONArray(json)
+            val set = mutableSetOf<String>()
+            for (i in 0 until arr.length()) {
+                set.add(arr.getString(i))
+            }
+            set
+        } catch (_: Exception) {
+            emptySet()
+        }
     }
 
     val cloudServerUrlFlow: Flow<String> = context.dataStore.data.map { prefs ->
@@ -121,11 +136,10 @@ class DataStoreManager(private val context: Context) {
 
     val videoTasksFlow: Flow<List<VideoTaskItem>> = context.dataStore.data.map { prefs ->
         val json = prefs[KEY_VIDEO_TASKS]
-        if (json.isNullOrBlank()) {
+        if (json == null) {
             getDefaultTasks()
         } else {
-            val list = parseVideoTasksJson(json)
-            if (list.isEmpty()) getDefaultTasks() else list
+            parseVideoTasksJson(json)
         }
     }
 
@@ -544,11 +558,24 @@ class DataStoreManager(private val context: Context) {
 
     suspend fun adminDeleteVideoTask(taskId: String) {
         context.dataStore.edit { prefs ->
-            val list = parseVideoTasksJson(prefs[KEY_VIDEO_TASKS] ?: "").toMutableList()
+            val json = prefs[KEY_VIDEO_TASKS]
+            val list = if (json == null) getDefaultTasks().toMutableList() else parseVideoTasksJson(json).toMutableList()
             list.removeAll { it.id == taskId }
             prefs[KEY_VIDEO_TASKS] = serializeVideoTasksJson(list)
+
+            val deletedJson = prefs[KEY_DELETED_TASK_IDS] ?: "[]"
+            val deletedArr = try { JSONArray(deletedJson) } catch (_: Exception) { JSONArray() }
+            deletedArr.put(taskId)
+            prefs[KEY_DELETED_TASK_IDS] = deletedArr.toString()
+
             if (prefs[KEY_SELECTED_TASK_ID] == taskId) {
-                prefs.remove(KEY_SELECTED_TASK_ID)
+                val nextTask = list.firstOrNull()
+                if (nextTask != null) {
+                    prefs[KEY_SELECTED_TASK_ID] = nextTask.id
+                    prefs[KEY_ACTIVE_VIDEO_URL] = nextTask.videoUrl
+                } else {
+                    prefs.remove(KEY_SELECTED_TASK_ID)
+                }
             }
         }
     }

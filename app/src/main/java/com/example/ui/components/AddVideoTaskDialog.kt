@@ -92,23 +92,28 @@ fun AddVideoTaskDialog(
     var isLive by remember { mutableStateOf(false) }
     var durationMinutesText by remember { mutableStateOf("10") }
     var isFetching by remember { mutableStateOf(false) }
+    var isSubmitting by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     fun fetchDetails(targetUrl: String) {
-        val trimmed = targetUrl.trim()
-        if (trimmed.isEmpty()) return
+        val cleaned = TitleMatcher.extractCleanYouTubeUrl(targetUrl.trim())
+        if (cleaned.isEmpty()) return
+        val vid = TitleMatcher.extractVideoId(cleaned)
+        if (!vid.isNullOrBlank() && thumbnailUrl.isBlank()) {
+            thumbnailUrl = "https://img.youtube.com/vi/$vid/hqdefault.jpg"
+        }
         isFetching = true
         errorMessage = null
 
         scope.launch {
-            val result = OEmbedFetcher.fetchOEmbed(trimmed)
+            val result = OEmbedFetcher.fetchOEmbed(cleaned)
             isFetching = false
             when (result) {
                 is OEmbedResult.Success -> {
                     titleInput = result.title
                     channelInput = result.authorName
                     thumbnailUrl = result.thumbnailUrl.ifEmpty {
-                        TitleMatcher.getThumbnailUrl(trimmed) ?: ""
+                        TitleMatcher.getThumbnailUrl(cleaned) ?: ""
                     }
                     if (result.title.contains("live", ignoreCase = true) ||
                         result.title.contains("24/7", ignoreCase = true)
@@ -117,8 +122,13 @@ fun AddVideoTaskDialog(
                     }
                 }
                 is OEmbedResult.Error -> {
-                    errorMessage = result.message
-                    thumbnailUrl = TitleMatcher.getThumbnailUrl(trimmed) ?: ""
+                    thumbnailUrl = TitleMatcher.getThumbnailUrl(cleaned) ?: ""
+                    if (titleInput.isBlank() && !vid.isNullOrBlank()) {
+                        titleInput = "YouTube Video ($vid)"
+                    }
+                    if (channelInput.isBlank()) {
+                        channelInput = "YouTube Creator"
+                    }
                 }
                 else -> {}
             }
@@ -188,13 +198,17 @@ fun AddVideoTaskDialog(
                 OutlinedTextField(
                     value = urlInput,
                     onValueChange = { raw ->
-                        val cleaned = TitleMatcher.extractCleanYouTubeUrl(raw)
-                        urlInput = cleaned
                         val sharedTitle = TitleMatcher.extractSharedTitle(raw)
                         if (!sharedTitle.isNullOrBlank() && titleInput.isBlank()) {
                             titleInput = sharedTitle
                         }
-                        if (cleaned.contains("youtu", ignoreCase = true)) {
+                        val cleaned = if (raw.contains(" ") || raw.contains("\n")) {
+                            TitleMatcher.extractCleanYouTubeUrl(raw)
+                        } else {
+                            raw
+                        }
+                        urlInput = cleaned
+                        if (TitleMatcher.extractVideoId(cleaned) != null || cleaned.contains("youtu", ignoreCase = true)) {
                             fetchDetails(cleaned)
                         }
                     },
@@ -253,6 +267,31 @@ fun AddVideoTaskDialog(
                         }
                     }
                 }
+
+                // Editable Title & Channel Fields (auto-filled from link, or manually editable)
+                OutlinedTextField(
+                    value = titleInput,
+                    onValueChange = { titleInput = it },
+                    label = { Text("Video Title (Auto-filled or Edit)") },
+                    placeholder = { Text("Video Title") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("add_task_title_input"),
+                    shape = RoundedCornerShape(12.dp),
+                    singleLine = true
+                )
+
+                OutlinedTextField(
+                    value = channelInput,
+                    onValueChange = { channelInput = it },
+                    label = { Text("Channel Name (Auto-filled or Edit)") },
+                    placeholder = { Text("YouTube Channel") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("add_task_channel_input"),
+                    shape = RoundedCornerShape(12.dp),
+                    singleLine = true
+                )
 
                 // Error notice if any
                 errorMessage?.let { err ->
@@ -407,28 +446,54 @@ fun AddVideoTaskDialog(
                 // Create Task Button
                 Button(
                     onClick = {
-                        val finalUrl = TitleMatcher.cleanYouTubeUrl(urlInput.trim()).ifEmpty { urlInput.trim() }
-                        val finalTitle = titleInput.ifBlank { "YouTube Video" }
-                        val finalChannel = channelInput.ifBlank { "YouTube Creator" }
-                        val finalThumb = thumbnailUrl.ifBlank { TitleMatcher.getThumbnailUrl(finalUrl) ?: "" }
-                        val minutes = durationMinutesText.toIntOrNull() ?: 10
-                        val durationSec = if (isLive) 0 else minutes * 60
+                        if (isSubmitting) return@Button
+                        scope.launch {
+                            isSubmitting = true
+                            val rawCleaned = TitleMatcher.extractCleanYouTubeUrl(urlInput.trim())
+                            val finalUrl = TitleMatcher.cleanYouTubeUrl(rawCleaned).ifEmpty { rawCleaned }
+                            var resolvedTitle = titleInput.trim()
+                            var resolvedChannel = channelInput.trim()
+                            var resolvedThumb = thumbnailUrl.trim()
 
-                        val newTask = VideoTaskItem(
-                            id = UUID.randomUUID().toString(),
-                            title = finalTitle,
-                            channelName = finalChannel,
-                            videoUrl = finalUrl,
-                            thumbnailUrl = finalThumb,
-                            durationSeconds = durationSec,
-                            isLive = isLive,
-                            isCompleted = false,
-                            rewardCoins = 10,
-                            selectedDurationSeconds = 180
-                        )
-                        onTaskAdded(newTask)
+                            if (resolvedTitle.isBlank()) {
+                                val fetched = OEmbedFetcher.fetchOEmbed(finalUrl)
+                                if (fetched is OEmbedResult.Success) {
+                                    resolvedTitle = fetched.title
+                                    if (resolvedChannel.isBlank()) resolvedChannel = fetched.authorName
+                                    if (resolvedThumb.isBlank()) resolvedThumb = fetched.thumbnailUrl
+                                }
+                            }
+
+                            val vid = TitleMatcher.extractVideoId(finalUrl)
+                            val finalTitle = resolvedTitle.ifBlank {
+                                if (!vid.isNullOrBlank()) "YouTube Video ($vid)" else "YouTube Video Task"
+                            }
+                            val finalChannel = resolvedChannel.ifBlank { "YouTube Creator" }
+                            val finalThumb = resolvedThumb.ifBlank { TitleMatcher.getThumbnailUrl(finalUrl) ?: "" }
+                            val minutes = (durationMinutesText.toIntOrNull() ?: 10).coerceAtLeast(3)
+                            val durationSec = if (isLive) 0 else minutes * 60
+                            val targetTier = com.example.data.WATCH_DURATION_TIERS
+                                .filter { isLive || it.minutes <= minutes }
+                                .maxByOrNull { it.minutes }
+                                ?: com.example.data.WATCH_DURATION_TIERS.first()
+
+                            val newTask = VideoTaskItem(
+                                id = UUID.randomUUID().toString(),
+                                title = finalTitle,
+                                channelName = finalChannel,
+                                videoUrl = finalUrl,
+                                thumbnailUrl = finalThumb,
+                                durationSeconds = durationSec,
+                                isLive = isLive,
+                                isCompleted = false,
+                                rewardCoins = targetTier.coins,
+                                selectedDurationSeconds = targetTier.seconds
+                            )
+                            isSubmitting = false
+                            onTaskAdded(newTask)
+                        }
                     },
-                    enabled = urlInput.isNotBlank(),
+                    enabled = urlInput.isNotBlank() && !isSubmitting,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(50.dp)
@@ -436,14 +501,25 @@ fun AddVideoTaskDialog(
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary)
                 ) {
-                    Icon(imageVector = Icons.Default.Add, contentDescription = null, tint = Color.Black)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Add Task to List",
-                        fontWeight = FontWeight.Bold,
-                        color = Color.Black,
-                        fontSize = 15.sp
-                    )
+                    if (isSubmitting) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.Black, strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Adding Task...",
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Black,
+                            fontSize = 15.sp
+                        )
+                    } else {
+                        Icon(imageVector = Icons.Default.Add, contentDescription = null, tint = Color.Black)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Add Task to List",
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Black,
+                            fontSize = 15.sp
+                        )
+                    }
                 }
             }
         }

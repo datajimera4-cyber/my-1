@@ -173,9 +173,11 @@ class WatchTimerService : Service() {
                 val sessionActive = WatchSessionRepository.sessionState.value == SessionState.ACTIVE
                 val elapsedSinceLaunch = System.currentTimeMillis() - WatchSessionRepository.taskLaunchTimestampMillis
 
-                // Video is paused ONLY if explicitly paused by user in YouTube, or media session explicitly signaled paused
-                val isExplicitlyPaused = YouTubeLiveSearchService.isVideoExplicitlyPaused ||
-                        (WatchSessionRepository.mediaSessionDetected.value && WatchSessionRepository.playbackState.value == VideoPlaybackState.PAUSED)
+                // Video is paused ONLY if explicitly paused by user in YouTube, or media session explicitly signaled paused while audio is not playing
+                val isExplicitlyPaused = !isAudioPlaying && elapsedSinceLaunch > 3000L && (
+                        YouTubeLiveSearchService.isVideoExplicitlyPaused ||
+                        WatchSessionRepository.isMediaSessionExplicitlyPaused
+                )
 
                 // Timer ticks when YouTube is active in foreground and not explicitly paused
                 val isPlaying = !isAppForeground && isYtForeground && sessionActive && !isExplicitlyPaused

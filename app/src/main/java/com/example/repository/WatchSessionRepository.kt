@@ -33,6 +33,10 @@ object WatchSessionRepository {
     var isAppInForeground: Boolean = false
         private set
 
+    @Volatile
+    var isMediaSessionExplicitlyPaused: Boolean = false
+        private set
+
     private val _matchResult = MutableStateFlow(MatchResult.UNKNOWN)
     val matchResult: StateFlow<MatchResult> = _matchResult.asStateFlow()
 
@@ -181,10 +185,12 @@ object WatchSessionRepository {
         _currentMediaArtist.value = taskAuthor
         _matchResult.value = MatchResult.MATCH
         _playbackState.value = VideoPlaybackState.PLAYING
+        isMediaSessionExplicitlyPaused = false
         lastTickRealtime = android.os.SystemClock.elapsedRealtime()
-        _mediaSessionDetected.value = true
+        _mediaSessionDetected.value = false
         _sessionState.value = SessionState.ACTIVE
         com.example.service.YouTubeLiveSearchService.isYouTubeInForeground = true
+        com.example.service.YouTubeLiveSearchService.isVideoExplicitlyPaused = false
 
         addLog("Task started. Target: \"$taskTitle\". Continuous watch session initialized from 00:00!", LogType.SUCCESS)
 
@@ -199,6 +205,7 @@ object WatchSessionRepository {
         _watchedMillis.value = 0L
         _currentMilestoneTier.value = null
         isMilestoneAwarded = false
+        isMediaSessionExplicitlyPaused = false
         _activeTaskId.value = taskId
         _redAlertMessage.value = null
         _isGracePeriodActive.value = false
@@ -232,14 +239,25 @@ object WatchSessionRepository {
             else -> VideoPlaybackState.NONE
         }
 
-        _playbackState.value = state
-        addLog("YouTube playback state: $state", LogType.INFO)
-
-        if (state != VideoPlaybackState.PLAYING) {
-            // Paused/Buffering/Stopped: reset last tick so paused time is never counted
-            lastTickRealtime = 0L
+        val elapsedSinceLaunch = System.currentTimeMillis() - taskLaunchTimestampMillis
+        when (state) {
+            VideoPlaybackState.PLAYING, VideoPlaybackState.BUFFERING -> {
+                isMediaSessionExplicitlyPaused = false
+                _playbackState.value = VideoPlaybackState.PLAYING
+            }
+            VideoPlaybackState.PAUSED, VideoPlaybackState.STOPPED -> {
+                if (elapsedSinceLaunch > 4000L) {
+                    isMediaSessionExplicitlyPaused = true
+                    _playbackState.value = state
+                    lastTickRealtime = 0L
+                }
+            }
+            VideoPlaybackState.NONE -> {
+                isMediaSessionExplicitlyPaused = false
+            }
         }
 
+        addLog("YouTube playback state: $state", LogType.INFO)
         recomputeMatchAndState()
     }
 
@@ -261,6 +279,7 @@ object WatchSessionRepository {
     fun onSessionDestroyed() {
         addLog("YouTube media session destroyed", LogType.WARNING)
         _mediaSessionDetected.value = false
+        isMediaSessionExplicitlyPaused = false
         _playbackState.value = VideoPlaybackState.NONE
         lastTickRealtime = 0L
         recomputeMatchAndState()
@@ -377,6 +396,14 @@ object WatchSessionRepository {
                 onRequestHideOverlay?.invoke()
                 addLog("App opened in foreground - watching paused", LogType.INFO)
             } else {
+                if (_sessionState.value == SessionState.ACTIVE) {
+                    com.example.service.YouTubeLiveSearchService.isYouTubeInForeground = true
+                    com.example.service.YouTubeLiveSearchService.isVideoExplicitlyPaused = false
+                    isMediaSessionExplicitlyPaused = false
+                    _playbackState.value = VideoPlaybackState.PLAYING
+                    lastTickRealtime = SystemClock.elapsedRealtime()
+                    onRequestShowOverlay?.invoke()
+                }
                 addLog("Switched out of app: Ready for video watch tracking", LogType.INFO)
             }
         }

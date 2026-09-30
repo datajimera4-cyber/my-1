@@ -1,5 +1,6 @@
 package com.example.data
 
+import com.example.util.TitleMatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -13,7 +14,8 @@ object OEmbedFetcher {
 
     /**
      * Fetches YouTube video metadata (title, author_name, author_url, thumbnail_url)
-     * using the public no-key oEmbed endpoint on Dispatchers.IO.
+     * using the public no-key oEmbed endpoint on Dispatchers.IO, with automatic URL normalization
+     * and fallback for shorts/live/restricted links.
      */
     suspend fun fetchOEmbed(rawVideoUrl: String): OEmbedResult = withContext(Dispatchers.IO) {
         val trimmedUrl = rawVideoUrl.trim()
@@ -24,24 +26,59 @@ object OEmbedFetcher {
             )
         }
 
-        if (!trimmedUrl.startsWith("http://") && !trimmedUrl.startsWith("https://")) {
-            return@withContext OEmbedResult.Error(
-                "Invalid video URL format. Expected an HTTP/HTTPS YouTube link."
-            )
+        val normalizedUrl = TitleMatcher.extractCleanYouTubeUrl(trimmedUrl)
+        val videoId = TitleMatcher.extractVideoId(normalizedUrl)
+        val canonicalUrl = if (!videoId.isNullOrBlank()) {
+            "https://www.youtube.com/watch?v=$videoId"
+        } else if (normalizedUrl.startsWith("http://") || normalizedUrl.startsWith("https://")) {
+            normalizedUrl
+        } else {
+            "https://$normalizedUrl"
         }
 
-        var connection: HttpURLConnection? = null
-        try {
-            val encodedUrl = URLEncoder.encode(trimmedUrl, "UTF-8")
-            val endpoint = "https://www.youtube.com/oembed?url=$encodedUrl&format=json"
-            val url = URL(endpoint)
+        val fallbackThumb = if (!videoId.isNullOrBlank()) {
+            "https://img.youtube.com/vi/$videoId/hqdefault.jpg"
+        } else ""
 
+        // 1. Try YouTube official oEmbed
+        val primaryResult = tryOEmbedEndpoint(
+            "https://www.youtube.com/oembed?url=${URLEncoder.encode(canonicalUrl, "UTF-8")}&format=json",
+            fallbackThumb
+        )
+        if (primaryResult is OEmbedResult.Success) {
+            return@withContext primaryResult
+        }
+
+        // 2. Fallback to noembed.com (handles some links where YouTube oEmbed returns 401/403)
+        val noembedResult = tryOEmbedEndpoint(
+            "https://noembed.com/embed?url=${URLEncoder.encode(canonicalUrl, "UTF-8")}",
+            fallbackThumb
+        )
+        if (noembedResult is OEmbedResult.Success) {
+            return@withContext noembedResult
+        }
+
+        // 3. Fallback to parsing YouTube watch page HTML <title> if videoId is valid
+        if (!videoId.isNullOrBlank()) {
+            val htmlResult = tryFetchWatchPageMetadata(canonicalUrl, fallbackThumb)
+            if (htmlResult is OEmbedResult.Success) {
+                return@withContext htmlResult
+            }
+        }
+
+        return@withContext primaryResult
+    }
+
+    private fun tryOEmbedEndpoint(endpointUrl: String, fallbackThumb: String): OEmbedResult {
+        var connection: HttpURLConnection? = null
+        return try {
+            val url = URL(endpointUrl)
             connection = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
-                connectTimeout = 10_000
-                readTimeout = 10_000
+                connectTimeout = 8_000
+                readTimeout = 8_000
                 setRequestProperty("Accept", "application/json")
-                setRequestProperty("User-Agent", "WatchEarn-Android/1.0")
+                setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
             }
 
             val responseCode = connection.responseCode
@@ -53,12 +90,12 @@ object OEmbedFetcher {
                 val title = jsonObject.optString("title", "").trim()
                 val authorName = jsonObject.optString("author_name", "").trim()
                 val authorUrl = jsonObject.optString("author_url", "")
-                val thumbnailUrl = jsonObject.optString("thumbnail_url", "")
+                val thumbnailUrl = jsonObject.optString("thumbnail_url", "").ifEmpty { fallbackThumb }
 
                 if (title.isNotEmpty()) {
                     OEmbedResult.Success(
                         title = title,
-                        authorName = authorName,
+                        authorName = authorName.ifEmpty { "YouTube Creator" },
                         authorUrl = authorUrl,
                         thumbnailUrl = thumbnailUrl
                     )
@@ -74,6 +111,45 @@ object OEmbedFetcher {
             }
         } catch (e: Exception) {
             OEmbedResult.Error("Network error: ${e.localizedMessage ?: "Unable to connect to YouTube"}")
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
+    private fun tryFetchWatchPageMetadata(watchUrl: String, fallbackThumb: String): OEmbedResult {
+        var connection: HttpURLConnection? = null
+        return try {
+            val url = URL(watchUrl)
+            connection = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 8_000
+                readTimeout = 8_000
+                setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36")
+            }
+            if (connection.responseCode == HttpURLConnection.HTTP_OK) {
+                val html = BufferedReader(InputStreamReader(connection.inputStream)).use { it.readText() }
+                val titleMatch = Regex("<title>(.*?)</title>", RegexOption.IGNORE_CASE).find(html)
+                val rawTitle = titleMatch?.groupValues?.getOrNull(1)
+                    ?.replace("- YouTube", "")
+                    ?.replace("&#39;", "'")
+                    ?.replace("&quot;", "\"")
+                    ?.replace("&amp;", "&")
+                    ?.trim() ?: ""
+                val authorMatch = Regex("\"ownerChannelName\":\"(.*?)\"").find(html)
+                val authorName = authorMatch?.groupValues?.getOrNull(1)?.trim() ?: "YouTube Creator"
+
+                if (rawTitle.isNotBlank() && !rawTitle.equals("YouTube", ignoreCase = true)) {
+                    return OEmbedResult.Success(
+                        title = rawTitle,
+                        authorName = authorName,
+                        authorUrl = "",
+                        thumbnailUrl = fallbackThumb
+                    )
+                }
+            }
+            OEmbedResult.Error("Could not parse watch page metadata.")
+        } catch (e: Exception) {
+            OEmbedResult.Error("Metadata fallback failed: ${e.localizedMessage}")
         } finally {
             connection?.disconnect()
         }

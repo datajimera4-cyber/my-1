@@ -91,28 +91,31 @@ class YouTubeLiveSearchService : AccessibilityService() {
 
         val pkg = event.packageName?.toString() ?: ""
         val myPkg = packageName ?: "com.example"
+        val activeRootPkg = try { rootInActiveWindow?.packageName?.toString() } catch (_: Exception) { null }
 
-        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
-            event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
-            if (pkg == "com.google.android.youtube") {
-                isYouTubeInForeground = true
+        if (pkg == "com.google.android.youtube" || activeRootPkg == "com.google.android.youtube") {
+            isYouTubeInForeground = true
+            if (!isVideoExplicitlyPaused) {
                 WatchSessionRepository.setPlaybackPlaying(true)
-                WatchSessionRepository.onRequestShowOverlay?.invoke()
-            } else if (pkg.isNotBlank() &&
+            }
+            WatchSessionRepository.onRequestShowOverlay?.invoke()
+        } else if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            val elapsedSinceLaunch = System.currentTimeMillis() - WatchSessionRepository.taskLaunchTimestampMillis
+            if (pkg.isNotBlank() &&
                 pkg != myPkg &&
-                !pkg.contains("systemui") &&
-                !pkg.contains("accessibility") &&
-                !pkg.contains("inputmethod") &&
-                !pkg.contains("overlay")
+                elapsedSinceLaunch > 3500L &&
+                !pkg.contains("systemui", ignoreCase = true) &&
+                !pkg.contains("accessibility", ignoreCase = true) &&
+                !pkg.contains("inputmethod", ignoreCase = true) &&
+                !pkg.contains("keyboard", ignoreCase = true) &&
+                !pkg.contains("overlay", ignoreCase = true) &&
+                !pkg.contains("permission", ignoreCase = true) &&
+                pkg != "android"
             ) {
                 isYouTubeInForeground = false
                 WatchSessionRepository.setPlaybackPlaying(false)
                 WatchSessionRepository.onRequestHideOverlay?.invoke()
             }
-        } else if (pkg == "com.google.android.youtube") {
-            isYouTubeInForeground = true
-            WatchSessionRepository.setPlaybackPlaying(true)
-            WatchSessionRepository.onRequestShowOverlay?.invoke()
         }
 
         // Detect user interactions on YouTube like and comment buttons
@@ -142,6 +145,12 @@ class YouTubeLiveSearchService : AccessibilityService() {
                         WatchSessionRepository.onTaskLikeDetected?.invoke()
                     } else if (isComment) {
                         WatchSessionRepository.onTaskCommentDetected?.invoke()
+                    } else if (desc.equals("Pause video", ignoreCase = true)) {
+                        isVideoExplicitlyPaused = true
+                        WatchSessionRepository.setPlaybackPlaying(false)
+                    } else if (desc.equals("Play video", ignoreCase = true)) {
+                        isVideoExplicitlyPaused = false
+                        WatchSessionRepository.setPlaybackPlaying(true)
                     }
                     node.recycle()
                 }
@@ -151,9 +160,9 @@ class YouTubeLiveSearchService : AccessibilityService() {
         // If target was already clicked or idle, monitor playback controls & like status in YouTube
         if (hasClickedTarget || currentPhase == LiveSearchPhase.IDLE || currentPhase == LiveSearchPhase.COMPLETED) {
             if (isYouTubeInForeground && event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
-                val activeNode = event.source ?: rootInActiveWindow
-                checkPlaybackControls(activeNode)
-                checkVideoLikeState(activeNode)
+                val rootWin = rootInActiveWindow ?: event.source
+                checkPlaybackControls(rootWin)
+                checkVideoLikeState(event.source ?: rootWin)
             }
             return
         }
@@ -518,30 +527,54 @@ class YouTubeLiveSearchService : AccessibilityService() {
     private fun checkPlaybackControls(node: AccessibilityNodeInfo?) {
         if (node == null) return
         try {
-            val desc = node.contentDescription?.toString() ?: ""
-            if (desc.contains("Play video", ignoreCase = true) || desc.equals("Play", ignoreCase = true)) {
-                // Video is currently paused in YouTube
-                isVideoExplicitlyPaused = true
-                WatchSessionRepository.setPlaybackPlaying(false)
-                return
-            } else if (desc.contains("Pause video", ignoreCase = true) || desc.equals("Pause", ignoreCase = true)) {
-                // Video is actively playing in YouTube
-                isVideoExplicitlyPaused = false
-                WatchSessionRepository.setPlaybackPlaying(true)
-                return
-            } else if (desc.contains("Replay video", ignoreCase = true) || desc.equals("Replay", ignoreCase = true)) {
-                // Video ended
-                isVideoExplicitlyPaused = true
-                WatchSessionRepository.setPlaybackPlaying(false)
-                return
-            }
-
-            for (i in 0 until node.childCount) {
-                val child = node.getChild(i) ?: continue
-                checkPlaybackControls(child)
-                child.recycle()
+            val state = findPlayerControlState(node)
+            when (state) {
+                true -> {
+                    // Explicit "Play video" / "Replay video" player control is visible -> video is paused
+                    isVideoExplicitlyPaused = true
+                    WatchSessionRepository.setPlaybackPlaying(false)
+                }
+                false, null -> {
+                    // Either "Pause video" is visible OR player controls auto-hid while video is playing
+                    if (isVideoExplicitlyPaused) {
+                        isVideoExplicitlyPaused = false
+                    }
+                    WatchSessionRepository.setPlaybackPlaying(true)
+                }
             }
         } catch (_: Exception) {}
+    }
+
+    /**
+     * Returns true if the YouTube video player control is showing "Play video" / "Replay video" (meaning paused),
+     * false if showing "Pause video" (meaning playing), or null if player controls overlay is hidden (normal playing state).
+     */
+    private fun findPlayerControlState(node: AccessibilityNodeInfo?): Boolean? {
+        if (node == null) return null
+        val desc = node.contentDescription?.toString()?.trim() ?: ""
+        val viewId = node.viewIdResourceName ?: ""
+        val isPlayerControlBtn = viewId.contains("player_control_play_pause_replay_button", ignoreCase = true) ||
+                viewId.contains("player_control", ignoreCase = true)
+
+        if (desc.equals("Play video", ignoreCase = true) ||
+            desc.equals("Replay video", ignoreCase = true) ||
+            (isPlayerControlBtn && (desc.equals("Play", ignoreCase = true) || desc.equals("Replay", ignoreCase = true)))
+        ) {
+            return true
+        }
+        if (desc.equals("Pause video", ignoreCase = true) ||
+            (isPlayerControlBtn && desc.equals("Pause", ignoreCase = true))
+        ) {
+            return false
+        }
+
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            val result = findPlayerControlState(child)
+            child.recycle()
+            if (result != null) return result
+        }
+        return null
     }
 
     private fun checkVideoLikeState(node: AccessibilityNodeInfo?) {

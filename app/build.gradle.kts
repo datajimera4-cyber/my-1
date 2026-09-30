@@ -13,26 +13,14 @@ android {
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
+    applicationId = "com.example.kingo.user"
     minSdk = 26
     targetSdk = 36
     versionCode = 1
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-  }
-
-  flavorDimensions += "role"
-  productFlavors {
-    create("admin") {
-      dimension = "role"
-      applicationId = "com.example.kingo.admin"
-      buildConfigField("String", "APP_ROLE", "\"ADMIN\"")
-    }
-    create("user") {
-      dimension = "role"
-      applicationId = "com.example.kingo.user"
-      buildConfigField("String", "APP_ROLE", "\"USER\"")
-    }
+    buildConfigField("String", "APP_ROLE", "\"USER\"")
   }
 
   signingConfigs {
@@ -148,14 +136,3 @@ dependencies {
   "ksp"(libs.moshi.kotlin.codegen)
 }
 
-afterEvaluate {
-  val copyTask = tasks.register<Copy>("copyDebugApkForStudio") {
-    from(layout.buildDirectory.file("outputs/apk/user/debug/app-user-debug.apk"))
-    into(layout.buildDirectory.dir("outputs/apk/debug"))
-    rename { "app-debug.apk" }
-  }
-
-  tasks.named("assembleDebug").configure {
-    finalizedBy(copyTask)
-  }
-}

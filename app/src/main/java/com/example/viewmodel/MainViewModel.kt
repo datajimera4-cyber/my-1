@@ -251,10 +251,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun addVideoTask(task: VideoTaskItem) {
-        val cleanUrl = TitleMatcher.cleanYouTubeUrl(task.videoUrl)
-        val cleanedTask = task.copy(videoUrl = cleanUrl)
+        val rawClean = TitleMatcher.extractCleanYouTubeUrl(task.videoUrl)
+        val cleanUrl = TitleMatcher.cleanYouTubeUrl(rawClean).ifEmpty { rawClean }
+        val thumb = task.thumbnailUrl.ifBlank { TitleMatcher.getThumbnailUrl(cleanUrl) ?: "" }
+        val cleanedTask = task.copy(videoUrl = cleanUrl, thumbnailUrl = thumb)
+        _currentVideoUrl.value = cleanUrl
+        _selectedTierSeconds.value = cleanedTask.selectedDurationSeconds
+        _selectedTierCoins.value = cleanedTask.rewardCoins
+
         viewModelScope.launch {
             dataStoreManager.addVideoTask(cleanedTask)
+            dataStoreManager.setSelectedTaskId(cleanedTask.id)
+            dataStoreManager.setActiveVideoUrl(cleanUrl)
+
+            if (cleanedTask.title.isBlank() || cleanedTask.title == "YouTube Video" || cleanedTask.title.startsWith("YouTube Video (")) {
+                val result = OEmbedFetcher.fetchOEmbed(cleanUrl)
+                if (result is OEmbedResult.Success) {
+                    _oEmbedState.value = result
+                    val updated = cleanedTask.copy(
+                        title = result.title,
+                        channelName = result.authorName.ifBlank { cleanedTask.channelName },
+                        thumbnailUrl = result.thumbnailUrl.ifBlank { cleanedTask.thumbnailUrl }
+                    )
+                    dataStoreManager.updateVideoTask(updated)
+                }
+            } else {
+                _oEmbedState.value = OEmbedResult.Success(
+                    title = cleanedTask.title,
+                    authorName = cleanedTask.channelName,
+                    authorUrl = "",
+                    thumbnailUrl = cleanedTask.thumbnailUrl
+                )
+            }
             WatchSessionRepository.addLog("Created new video task: \"${cleanedTask.title}\"", LogType.SUCCESS)
         }
     }
@@ -315,11 +343,49 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setVideoUrl(url: String) {
-        val cleanUrl = TitleMatcher.cleanYouTubeUrl(url).ifEmpty { url }
+        val rawClean = TitleMatcher.extractCleanYouTubeUrl(url)
+        val cleanUrl = TitleMatcher.cleanYouTubeUrl(rawClean).ifEmpty { rawClean }
         _currentVideoUrl.value = cleanUrl
+        _oEmbedState.value = OEmbedResult.Loading
         viewModelScope.launch {
             dataStoreManager.setActiveVideoUrl(cleanUrl)
-            fetchOEmbed(cleanUrl)
+            val result = OEmbedFetcher.fetchOEmbed(cleanUrl)
+            _oEmbedState.value = result
+            val thumb = (result as? OEmbedResult.Success)?.thumbnailUrl?.ifBlank { null }
+                ?: TitleMatcher.getThumbnailUrl(cleanUrl)
+                ?: ""
+            val vid = TitleMatcher.extractVideoId(cleanUrl)
+            val resolvedTitle = (result as? OEmbedResult.Success)?.title
+                ?: if (!vid.isNullOrBlank()) "YouTube Video ($vid)" else "YouTube Video Task"
+            val resolvedAuthor = (result as? OEmbedResult.Success)?.authorName?.ifBlank { null }
+                ?: "YouTube Creator"
+
+            val activeId = selectedTaskId.value
+            val existingTask = videoTasks.value.find { it.id == activeId }
+            if (existingTask != null) {
+                val updatedTask = existingTask.copy(
+                    title = resolvedTitle,
+                    channelName = resolvedAuthor,
+                    videoUrl = cleanUrl,
+                    thumbnailUrl = thumb,
+                    isCompleted = false,
+                    lockedUntilMillis = 0L
+                )
+                dataStoreManager.updateVideoTask(updatedTask)
+            } else {
+                val newTask = VideoTaskItem(
+                    id = "task_${System.currentTimeMillis()}",
+                    title = resolvedTitle,
+                    channelName = resolvedAuthor,
+                    videoUrl = cleanUrl,
+                    thumbnailUrl = thumb,
+                    durationSeconds = 600,
+                    rewardCoins = _selectedTierCoins.value,
+                    selectedDurationSeconds = _selectedTierSeconds.value
+                )
+                dataStoreManager.addVideoTask(newTask)
+                dataStoreManager.setSelectedTaskId(newTask.id)
+            }
         }
     }
 

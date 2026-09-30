@@ -40,7 +40,18 @@ object TitleMatcher {
                 normPlayingTitle.contains(normTaskTitle) ||
                 normTaskTitle.contains(normPlayingTitle)
 
-        if (!titleMatches) {
+        val stopWords = setOf(
+            "the", "and", "official", "video", "music", "audio", "with",
+            "from", "feat", "song", "lyrics", "full", "remaster", "remastered"
+        )
+        val taskWords = normTaskTitle.split(" ").map { it.trim() }.filter { it.length >= 3 && !stopWords.contains(it) }
+        val matchingWords = taskWords.count { word -> normPlayingTitle.contains(word) }
+        val keywordMatches = taskWords.isNotEmpty() &&
+                ((matchingWords >= 2 && matchingWords.toFloat() / taskWords.size.coerceAtLeast(1) >= 0.5f) ||
+                 (taskWords.size == 1 && matchingWords == 1) ||
+                 (normTaskTitle.length >= 10 && normPlayingTitle.contains(normTaskTitle.take(12))))
+
+        if (!titleMatches && !keywordMatches) {
             return MatchResult.MISMATCH
         }
 
@@ -56,7 +67,8 @@ object TitleMatcher {
                     normPlayingArtist.contains(normTaskAuthor) ||
                     normTaskAuthor.contains(normPlayingArtist) ||
                     compactArtist.contains(compactAuthor) ||
-                    compactAuthor.contains(compactArtist)
+                    compactAuthor.contains(compactArtist) ||
+                    matchingWords >= 3
             if (!artistMatches) {
                 // Channel clearly differs (e.g. reupload or completely different track)
                 return MatchResult.MISMATCH
@@ -71,19 +83,22 @@ object TitleMatcher {
      */
     fun extractVideoId(url: String?): String? {
         if (url.isNullOrBlank()) return null
+        val trimmed = url.trim()
         val patterns = listOf(
-            Regex("(?:https?:\\/\\/)?(?:www\\.|m\\.)?youtube\\.com\\/watch\\?v=([a-zA-Z0-9_-]{11})"),
+            Regex("(?:v=|vi=)([a-zA-Z0-9_-]{11})"),
+            Regex("(?:https?:\\/\\/)?(?:www\\.|m\\.|music\\.)?youtube\\.com\\/watch\\?v=([a-zA-Z0-9_-]{11})"),
             Regex("(?:https?:\\/\\/)?(?:www\\.|m\\.)?youtu\\.be\\/([a-zA-Z0-9_-]{11})"),
             Regex("(?:https?:\\/\\/)?(?:www\\.|m\\.)?youtube\\.com\\/embed\\/([a-zA-Z0-9_-]{11})"),
             Regex("(?:https?:\\/\\/)?(?:www\\.|m\\.)?youtube\\.com\\/shorts\\/([a-zA-Z0-9_-]{11})"),
             Regex("(?:https?:\\/\\/)?(?:www\\.|m\\.)?youtube\\.com\\/live\\/([a-zA-Z0-9_-]{11})"),
+            Regex("(?:https?:\\/\\/)?(?:www\\.|m\\.)?youtube\\.com\\/v\\/([a-zA-Z0-9_-]{11})"),
             Regex("^[a-zA-Z0-9_-]{11}$")
         )
 
         for (pattern in patterns) {
-            val match = pattern.find(url.trim())
+            val match = pattern.find(trimmed)
             if (match != null) {
-                return match.groupValues.getOrNull(1) ?: match.value
+                return match.groupValues.getOrNull(1)?.takeIf { it.isNotBlank() } ?: match.value
             }
         }
         return null
@@ -96,12 +111,17 @@ object TitleMatcher {
     fun extractCleanYouTubeUrl(text: String?): String {
         if (text.isNullOrBlank()) return ""
         val trimmed = text.trim()
-        val urlRegex = Regex("""https?://(?:www\.|m\.)?(?:youtube\.com|youtu\.be)[^\s]+""")
+        val urlRegex = Regex("""(?:https?://)?(?:www\.|m\.|music\.)?(?:youtube\.com|youtu\.be)[^\s]+""", RegexOption.IGNORE_CASE)
         val match = urlRegex.find(trimmed)
         val candidate = match?.value ?: trimmed
         val videoId = extractVideoId(candidate)
         return if (!videoId.isNullOrBlank()) {
             "https://www.youtube.com/watch?v=$videoId"
+        } else if (!candidate.startsWith("http://", ignoreCase = true) &&
+            !candidate.startsWith("https://", ignoreCase = true) &&
+            (candidate.contains("youtube.com", ignoreCase = true) || candidate.contains("youtu.be", ignoreCase = true))
+        ) {
+            "https://$candidate"
         } else {
             candidate
         }

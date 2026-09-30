@@ -117,11 +117,16 @@ fun ChangeVideoLinkDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    val trimmed = inputUrl.trim()
-                    if (trimmed.isBlank() || (!trimmed.startsWith("http://") && !trimmed.startsWith("https://"))) {
-                        errorMessage = "Please enter a valid HTTP/HTTPS YouTube link."
+                    val cleaned = TitleMatcher.extractCleanYouTubeUrl(inputUrl.trim())
+                    if (cleaned.isBlank()) {
+                        errorMessage = "Please enter a valid YouTube link."
                     } else {
-                        onSaveLink(trimmed)
+                        val finalUrl = if (cleaned.startsWith("http://") || cleaned.startsWith("https://")) {
+                            cleaned
+                        } else {
+                            "https://$cleaned"
+                        }
+                        onSaveLink(finalUrl)
                         onDismiss()
                     }
                 },
