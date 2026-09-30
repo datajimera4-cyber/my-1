@@ -32,18 +32,30 @@ class YouTubeLiveSearchService : AccessibilityService() {
         var targetSearchChannel: String? = null
 
         @Volatile
+        var targetVideoUrl: String? = null
+
+        @Volatile
+        var targetVideoId: String? = null
+
+        @Volatile
         var hasClickedTarget: Boolean = false
+
+        @Volatile
+        var lastClickTime: Long = 0L
 
         @Volatile
         var currentPhase: LiveSearchPhase = LiveSearchPhase.IDLE
 
         private var scrollAttempts = 0
 
-        fun armSearchTrigger(title: String, channel: String?) {
+        fun armSearchTrigger(title: String, channel: String?, videoUrl: String? = null, videoId: String? = null) {
             targetSearchTitle = title
             targetSearchChannel = channel
+            targetVideoUrl = videoUrl
+            targetVideoId = videoId
             hasClickedTarget = false
             scrollAttempts = 0
+            lastClickTime = 0L
             currentPhase = LiveSearchPhase.OPEN_SEARCH_BAR
             WatchSessionRepository.addLog("Live Human Search armed for: \"$title\"", LogType.INFO)
         }
@@ -51,8 +63,11 @@ class YouTubeLiveSearchService : AccessibilityService() {
         fun disarm() {
             targetSearchTitle = null
             targetSearchChannel = null
+            targetVideoUrl = null
+            targetVideoId = null
             hasClickedTarget = false
             scrollAttempts = 0
+            lastClickTime = 0L
             currentPhase = LiveSearchPhase.IDLE
         }
     }
@@ -365,18 +380,58 @@ class YouTubeLiveSearchService : AccessibilityService() {
                     }
 
                     val toClick = if (clickTarget != null && clickTarget.isClickable) clickTarget else node
-                    val clicked = toClick.performAction(AccessibilityNodeInfo.ACTION_CLICK) ||
-                            node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
 
-                    if (clicked) {
-                        hasClickedTarget = true
-                        currentPhase = LiveSearchPhase.COMPLETED
-                        WatchSessionRepository.addLog(
-                            "🎉 Human search: Found and clicked target video! Video is now playing.",
-                            LogType.SUCCESS
-                        )
-                        return true
+                    val nodeRect = android.graphics.Rect()
+                    node.getBoundsInScreen(nodeRect)
+                    val cardRect = android.graphics.Rect()
+                    toClick.getBoundsInScreen(cardRect)
+
+                    // Calculate real screen coordinates to simulate a human finger tap
+                    val tapX = if (nodeRect.width() > 0) nodeRect.centerX() else cardRect.centerX()
+                    val tapY = if (cardRect.height() > 100) {
+                        // Tapping the thumbnail (upper 35% of card) opens the full video player
+                        cardRect.top + (cardRect.height() * 0.35f).toInt()
+                    } else if (nodeRect.height() > 0) {
+                        nodeRect.centerY()
+                    } else {
+                        cardRect.centerY()
                     }
+
+                    // 1. Dispatch real human touch tap on video thumbnail/card
+                    dispatchTapGesture(tapX, tapY)
+
+                    // 2. Perform accessibility click on both the title node and card container
+                    val clicked = toClick.performAction(AccessibilityNodeInfo.ACTION_CLICK) ||
+                            node.performAction(AccessibilityNodeInfo.ACTION_CLICK) ||
+                            (node.parent?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true)
+
+                    hasClickedTarget = true
+                    lastClickTime = System.currentTimeMillis()
+                    currentPhase = LiveSearchPhase.COMPLETED
+                    WatchSessionRepository.addLog(
+                        "🎉 Human search: Tapped target video thumbnail ($tapX, $tapY)! Opening full watch player.",
+                        LogType.SUCCESS
+                    )
+
+                    // Fallback insurance: If YouTube still remains in search feed 1.2s later (playing inline without opening full watch screen),
+                    // launch video directly so user is guaranteed to get the full video player!
+                    val fallbackUrl = targetVideoUrl
+                    if (!fallbackUrl.isNullOrBlank()) {
+                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                            try {
+                                val currentRoot = rootInActiveWindow
+                                val searchBoxStillVisible = currentRoot?.let { findSearchEditText(it) != null } ?: false
+                                currentRoot?.recycle()
+                                if (searchBoxStillVisible) {
+                                    WatchSessionRepository.addLog("Ensuring full player view: Opening video in YouTube player", LogType.INFO)
+                                    val openIntent = com.example.util.PermissionHelper.openVideoIntent(applicationContext, fallbackUrl, targetTitle)
+                                    applicationContext.startActivity(openIntent)
+                                }
+                            } catch (_: Exception) {}
+                        }, 1200L)
+                    }
+
+                    return true
                 }
             }
         }
@@ -406,6 +461,21 @@ class YouTubeLiveSearchService : AccessibilityService() {
                 return true
             }
             child.recycle()
+        }
+        return false
+    }
+
+    private fun dispatchTapGesture(x: Int, y: Int): Boolean {
+        if (x <= 0 || y <= 0) return false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            val path = android.graphics.Path().apply {
+                moveTo(x.toFloat(), y.toFloat())
+            }
+            val stroke = android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 75)
+            val gesture = android.accessibilityservice.GestureDescription.Builder()
+                .addStroke(stroke)
+                .build()
+            return dispatchGesture(gesture, null, null)
         }
         return false
     }

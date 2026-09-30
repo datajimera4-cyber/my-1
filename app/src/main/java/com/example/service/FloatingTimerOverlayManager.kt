@@ -39,6 +39,11 @@ class FloatingTimerOverlayManager(private val context: Context) {
     fun showOverlay() {
         if (isAttached || !Settings.canDrawOverlays(context)) return
 
+        val density = context.resources.displayMetrics.density
+        val screenWidth = context.resources.displayMetrics.widthPixels
+        val defaultPillWidth = (190 * density).toInt()
+        val sideX = (screenWidth - defaultPillWidth - (12 * density).toInt()).coerceAtLeast(20)
+
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -49,12 +54,13 @@ class FloatingTimerOverlayManager(private val context: Context) {
                 WindowManager.LayoutParams.TYPE_PHONE
             },
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                     WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = 30
-            y = 180
+            x = sideX
+            y = (190 * density).toInt()
         }
 
         val root = FrameLayout(context).apply {
@@ -78,8 +84,6 @@ class FloatingTimerOverlayManager(private val context: Context) {
             background = bg
             elevation = 12 * density
         }
-
-        val density = context.resources.displayMetrics.density
 
         // Green live dot
         val liveDot = View(context).apply {

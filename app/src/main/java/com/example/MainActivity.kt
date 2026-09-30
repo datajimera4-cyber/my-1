@@ -36,6 +36,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         NotificationChannels.createChannels(this)
+        com.example.admin.AdminWebServer.startServer(this, com.example.data.DataStoreManager(this)) { _, _ -> }
 
         setContent {
             WatchEarnTheme {

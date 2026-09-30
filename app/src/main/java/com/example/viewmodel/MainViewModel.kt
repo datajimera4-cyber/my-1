@@ -436,7 +436,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 } catch (_: Exception) {}
 
                 // Arm the accessibility trigger to auto-type in search bar and click target video card
-                YouTubeLiveSearchService.armSearchTrigger(title, author)
+                YouTubeLiveSearchService.armSearchTrigger(title, author, effectiveUrl, targetVideoId)
 
                 WatchSessionRepository.startTask(
                     taskTitle = title,

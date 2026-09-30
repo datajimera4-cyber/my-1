@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.MonetizationOn
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Warning
@@ -120,6 +121,7 @@ fun TaskScreen(
     var showChangeLinkDialog by remember { mutableStateOf(false) }
     var showDurationDialog by remember { mutableStateOf(false) }
     var showAccessibilityPromptDialog by remember { mutableStateOf(false) }
+    var showOverlayPromptDialog by remember { mutableStateOf(false) }
 
     // On open, ensure oEmbed is loaded
     LaunchedEffect(currentUrl) {
@@ -646,12 +648,101 @@ fun TaskScreen(
                 }
             }
 
+            // 4d. Floating Side Timer Overlay Status Card
+            val isOverlayGranted = remember(sessionState) { PermissionHelper.isOverlayPermissionGranted(context) }
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isOverlayGranted) Slate800 else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("floating_overlay_status_card")
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .background(
+                                if (isOverlayGranted) SuccessGreen.copy(alpha = 0.2f) else AmberPrimary.copy(alpha = 0.2f),
+                                CircleShape
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Timer,
+                            contentDescription = null,
+                            tint = if (isOverlayGranted) SuccessGreen else AmberPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Side Floating Watch Timer",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isOverlayGranted) Color.White else MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .background(
+                                        if (isOverlayGranted) SuccessGreen.copy(alpha = 0.2f) else AmberPrimary.copy(alpha = 0.2f),
+                                        RoundedCornerShape(4.dp)
+                                    )
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = if (isOverlayGranted) "ACTIVE" else "SETUP NEEDED",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isOverlayGranted) SuccessGreen else AmberPrimary,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 9.sp
+                                )
+                            }
+                        }
+                        Text(
+                            text = if (isOverlayGranted)
+                                "Timer floats on side of YouTube showing real-time seconds & coins"
+                            else
+                                "Requires 'Display over other apps' to show timer on side of YouTube",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            lineHeight = 15.sp
+                        )
+                    }
+                    if (!isOverlayGranted) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        OutlinedButton(
+                            onClick = {
+                                try {
+                                    context.startActivity(PermissionHelper.createOverlaySettingsIntent(context))
+                                } catch (_: Exception) {}
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(34.dp).testTag("enable_overlay_btn")
+                        ) {
+                            Text("Enable", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.weight(1f, fill = false))
 
             // 5. "Start Task" Button
             Button(
                 onClick = {
-                    if (liveSearchMode && !PermissionHelper.isAccessibilityServiceEnabled(context)) {
+                    if (!PermissionHelper.isOverlayPermissionGranted(context)) {
+                        showOverlayPromptDialog = true
+                    } else if (liveSearchMode && !PermissionHelper.isAccessibilityServiceEnabled(context)) {
                         showAccessibilityPromptDialog = true
                     } else {
                         viewModel.startTask(context)
@@ -810,6 +901,58 @@ fun TaskScreen(
                     }
                 ) {
                     Text("Continue Without Auto-Click")
+                }
+            }
+        )
+    }
+
+    if (showOverlayPromptDialog) {
+        AlertDialog(
+            onDismissRequest = { showOverlayPromptDialog = false },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Timer,
+                    contentDescription = null,
+                    tint = AmberPrimary,
+                    modifier = Modifier.size(36.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "Enable Floating Timer Overlay",
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = "To see the live countdown timer running on the side of your screen while watching videos on YouTube, please enable 'Display over other apps' for Kingo King.\n\nYou can drag the floating timer anywhere on the screen so it doesn't block video controls."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showOverlayPromptDialog = false
+                        try {
+                            context.startActivity(PermissionHelper.createOverlaySettingsIntent(context))
+                        } catch (_: Exception) {}
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary)
+                ) {
+                    Text("Enable in Settings", color = Color.Black, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showOverlayPromptDialog = false
+                        if (liveSearchMode && !PermissionHelper.isAccessibilityServiceEnabled(context)) {
+                            showAccessibilityPromptDialog = true
+                        } else {
+                            viewModel.startTask(context)
+                        }
+                    }
+                ) {
+                    Text("Continue Without Overlay")
                 }
             }
         )
