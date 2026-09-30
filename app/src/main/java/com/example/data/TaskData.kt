@@ -146,3 +146,42 @@ data class VideoTaskItem(
     val createdAt: Long = System.currentTimeMillis()
 )
 
+/**
+ * User Account Profile for Email Authentication.
+ */
+data class UserProfile(
+    val userId: String,
+    val email: String,
+    val name: String = "",
+    val passwordHash: String = "",
+    val coinsBalance: Int = 0,
+    val completedTasksCount: Int = 0,
+    val joinedAtMillis: Long = System.currentTimeMillis()
+)
+
+/**
+ * Payout/Withdrawal Request Status for Admin review.
+ */
+enum class PayoutStatus {
+    PENDING,
+    APPROVED,
+    REJECTED
+}
+
+/**
+ * Payout Request Model managed by Admin Dashboard.
+ */
+data class PayoutRequest(
+    val id: String,
+    val userId: String,
+    val userEmail: String,
+    val amountCoins: Int,
+    val amountInr: Double,
+    val method: String,
+    val destination: String,
+    val status: PayoutStatus = PayoutStatus.PENDING,
+    val requestedAtMillis: Long = System.currentTimeMillis(),
+    val processedAtMillis: Long? = null,
+    val adminNote: String? = null
+)
+

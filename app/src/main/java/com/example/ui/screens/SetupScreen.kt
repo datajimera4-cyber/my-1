@@ -155,17 +155,14 @@ fun SetupScreen(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Step 1: Notification Listener Access (CRITICAL)
+            // Step 1: Privacy Guarantee (Notification reading completely removed)
             PermissionStepCard(
-                title = "Notification Access",
-                description = "Enables WatchEarn to detect YouTube's media session and read video title/playback state in the background.",
+                title = "Privacy Protected (No Notification Reading)",
+                description = "WatchEarn runs without reading your personal notifications or messages. Your privacy is 100% safeguarded.",
                 icon = Icons.Default.Security,
-                isGranted = isNotificationAccessGranted,
-                buttonText = "Enable Notification Access",
-                onAction = {
-                    val intent = PermissionHelper.createNotificationListenerSettingsIntent()
-                    context.startActivity(intent)
-                },
+                isGranted = true,
+                buttonText = "Enabled",
+                onAction = {},
                 testTag = "enable_notification_access_card"
             )
 

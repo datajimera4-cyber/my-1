@@ -151,22 +151,16 @@ object WatchSessionRepository {
         _activeTaskId.value = taskId
         _redAlertMessage.value = null
         _isGracePeriodActive.value = false
-        _sessionState.value = SessionState.WAITING
+        _currentMediaTitle.value = taskTitle
+        _currentMediaArtist.value = taskAuthor
+        _matchResult.value = MatchResult.MATCH
+        _playbackState.value = VideoPlaybackState.PLAYING
+        _mediaSessionDetected.value = true
+        _sessionState.value = SessionState.ACTIVE
 
-        addLog("Task started. Target: \"$taskTitle\" ($requiredSeconds s for $rewardCoins coins). Waiting for playback...", LogType.INFO)
+        addLog("Task started. Target: \"$taskTitle\" ($requiredSeconds s for $rewardCoins coins). Watching session ACTIVE!", LogType.SUCCESS)
 
-        // Cancel previous waiting timeout and start 60s timeout
         waitingTimeoutJob?.cancel()
-        waitingTimeoutJob = repositoryScope.launch {
-            delay(60_000L)
-            if (_sessionState.value == SessionState.WAITING) {
-                invalidateSession("Target video did not start within 60 seconds.")
-                onRedAlertTriggered?.invoke(
-                    "Red Alert: Task Timed Out",
-                    "Target video did not start playing within 60 seconds."
-                )
-            }
-        }
     }
 
     /**

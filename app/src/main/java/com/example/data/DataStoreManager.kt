@@ -28,6 +28,9 @@ class DataStoreManager(private val context: Context) {
         private val KEY_LIVE_SEARCH_MODE = booleanPreferencesKey("live_search_mode")
         private val KEY_VIDEO_TASKS = stringPreferencesKey("video_tasks_json")
         private val KEY_SELECTED_TASK_ID = stringPreferencesKey("selected_task_id")
+        private val KEY_USERS = stringPreferencesKey("users_json")
+        private val KEY_CURRENT_USER_EMAIL = stringPreferencesKey("current_user_email")
+        private val KEY_PAYOUT_REQUESTS = stringPreferencesKey("payout_requests_json")
     }
 
     val liveSearchModeFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
@@ -36,6 +39,42 @@ class DataStoreManager(private val context: Context) {
 
     val selectedTaskIdFlow: Flow<String?> = context.dataStore.data.map { prefs ->
         prefs[KEY_SELECTED_TASK_ID]
+    }
+
+    val currentUserEmailFlow: Flow<String?> = context.dataStore.data.map { prefs ->
+        prefs[KEY_CURRENT_USER_EMAIL]
+    }
+
+    val usersFlow: Flow<List<UserProfile>> = context.dataStore.data.map { prefs ->
+        val json = prefs[KEY_USERS] ?: "[]"
+        parseUsersJson(json)
+    }
+
+    val currentUserFlow: Flow<UserProfile?> = context.dataStore.data.map { prefs ->
+        val currentEmail = prefs[KEY_CURRENT_USER_EMAIL]
+        val usersJson = prefs[KEY_USERS] ?: "[]"
+        val users = parseUsersJson(usersJson)
+        if (currentEmail.isNullOrBlank()) {
+            // Default guest profile if not logged in
+            UserProfile(
+                userId = "user_guest",
+                email = "guest@watchearn.com",
+                name = "VIP Watcher",
+                coinsBalance = prefs[KEY_WALLET_BALANCE] ?: 0
+            )
+        } else {
+            users.find { it.email.equals(currentEmail, ignoreCase = true) } ?: UserProfile(
+                userId = "user_${currentEmail.hashCode()}",
+                email = currentEmail,
+                name = currentEmail.substringBefore("@"),
+                coinsBalance = prefs[KEY_WALLET_BALANCE] ?: 0
+            )
+        }
+    }
+
+    val payoutRequestsFlow: Flow<List<PayoutRequest>> = context.dataStore.data.map { prefs ->
+        val json = prefs[KEY_PAYOUT_REQUESTS] ?: "[]"
+        parsePayoutRequestsJson(json)
     }
 
     val videoTasksFlow: Flow<List<VideoTaskItem>> = context.dataStore.data.map { prefs ->
@@ -136,20 +175,205 @@ class DataStoreManager(private val context: Context) {
 
                 val currentJson = prefs[KEY_TRANSACTIONS] ?: "[]"
                 val list = parseTransactionsJson(currentJson).toMutableList()
+                val reqId = UUID.randomUUID().toString()
                 list.add(
                     0,
                     WalletTransaction(
-                        id = UUID.randomUUID().toString(),
-                        title = "Withdrawal to $method ($destination) [₹$formattedInr]",
+                        id = reqId,
+                        title = "Withdrawal PENDING to $method ($destination) [₹$formattedInr]",
                         coins = -coins,
                         timestampMillis = System.currentTimeMillis()
                     )
                 )
                 prefs[KEY_TRANSACTIONS] = serializeTransactionsJson(list)
+
+                // Add to payout requests queue for instant Admin Panel review!
+                val currentEmail = prefs[KEY_CURRENT_USER_EMAIL] ?: "guest@watchearn.com"
+                val payoutList = parsePayoutRequestsJson(prefs[KEY_PAYOUT_REQUESTS] ?: "[]").toMutableList()
+                payoutList.add(
+                    0,
+                    PayoutRequest(
+                        id = reqId,
+                        userId = "usr_${Math.abs(currentEmail.hashCode()) % 100000}",
+                        userEmail = currentEmail,
+                        amountCoins = coins,
+                        amountInr = inrAmount,
+                        method = method,
+                        destination = destination,
+                        status = PayoutStatus.PENDING,
+                        requestedAtMillis = System.currentTimeMillis()
+                    )
+                )
+                prefs[KEY_PAYOUT_REQUESTS] = serializePayoutRequestsJson(payoutList)
                 success = true
             }
         }
         return success
+    }
+
+    suspend fun approvePayout(requestId: String, note: String = "Payment Dispatched"): Boolean {
+        var found = false
+        context.dataStore.edit { prefs ->
+            val payoutList = parsePayoutRequestsJson(prefs[KEY_PAYOUT_REQUESTS] ?: "[]").toMutableList()
+            val index = payoutList.indexOfFirst { it.id == requestId }
+            if (index != -1) {
+                val req = payoutList[index]
+                payoutList[index] = req.copy(
+                    status = PayoutStatus.APPROVED,
+                    processedAtMillis = System.currentTimeMillis(),
+                    adminNote = note
+                )
+                prefs[KEY_PAYOUT_REQUESTS] = serializePayoutRequestsJson(payoutList)
+
+                // Add approved transaction entry
+                val txList = parseTransactionsJson(prefs[KEY_TRANSACTIONS] ?: "[]").toMutableList()
+                txList.add(
+                    0,
+                    WalletTransaction(
+                        id = UUID.randomUUID().toString(),
+                        title = "✅ Payout APPROVED: ₹${String.format(java.util.Locale.US, "%.2f", req.amountInr)} sent via ${req.method} ($note)",
+                        coins = 0,
+                        timestampMillis = System.currentTimeMillis()
+                    )
+                )
+                prefs[KEY_TRANSACTIONS] = serializeTransactionsJson(txList)
+                found = true
+            }
+        }
+        return found
+    }
+
+    suspend fun rejectPayout(requestId: String, reason: String = "Declined by Admin"): Boolean {
+        var found = false
+        context.dataStore.edit { prefs ->
+            val payoutList = parsePayoutRequestsJson(prefs[KEY_PAYOUT_REQUESTS] ?: "[]").toMutableList()
+            val index = payoutList.indexOfFirst { it.id == requestId }
+            if (index != -1) {
+                val req = payoutList[index]
+                payoutList[index] = req.copy(
+                    status = PayoutStatus.REJECTED,
+                    processedAtMillis = System.currentTimeMillis(),
+                    adminNote = reason
+                )
+                prefs[KEY_PAYOUT_REQUESTS] = serializePayoutRequestsJson(payoutList)
+
+                // Refund the coins back to the user's wallet!
+                val currentBalance = prefs[KEY_WALLET_BALANCE] ?: 0
+                prefs[KEY_WALLET_BALANCE] = currentBalance + req.amountCoins
+
+                val txList = parseTransactionsJson(prefs[KEY_TRANSACTIONS] ?: "[]").toMutableList()
+                txList.add(
+                    0,
+                    WalletTransaction(
+                        id = UUID.randomUUID().toString(),
+                        title = "❌ Payout REJECTED (Refunded +${req.amountCoins} coins): $reason",
+                        coins = req.amountCoins,
+                        timestampMillis = System.currentTimeMillis()
+                    )
+                )
+                prefs[KEY_TRANSACTIONS] = serializeTransactionsJson(txList)
+                found = true
+            }
+        }
+        return found
+    }
+
+    suspend fun signUpUser(email: String, password: String, name: String): Pair<Boolean, String> {
+        val cleanEmail = email.trim().lowercase()
+        if (cleanEmail.isEmpty() || !cleanEmail.contains("@")) {
+            return Pair(false, "Please enter a valid email address.")
+        }
+        if (password.length < 4) {
+            return Pair(false, "Password must be at least 4 characters.")
+        }
+
+        var result = Pair(true, "Account created successfully!")
+        context.dataStore.edit { prefs ->
+            val users = parseUsersJson(prefs[KEY_USERS] ?: "[]").toMutableList()
+            if (users.any { it.email.equals(cleanEmail, ignoreCase = true) }) {
+                result = Pair(false, "Account with this email already exists.")
+                return@edit
+            }
+            val newUser = UserProfile(
+                userId = "usr_${Math.abs(cleanEmail.hashCode()) % 100000}",
+                email = cleanEmail,
+                name = name.ifBlank { cleanEmail.substringBefore("@") },
+                passwordHash = password,
+                coinsBalance = prefs[KEY_WALLET_BALANCE] ?: 0,
+                joinedAtMillis = System.currentTimeMillis()
+            )
+            users.add(newUser)
+            prefs[KEY_USERS] = serializeUsersJson(users)
+            prefs[KEY_CURRENT_USER_EMAIL] = cleanEmail
+        }
+        return result
+    }
+
+    suspend fun loginUser(email: String, password: String): Pair<Boolean, String> {
+        val cleanEmail = email.trim().lowercase()
+        if (cleanEmail.isEmpty() || !cleanEmail.contains("@")) {
+            return Pair(false, "Please enter a valid email address.")
+        }
+        var result = Pair(false, "Invalid email or password.")
+        context.dataStore.edit { prefs ->
+            val users = parseUsersJson(prefs[KEY_USERS] ?: "[]").toMutableList()
+            val existing = users.find { it.email.equals(cleanEmail, ignoreCase = true) }
+            if (existing != null) {
+                if (existing.passwordHash == password || existing.passwordHash.isEmpty()) {
+                    prefs[KEY_CURRENT_USER_EMAIL] = cleanEmail
+                    result = Pair(true, "Logged in successfully!")
+                } else {
+                    result = Pair(false, "Incorrect password.")
+                }
+            } else {
+                // Auto create account on first login
+                val newUser = UserProfile(
+                    userId = "usr_${Math.abs(cleanEmail.hashCode()) % 100000}",
+                    email = cleanEmail,
+                    name = cleanEmail.substringBefore("@"),
+                    passwordHash = password,
+                    coinsBalance = prefs[KEY_WALLET_BALANCE] ?: 0,
+                    joinedAtMillis = System.currentTimeMillis()
+                )
+                users.add(newUser)
+                prefs[KEY_USERS] = serializeUsersJson(users)
+                prefs[KEY_CURRENT_USER_EMAIL] = cleanEmail
+                result = Pair(true, "Account created and logged in!")
+            }
+        }
+        return result
+    }
+
+    suspend fun logoutUser() {
+        context.dataStore.edit { prefs ->
+            prefs.remove(KEY_CURRENT_USER_EMAIL)
+        }
+    }
+
+    suspend fun adminDeleteVideoTask(taskId: String) {
+        context.dataStore.edit { prefs ->
+            val list = parseVideoTasksJson(prefs[KEY_VIDEO_TASKS] ?: "").toMutableList()
+            list.removeAll { it.id == taskId }
+            prefs[KEY_VIDEO_TASKS] = serializeVideoTasksJson(list)
+            if (prefs[KEY_SELECTED_TASK_ID] == taskId) {
+                prefs.remove(KEY_SELECTED_TASK_ID)
+            }
+        }
+    }
+
+    suspend fun adminUpdateUserCoins(userEmail: String, newCoins: Int) {
+        context.dataStore.edit { prefs ->
+            val currentEmail = prefs[KEY_CURRENT_USER_EMAIL]
+            if (currentEmail.equals(userEmail, ignoreCase = true) || userEmail.isBlank() || userEmail == "current") {
+                prefs[KEY_WALLET_BALANCE] = newCoins.coerceAtLeast(0)
+            }
+            val users = parseUsersJson(prefs[KEY_USERS] ?: "[]").toMutableList()
+            val index = users.indexOfFirst { it.email.equals(userEmail, ignoreCase = true) }
+            if (index != -1) {
+                users[index] = users[index].copy(coinsBalance = newCoins.coerceAtLeast(0))
+                prefs[KEY_USERS] = serializeUsersJson(users)
+            }
+        }
     }
 
     suspend fun resetAll() {
@@ -343,6 +567,102 @@ class DataStoreManager(private val context: Context) {
                 put("title", item.title)
                 put("coins", item.coins)
                 put("timestampMillis", item.timestampMillis)
+            }
+            array.put(obj)
+        }
+        return array.toString()
+    }
+
+    private fun parseUsersJson(json: String): List<UserProfile> {
+        val list = mutableListOf<UserProfile>()
+        try {
+            val array = JSONArray(json)
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                list.add(
+                    UserProfile(
+                        userId = obj.optString("userId", UUID.randomUUID().toString()),
+                        email = obj.optString("email", ""),
+                        name = obj.optString("name", ""),
+                        passwordHash = obj.optString("passwordHash", ""),
+                        coinsBalance = obj.optInt("coinsBalance", 0),
+                        completedTasksCount = obj.optInt("completedTasksCount", 0),
+                        joinedAtMillis = obj.optLong("joinedAtMillis", System.currentTimeMillis())
+                    )
+                )
+            }
+        } catch (_: Exception) {
+            // fallback
+        }
+        return list
+    }
+
+    private fun serializeUsersJson(users: List<UserProfile>): String {
+        val array = JSONArray()
+        for (u in users) {
+            val obj = JSONObject().apply {
+                put("userId", u.userId)
+                put("email", u.email)
+                put("name", u.name)
+                put("passwordHash", u.passwordHash)
+                put("coinsBalance", u.coinsBalance)
+                put("completedTasksCount", u.completedTasksCount)
+                put("joinedAtMillis", u.joinedAtMillis)
+            }
+            array.put(obj)
+        }
+        return array.toString()
+    }
+
+    private fun parsePayoutRequestsJson(json: String): List<PayoutRequest> {
+        val list = mutableListOf<PayoutRequest>()
+        try {
+            val array = JSONArray(json)
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                val statusStr = obj.optString("status", PayoutStatus.PENDING.name)
+                val status = try {
+                    PayoutStatus.valueOf(statusStr)
+                } catch (_: Exception) {
+                    PayoutStatus.PENDING
+                }
+                list.add(
+                    PayoutRequest(
+                        id = obj.optString("id", UUID.randomUUID().toString()),
+                        userId = obj.optString("userId", ""),
+                        userEmail = obj.optString("userEmail", ""),
+                        amountCoins = obj.optInt("amountCoins", 0),
+                        amountInr = obj.optDouble("amountInr", 0.0),
+                        method = obj.optString("method", "UPI"),
+                        destination = obj.optString("destination", ""),
+                        status = status,
+                        requestedAtMillis = obj.optLong("requestedAtMillis", System.currentTimeMillis()),
+                        processedAtMillis = if (obj.has("processedAtMillis")) obj.optLong("processedAtMillis") else null,
+                        adminNote = if (obj.has("adminNote")) obj.optString("adminNote") else null
+                    )
+                )
+            }
+        } catch (_: Exception) {
+            // fallback
+        }
+        return list
+    }
+
+    private fun serializePayoutRequestsJson(requests: List<PayoutRequest>): String {
+        val array = JSONArray()
+        for (r in requests) {
+            val obj = JSONObject().apply {
+                put("id", r.id)
+                put("userId", r.userId)
+                put("userEmail", r.userEmail)
+                put("amountCoins", r.amountCoins)
+                put("amountInr", r.amountInr)
+                put("method", r.method)
+                put("destination", r.destination)
+                put("status", r.status.name)
+                put("requestedAtMillis", r.requestedAtMillis)
+                r.processedAtMillis?.let { put("processedAtMillis", it) }
+                r.adminNote?.let { put("adminNote", it) }
             }
             array.put(obj)
         }

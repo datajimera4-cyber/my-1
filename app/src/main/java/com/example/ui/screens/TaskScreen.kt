@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.HourglassTop
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Accessibility
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MonetizationOn
 import androidx.compose.material.icons.filled.Pause
@@ -41,10 +42,13 @@ import com.example.ui.components.DurationSelectionDialog
 import com.example.ui.components.SearchLoadingOverlay
 import com.example.ui.theme.Slate800
 import com.example.util.TitleMatcher
+import com.example.util.PermissionHelper
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -115,6 +119,7 @@ fun TaskScreen(
 
     var showChangeLinkDialog by remember { mutableStateOf(false) }
     var showDurationDialog by remember { mutableStateOf(false) }
+    var showAccessibilityPromptDialog by remember { mutableStateOf(false) }
 
     // On open, ensure oEmbed is loaded
     LaunchedEffect(currentUrl) {
@@ -571,7 +576,12 @@ fun TaskScreen(
                     Spacer(modifier = Modifier.width(8.dp))
                     Switch(
                         checked = liveSearchMode,
-                        onCheckedChange = { viewModel.toggleLiveSearchMode(it) },
+                        onCheckedChange = { enabled ->
+                            viewModel.toggleLiveSearchMode(enabled)
+                            if (enabled && !PermissionHelper.isAccessibilityServiceEnabled(context)) {
+                                showAccessibilityPromptDialog = true
+                            }
+                        },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Color.Black,
                             checkedTrackColor = SuccessGreen
@@ -640,7 +650,13 @@ fun TaskScreen(
 
             // 5. "Start Task" Button
             Button(
-                onClick = { viewModel.startTask(context) },
+                onClick = {
+                    if (liveSearchMode && !PermissionHelper.isAccessibilityServiceEnabled(context)) {
+                        showAccessibilityPromptDialog = true
+                    } else {
+                        viewModel.startTask(context)
+                    }
+                },
                 enabled = !isCompleted && sessionState != SessionState.COMPLETED,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -748,6 +764,54 @@ fun TaskScreen(
             targetTitle = targetTitle,
             targetChannel = targetChannel,
             thumbnailUrl = thumbnailUrl
+        )
+    }
+
+    if (showAccessibilityPromptDialog) {
+        AlertDialog(
+            onDismissRequest = { showAccessibilityPromptDialog = false },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Accessibility,
+                    contentDescription = null,
+                    tint = AmberPrimary,
+                    modifier = Modifier.size(36.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "Enable Auto-Search & Auto-Click",
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = "To allow Kingo King to automatically open YouTube, clear and type the task title in the search bar, and locate & click the target video card for you, please enable 'Kingo King' in Android Accessibility settings.\n\nWithout Accessibility enabled, you can still continue and YouTube will open with the search results directly."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showAccessibilityPromptDialog = false
+                        try {
+                            context.startActivity(PermissionHelper.createAccessibilitySettingsIntent())
+                        } catch (_: Exception) {}
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary)
+                ) {
+                    Text("Enable in Settings", color = Color.Black, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showAccessibilityPromptDialog = false
+                        viewModel.startTask(context)
+                    }
+                ) {
+                    Text("Continue Without Auto-Click")
+                }
+            }
         )
     }
 }

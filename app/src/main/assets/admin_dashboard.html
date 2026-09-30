@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kingo King — Admin Control Panel</title>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', sans-serif; }
+        body { background: #0f172a; color: #f8fafc; padding: 24px; min-height: 100vh; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 24px; border-bottom: 1px solid #1e293b; margin-bottom: 24px; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-badge { width: 44px; height: 44px; background: #f59e0b; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; color: #000; font-weight: 800; }
+        .logo h1 { font-size: 22px; font-weight: 800; color: #fff; }
+        .logo p { font-size: 12px; color: #f59e0b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+        .badge-live { background: rgba(34, 197, 94, 0.15); color: #22c55e; border: 1px solid rgba(34, 197, 94, 0.3); padding: 6px 14px; border-radius: 999px; font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+        .dot { width: 8px; height: 8px; background: #22c55e; border-radius: 50%; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { opacity: 0.4; } 50% { opacity: 1; } 100% { opacity: 0.4; } }
+        
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; margin-bottom: 28px; }
+        .stat-card { background: #1e293b; border-radius: 18px; padding: 20px; border: 1px solid #334155; }
+        .stat-label { font-size: 13px; color: #94a3b8; font-weight: 600; margin-bottom: 6px; }
+        .stat-value { font-size: 30px; font-weight: 800; color: #f8fafc; }
+        .stat-accent { color: #f59e0b; }
+        .stat-green { color: #22c55e; }
+
+        .tabs { display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 1px solid #334155; padding-bottom: 12px; }
+        .tab-btn { background: transparent; border: none; color: #94a3b8; padding: 10px 18px; border-radius: 10px; font-weight: 700; font-size: 14px; cursor: pointer; transition: 0.2s; }
+        .tab-btn.active { background: #f59e0b; color: #000; }
+
+        .card { background: #1e293b; border-radius: 18px; padding: 24px; border: 1px solid #334155; margin-bottom: 24px; }
+        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .card-title { font-size: 18px; font-weight: 700; }
+
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 16px; }
+        .form-group label { display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 6px; }
+        .form-group input, .form-group select { width: 100%; background: #0f172a; border: 1px solid #334155; padding: 10px 14px; border-radius: 10px; color: #fff; font-size: 14px; outline: none; }
+        .form-group input:focus { border-color: #f59e0b; }
+        .btn-primary { background: #f59e0b; color: #000; font-weight: 700; border: none; padding: 12px 24px; border-radius: 10px; cursor: pointer; transition: 0.2s; }
+        .btn-primary:hover { background: #d97706; }
+        
+        table { width: 100%; border-collapse: collapse; text-align: left; }
+        th { font-size: 12px; color: #94a3b8; text-transform: uppercase; padding: 12px 14px; border-bottom: 1px solid #334155; }
+        td { padding: 14px; border-bottom: 1px solid #283548; font-size: 14px; vertical-align: middle; }
+        tr:hover { background: #182234; }
+        
+        .badge { padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 700; display: inline-block; }
+        .badge-pending { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+        .badge-approved { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
+        .badge-rejected { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+
+        .btn-sm { padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 700; border: none; cursor: pointer; margin-right: 6px; }
+        .btn-approve { background: #22c55e; color: #000; }
+        .btn-reject { background: #ef4444; color: #fff; }
+        .btn-delete { background: #ef4444; color: #fff; }
+        .btn-coins { background: #f59e0b; color: #000; }
+        .thumb-preview { width: 64px; height: 38px; border-radius: 6px; object-fit: cover; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">
+                <div class="logo-badge">▶</div>
+                <div>
+                    <h1>Kingo King — Remote Admin Panel</h1>
+                    <p>Live Dashboard & Real-Time App Controls</p>
+                </div>
+            </div>
+            <div class="badge-live">
+                <div class="dot"></div> LIVE SYNC ACTIVE
+            </div>
+        </header>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Pending Payouts</div>
+                <div class="stat-value stat-accent" id="stat-pending">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Active Video Tasks</div>
+                <div class="stat-value" id="stat-tasks">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Registered Users</div>
+                <div class="stat-value" id="stat-users">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">App Current Coins</div>
+                <div class="stat-value stat-green" id="stat-coins">0</div>
+            </div>
+        </div>
+
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('tasks')">🎬 Manage Video Tasks</button>
+            <button class="tab-btn" onclick="switchTab('payouts')">💸 Payout Requests (<span id="tab-pending-count">0</span>)</button>
+            <button class="tab-btn" onclick="switchTab('users')">👥 User Accounts & Coins</button>
+        </div>
+
+        <!-- Section 1: Tasks -->
+        <div id="tab-tasks">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">+ Add New YouTube Video Task</h2>
+                </div>
+                <form id="add-task-form" onsubmit="handleAddTask(event)">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Task Title</label>
+                            <input type="text" id="task-title" required placeholder="e.g. My New Video Song">
+                        </div>
+                        <div class="form-group">
+                            <label>YouTube Channel Name</label>
+                            <input type="text" id="task-channel" required placeholder="e.g. T-Series / Creator">
+                        </div>
+                        <div class="form-group">
+                            <label>YouTube Video Link</label>
+                            <input type="url" id="task-url" required placeholder="https://www.youtube.com/watch?v=...">
+                        </div>
+                        <div class="form-group">
+                            <label>Required Watch Time</label>
+                            <select id="task-duration">
+                                <option value="180">3 Minutes (180s)</option>
+                                <option value="300">5 Minutes (300s)</option>
+                                <option value="600">10 Minutes (600s)</option>
+                                <option value="1200">20 Minutes (1200s)</option>
+                                <option value="1800">30 Minutes (1800s)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Reward Coins</label>
+                            <input type="number" id="task-coins" required value="20" min="5">
+                        </div>
+                    </div>
+                    <button type="submit" class="btn-primary">+ Add Task in Realtime</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Active Video Tasks (Live in App)</h2>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Thumbnail</th>
+                            <th>Title & Channel</th>
+                            <th>Duration</th>
+                            <th>Reward</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tasks-table-body">
+                        <tr><td colspan="5">Loading tasks...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Section 2: Payouts -->
+        <div id="tab-payouts" style="display: none;">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">User Withdrawal & Payout Requests</h2>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>User Email</th>
+                            <th>Coins</th>
+                            <th>Amount (INR)</th>
+                            <th>Payment Method & Details</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="payouts-table-body">
+                        <tr><td colspan="6">Loading payout requests...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Section 3: Users -->
+        <div id="tab-users" style="display: none;">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Registered User Accounts & Wallet Adjustments</h2>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Email</th>
+                            <th>User ID</th>
+                            <th>Coins Balance</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="users-table-body">
+                        <tr><td colspan="4">Loading users...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentTab = 'tasks';
+
+        function switchTab(tab) {
+            currentTab = tab;
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            document.getElementById('tab-tasks').style.display = tab === 'tasks' ? 'block' : 'none';
+            document.getElementById('tab-payouts').style.display = tab === 'payouts' ? 'block' : 'none';
+            document.getElementById('tab-users').style.display = tab === 'users' ? 'block' : 'none';
+        }
+
+        async function fetchDashboardData() {
+            try {
+                const res = await fetch('/api/data');
+                const data = await res.json();
+
+                document.getElementById('stat-pending').innerText = data.pendingPayoutsCount;
+                document.getElementById('tab-pending-count').innerText = data.pendingPayoutsCount;
+                document.getElementById('stat-tasks').innerText = data.tasks.length;
+                document.getElementById('stat-users').innerText = Math.max(1, data.users.length);
+                document.getElementById('stat-coins').innerText = data.currentWalletBalance;
+
+                // Render Tasks
+                const tasksTbody = document.getElementById('tasks-table-body');
+                if (data.tasks.length === 0) {
+                    tasksTbody.innerHTML = '<tr><td colspan="5">No active tasks. Add one above!</td></tr>';
+                } else {
+                    tasksTbody.innerHTML = data.tasks.map(t => `
+                        <tr>
+                            <td><img src="${t.thumbnailUrl || 'https://via.placeholder.com/64x38'}" class="thumb-preview" /></td>
+                            <td>
+                                <strong>${escapeHtml(t.title)}</strong><br>
+                                <span style="color:#94a3b8; font-size:12px;">${escapeHtml(t.channelName)}</span>
+                            </td>
+                            <td>${Math.round(t.selectedDurationSeconds / 60)} min</td>
+                            <td><span style="color:#f59e0b; font-weight:800;">+${t.rewardCoins} coins</span></td>
+                            <td>
+                                <button class="btn-sm btn-delete" onclick="deleteTask('${t.id}')">Delete</button>
+                            </td>
+                        </tr>
+                    `).join('');
+                }
+
+                // Render Payouts
+                const payoutsTbody = document.getElementById('payouts-table-body');
+                if (data.payouts.length === 0) {
+                    payoutsTbody.innerHTML = '<tr><td colspan="6">No payout requests submitted yet.</td></tr>';
+                } else {
+                    payoutsTbody.innerHTML = data.payouts.map(p => `
+                        <tr>
+                            <td><strong>${escapeHtml(p.userEmail)}</strong></td>
+                            <td>${p.amountCoins} coins</td>
+                            <td style="color:#22c55e; font-weight:800;">₹${p.amountInr.toFixed(2)}</td>
+                            <td><strong>${escapeHtml(p.method)}</strong>: ${escapeHtml(p.destination)}</td>
+                            <td>
+                                <span class="badge badge-${p.status.toLowerCase()}">${p.status}</span>
+                                ${p.adminNote ? `<br><small style="color:#94a3b8;">${escapeHtml(p.adminNote)}</small>` : ''}
+                            </td>
+                            <td>
+                                ${p.status === 'PENDING' ? `
+                                    <button class="btn-sm btn-approve" onclick="approvePayout('${p.id}')">Approve & Pay</button>
+                                    <button class="btn-sm btn-reject" onclick="rejectPayout('${p.id}')">Reject</button>
+                                ` : '<span style="color:#64748b; font-size:12px;">Processed</span>'}
+                            </td>
+                        </tr>
+                    `).join('');
+                }
+
+                // Render Users
+                const usersTbody = document.getElementById('users-table-body');
+                const userList = data.users.length > 0 ? data.users : [{ userId: 'app_user', email: 'guest@watchearn.com', coinsBalance: data.currentWalletBalance }];
+                usersTbody.innerHTML = userList.map(u => `
+                    <tr>
+                        <td><strong>${escapeHtml(u.email)}</strong></td>
+                        <td>${escapeHtml(u.userId)}</td>
+                        <td><span style="color:#f59e0b; font-weight:800;">${u.coinsBalance} coins</span></td>
+                        <td>
+                            <button class="btn-sm btn-coins" onclick="adjustCoins('${escapeHtml(u.email)}', ${u.coinsBalance})">Adjust Coins</button>
+                        </td>
+                    </tr>
+                `).join('');
+
+            } catch (e) {
+                console.error("Fetch error", e);
+            }
+        }
+
+        async function handleAddTask(e) {
+            e.preventDefault();
+            const title = document.getElementById('task-title').value;
+            const channel = document.getElementById('task-channel').value;
+            const url = document.getElementById('task-url').value;
+            const duration = parseInt(document.getElementById('task-duration').value);
+            const coins = parseInt(document.getElementById('task-coins').value);
+
+            await fetch('/api/tasks/add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title, channelName: channel, videoUrl: url, durationSeconds: duration, rewardCoins: coins })
+            });
+            document.getElementById('add-task-form').reset();
+            fetchDashboardData();
+        }
+
+        async function deleteTask(id) {
+            if (!confirm('Are you sure you want to remove this task?')) return;
+            await fetch('/api/tasks/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id })
+            });
+            fetchDashboardData();
+        }
+
+        async function approvePayout(id) {
+            const note = prompt('Optional payment transaction / reference note:', 'Payment Dispatched via UPI');
+            if (note === null) return;
+            await fetch('/api/payouts/approve', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id, note })
+            });
+            fetchDashboardData();
+        }
+
+        async function rejectPayout(id) {
+            const reason = prompt('Reason for rejection (coins will be refunded):', 'Invalid UPI details');
+            if (reason === null) return;
+            await fetch('/api/payouts/reject', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id, reason })
+            });
+            fetchDashboardData();
+        }
+
+        async function adjustCoins(email, currentCoins) {
+            const newCoinsStr = prompt(`Enter new coin balance for ${email}:`, currentCoins);
+            if (newCoinsStr === null) return;
+            const coins = parseInt(newCoinsStr);
+            if (isNaN(coins)) return;
+            await fetch('/api/users/update_coins', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, coins })
+            });
+            fetchDashboardData();
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+        }
+
+        // Auto poll every 2.5 seconds
+        fetchDashboardData();
+        setInterval(fetchDashboardData, 2500);
+    </script>
+</body>
+</html>

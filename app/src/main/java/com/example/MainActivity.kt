@@ -90,6 +90,7 @@ fun WatchEarnApp(viewModel: MainViewModel = viewModel()) {
                 AppScreen.TASK, AppScreen.TASK_DETAIL -> TaskScreen(viewModel = viewModel)
                 AppScreen.SETUP -> SetupScreen(viewModel = viewModel)
                 AppScreen.DIAGNOSTICS -> DiagnosticsScreen(viewModel = viewModel)
+                AppScreen.ADMIN -> com.example.ui.screens.AdminDashboardScreen(viewModel = viewModel)
             }
         }
     }

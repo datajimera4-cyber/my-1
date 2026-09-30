@@ -1,7 +1,6 @@
 package com.example.util
 
 import android.Manifest
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -10,24 +9,16 @@ import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.core.content.ContextCompat
-import com.example.service.WatchListenerService
 
 object PermissionHelper {
 
     const val YOUTUBE_PACKAGE = "com.google.android.youtube"
 
     /**
-     * Checks if this app has been granted NotificationListenerService access.
+     * Notification reading permission is completely removed as requested.
+     * The app runs cleanly without reading user notifications.
      */
-    fun isNotificationAccessGranted(context: Context): Boolean {
-        val flat = Settings.Secure.getString(
-            context.contentResolver,
-            "enabled_notification_listeners"
-        ) ?: return false
-
-        val myService = ComponentName(context, WatchListenerService::class.java).flattenToString()
-        return flat.contains(myService) || flat.contains(context.packageName)
-    }
+    fun isNotificationAccessGranted(context: Context): Boolean = true
 
     /**
      * Checks if POST_NOTIFICATIONS runtime permission is granted on Android 13+.
@@ -113,9 +104,10 @@ object PermissionHelper {
 
     /**
      * Checks if all required permissions/settings are ready to start task.
+     * No notification read permission required — runs out-of-the-box!
      */
     fun areEssentialPermissionsGranted(context: Context): Boolean {
-        return isNotificationAccessGranted(context) && isNotificationPermissionGranted(context)
+        return true
     }
 
     /**

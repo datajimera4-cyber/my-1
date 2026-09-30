@@ -22,6 +22,9 @@ import com.example.util.TitleMatcher
 import com.example.data.YouTubeSearchEngine
 import com.example.service.YouTubeLiveSearchService
 import com.example.data.VideoTaskItem
+import com.example.data.UserProfile
+import com.example.data.PayoutStatus
+import com.example.data.PayoutRequest
 import com.example.data.WatchDurationTier
 import com.example.data.WATCH_DURATION_TIERS
 import kotlinx.coroutines.delay
@@ -41,7 +44,8 @@ enum class AppScreen {
     WALLET,
     ME,
     SETUP,
-    DIAGNOSTICS
+    DIAGNOSTICS,
+    ADMIN
 }
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -72,6 +76,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val selectedTaskId: StateFlow<String?> = dataStoreManager.selectedTaskIdFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val currentUser: StateFlow<UserProfile?> = dataStoreManager.currentUserFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val allUsers: StateFlow<List<UserProfile>> = dataStoreManager.usersFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val payoutRequests: StateFlow<List<PayoutRequest>> = dataStoreManager.payoutRequestsFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    private val _adminServerRunning = MutableStateFlow(com.example.admin.AdminWebServer.isRunning)
+    val adminServerRunning: StateFlow<Boolean> = _adminServerRunning.asStateFlow()
+
+    private val _adminServerUrl = MutableStateFlow("")
+    val adminServerUrl: StateFlow<String> = _adminServerUrl.asStateFlow()
 
     private val _activeRewardCoins = MutableStateFlow(10)
     val activeRewardCoins: StateFlow<Int> = _activeRewardCoins.asStateFlow()
@@ -285,6 +304,87 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    fun toggleAdminServer(context: Context, enabled: Boolean) {
+        if (enabled) {
+            com.example.admin.AdminWebServer.startServer(context, dataStoreManager) { running, url ->
+                _adminServerRunning.value = running
+                _adminServerUrl.value = url
+            }
+        } else {
+            com.example.admin.AdminWebServer.stopServer { running, url ->
+                _adminServerRunning.value = running
+                _adminServerUrl.value = url
+            }
+        }
+    }
+
+    fun signUp(email: String, password: String, name: String, onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            val res = dataStoreManager.signUpUser(email, password, name)
+            onResult(res.first, res.second)
+            if (res.first) {
+                WatchSessionRepository.addLog("User signed up: $email", LogType.SUCCESS)
+            }
+        }
+    }
+
+    fun login(email: String, password: String, onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            val res = dataStoreManager.loginUser(email, password)
+            onResult(res.first, res.second)
+            if (res.first) {
+                WatchSessionRepository.addLog("User logged in: $email", LogType.SUCCESS)
+            }
+        }
+    }
+
+    fun logout() {
+        viewModelScope.launch {
+            dataStoreManager.logoutUser()
+            WatchSessionRepository.addLog("User logged out", LogType.INFO)
+        }
+    }
+
+    fun requestWithdrawal(coins: Int, method: String, destination: String, onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            val success = dataStoreManager.withdrawCoins(coins, method, destination)
+            if (success) {
+                onResult(true, "Payout request submitted! Admin will verify and process.")
+                WatchSessionRepository.addLog("Payout request created: $coins coins to $method ($destination)", LogType.INFO)
+            } else {
+                onResult(false, "Insufficient balance or invalid coins amount.")
+            }
+        }
+    }
+
+    fun approvePayout(requestId: String, note: String = "Approved & Dispatched") {
+        viewModelScope.launch {
+            dataStoreManager.approvePayout(requestId, note)
+            WatchSessionRepository.addLog("Admin: Payout approved for request #$requestId", LogType.SUCCESS)
+        }
+    }
+
+    fun rejectPayout(requestId: String, reason: String = "Declined by Admin") {
+        viewModelScope.launch {
+            dataStoreManager.rejectPayout(requestId, reason)
+            WatchSessionRepository.addLog("Admin: Payout rejected ($reason). Coins refunded.", LogType.WARNING)
+        }
+    }
+
+    fun adminDeleteTask(taskId: String) {
+        viewModelScope.launch {
+            dataStoreManager.adminDeleteVideoTask(taskId)
+            WatchSessionRepository.addLog("Admin: Deleted task #$taskId", LogType.INFO)
+        }
+    }
+
+    fun adminUpdateUserCoins(userEmail: String, newCoins: Int) {
+        viewModelScope.launch {
+            dataStoreManager.adminUpdateUserCoins(userEmail, newCoins)
+            WatchSessionRepository.addLog("Admin: Updated coins to $newCoins for $userEmail", LogType.SUCCESS)
+        }
+    }
+
     private fun startTaskInternal(
         context: Context,
         videoUrl: String,
@@ -292,13 +392,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         rewardCoins: Int,
         taskId: String?
     ) {
-        // Permission check: if missing essential permissions, route to Setup
-        if (!PermissionHelper.areEssentialPermissionsGranted(context)) {
-            WatchSessionRepository.addLog("Permissions missing. Redirecting to Setup screen.", LogType.WARNING)
-            navigateTo(AppScreen.SETUP)
-            return
-        }
-
         if (searchProgress.value.isSearching) {
             return // Avoid duplicate search clicks
         }
@@ -331,11 +424,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val currentWatched = watchedMillis.value
 
             if (liveSearchMode.value) {
-                // LIVE MODE: Human-like YouTube automation. No pre-pasted title or direct video link!
+                // LIVE MODE: Directly opens YouTube with the target title searched!
                 WatchSessionRepository.updateSearchProgress(com.example.data.SearchProgressState(isSearching = false))
-                WatchSessionRepository.addLog("Live Mode: Opening YouTube to search & locate video like a human", LogType.INFO)
+                WatchSessionRepository.addLog("Live Mode: Opening YouTube search for \"$title\"", LogType.INFO)
 
-                // Arm the accessibility trigger to open search, clear old text, type title & click video
+                // Copy title to clipboard so it is instantly available for quick paste or system
+                try {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                    val clip = android.content.ClipData.newPlainText("YouTube Search Query", title)
+                    clipboard?.setPrimaryClip(clip)
+                } catch (_: Exception) {}
+
+                // Arm the accessibility trigger to auto-type in search bar and click target video card
                 YouTubeLiveSearchService.armSearchTrigger(title, author)
 
                 WatchSessionRepository.startTask(
@@ -348,25 +448,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 WatchTimerService.start(context)
 
-                // Step 1: Open YouTube app normally (clean launch)
-                val ytLaunchIntent = context.packageManager.getLaunchIntentForPackage(PermissionHelper.YOUTUBE_PACKAGE)
-                    ?: Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com")).apply {
-                        setPackage(PermissionHelper.YOUTUBE_PACKAGE)
-                    }
-                ytLaunchIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                context.startActivity(ytLaunchIntent)
+                // Open YouTube with the exact search query intent
+                val ytSearchIntent = PermissionHelper.openYouTubeSearchIntent(context, title)
+                try {
+                    context.startActivity(ytSearchIntent)
+                } catch (_: Exception) {
+                    val fallbackIntent = PermissionHelper.openVideoIntent(context, effectiveUrl, title)
+                    context.startActivity(fallbackIntent)
+                }
 
                 WatchSessionRepository.addLog(
-                    "YouTube opened! Kingo King Accessibility engine typing query and finding video...",
-                    LogType.INFO
+                    "YouTube opened for \"$title\"! Auto-searching and locating target video card...",
+                    LogType.SUCCESS
                 )
-
-                if (!PermissionHelper.isAccessibilityServiceEnabled(context)) {
-                    WatchSessionRepository.addLog(
-                        "⚠️ Tip: Enable Kingo King in Accessibility Settings for automatic typing and video clicking.",
-                        LogType.WARNING
-                    )
-                }
             } else {
                 // DEFAULT SIMULATION MODE: Shows in-app typewriter/radar loading screen
                 val foundItem = YouTubeSearchEngine.searchAndLocateVideo(
@@ -497,10 +591,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val inr = coins / 10.0
                 val formatted = String.format(java.util.Locale.US, "%.2f", inr)
                 WatchSessionRepository.addLog(
-                    "Withdrawal processed: $coins coins (₹$formatted INR) to $method: $destination",
+                    "Withdrawal request submitted: $coins coins (₹$formatted INR) to $method: $destination",
                     LogType.SUCCESS
                 )
-                onComplete(true, "Successfully withdrawn ₹$formatted INR via $method!")
+                onComplete(true, "Payout request for ₹$formatted INR via $method submitted! It has been sent to the Admin Panel for approval.")
             } else {
                 onComplete(false, "Payout processing failed. Check wallet balance.")
             }
