@@ -36,41 +36,72 @@ object TitleMatcher {
             return MatchResult.UNKNOWN
         }
 
-        val titleMatches = normPlayingTitle == normTaskTitle ||
-                normPlayingTitle.contains(normTaskTitle) ||
-                normTaskTitle.contains(normPlayingTitle)
+        val normPlayingArtist = normalize(playingArtist)
+        val normTaskAuthor = normalize(taskAuthor)
+
+        val isJustAuthorName = normTaskAuthor.isNotEmpty() && (
+                normPlayingTitle == normTaskAuthor ||
+                normTaskAuthor.contains(normPlayingTitle) ||
+                normPlayingTitle.replace(" ", "") == normTaskAuthor.replace(" ", "")
+        )
+
+        val titleMatches = !isJustAuthorName && (
+                normPlayingTitle == normTaskTitle ||
+                (normTaskTitle.length >= 6 && normPlayingTitle.contains(normTaskTitle)) ||
+                (normPlayingTitle.length >= 10 &&
+                        normPlayingTitle.length >= (normTaskTitle.length * 0.65f).toInt() &&
+                        normTaskTitle.contains(normPlayingTitle))
+        )
 
         val stopWords = setOf(
             "the", "and", "official", "video", "music", "audio", "with",
-            "from", "feat", "song", "lyrics", "full", "remaster", "remastered"
+            "from", "feat", "song", "lyrics", "full", "remaster", "remastered",
+            "hd", "4k", "hq", "live", "new", "youtube", "task"
         )
-        val taskWords = normTaskTitle.split(" ").map { it.trim() }.filter { it.length >= 3 && !stopWords.contains(it) }
-        val matchingWords = taskWords.count { word -> normPlayingTitle.contains(word) }
-        val keywordMatches = taskWords.isNotEmpty() &&
-                ((matchingWords >= 2 && matchingWords.toFloat() / taskWords.size.coerceAtLeast(1) >= 0.5f) ||
-                 (taskWords.size == 1 && matchingWords == 1) ||
-                 (normTaskTitle.length >= 10 && normPlayingTitle.contains(normTaskTitle.take(12))))
+        val authorWords = if (normTaskAuthor.isNotEmpty()) {
+            normTaskAuthor.split(" ").map { it.trim() }.filter { it.length >= 2 }.toSet()
+        } else {
+            emptySet()
+        }
+
+        val allTaskWords = normTaskTitle.split(" ").map { it.trim() }.filter { it.length >= 3 && !stopWords.contains(it) }
+        val distinctiveTaskWords = allTaskWords.filter { !authorWords.contains(it) }
+        val taskWords = distinctiveTaskWords.ifEmpty { allTaskWords }
+
+        val playingWords = normPlayingTitle.split(" ").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+        val matchingWords = taskWords.count { word ->
+            playingWords.contains(word) || (word.length >= 5 && normPlayingTitle.contains(word))
+        }
+
+        val keywordMatches = taskWords.isNotEmpty() && (
+                (taskWords.size >= 2 && matchingWords >= 2 && (matchingWords.toFloat() / taskWords.size) >= 0.6f) ||
+                (taskWords.size == 1 && matchingWords == 1)
+        )
 
         if (!titleMatches && !keywordMatches) {
             return MatchResult.MISMATCH
         }
 
-        // If artist is available and task author is available, verify loose match
-        val normPlayingArtist = normalize(playingArtist)
-        val normTaskAuthor = normalize(taskAuthor)
+        // If artist/channel is available and task author is available (and not a generic placeholder), verify channel match
+        val isGenericAuthor = normTaskAuthor == "youtube creator" ||
+                normTaskAuthor == "youtube channel" ||
+                normTaskAuthor == "youtube" ||
+                normTaskAuthor == "unknown"
 
-        if (normPlayingArtist.isNotEmpty() && normTaskAuthor.isNotEmpty()) {
+        if (normPlayingArtist.isNotEmpty() && normTaskAuthor.isNotEmpty() && !isGenericAuthor) {
             val compactArtist = normPlayingArtist.replace(" ", "")
             val compactAuthor = normTaskAuthor.replace(" ", "")
+            val authorDistinctiveWords = normTaskAuthor.split(" ").map { it.trim() }.filter { it.length >= 3 && !stopWords.contains(it) }
+            val matchingAuthorWords = authorDistinctiveWords.count { w -> normPlayingArtist.contains(w) }
 
             val artistMatches = normPlayingArtist == normTaskAuthor ||
                     normPlayingArtist.contains(normTaskAuthor) ||
                     normTaskAuthor.contains(normPlayingArtist) ||
                     compactArtist.contains(compactAuthor) ||
                     compactAuthor.contains(compactArtist) ||
-                    matchingWords >= 3
+                    (authorDistinctiveWords.isNotEmpty() && matchingAuthorWords == authorDistinctiveWords.size)
+
             if (!artistMatches) {
-                // Channel clearly differs (e.g. reupload or completely different track)
                 return MatchResult.MISMATCH
             }
         }

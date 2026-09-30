@@ -303,7 +303,11 @@ class DataStoreManager(private val context: Context) {
             val lockTime = System.currentTimeMillis() + durationMillis
             if (index != -1) {
                 val t = currentList[index]
-                currentList[index] = t.copy(lockedUntilMillis = lockTime)
+                currentList[index] = t.copy(
+                    isCompleted = false,
+                    watchedMillis = 0L,
+                    lockedUntilMillis = lockTime
+                )
                 prefs[KEY_VIDEO_TASKS] = serializeVideoTasksJson(currentList)
             }
         }
@@ -316,7 +320,32 @@ class DataStoreManager(private val context: Context) {
             val index = currentList.indexOfFirst { it.id == taskId }
             if (index != -1) {
                 val t = currentList[index]
-                currentList[index] = t.copy(lockedUntilMillis = 0L)
+                currentList[index] = t.copy(
+                    isCompleted = false,
+                    watchedMillis = 0L,
+                    lockedUntilMillis = 0L
+                )
+                prefs[KEY_VIDEO_TASKS] = serializeVideoTasksJson(currentList)
+            }
+        }
+    }
+
+    suspend fun unlockExpiredTasks() {
+        context.dataStore.edit { prefs ->
+            val json = prefs[KEY_VIDEO_TASKS] ?: return@edit
+            val now = System.currentTimeMillis()
+            val rawArray = try { JSONArray(json) } catch (_: Exception) { return@edit }
+            var anyExpired = false
+            for (i in 0 until rawArray.length()) {
+                val obj = rawArray.optJSONObject(i) ?: continue
+                val lockedUntil = obj.optLong("lockedUntilMillis", 0L)
+                if (lockedUntil in 1..now) {
+                    anyExpired = true
+                    break
+                }
+            }
+            if (anyExpired) {
+                val currentList = parseVideoTasksJson(json)
                 prefs[KEY_VIDEO_TASKS] = serializeVideoTasksJson(currentList)
             }
         }
@@ -647,10 +676,11 @@ class DataStoreManager(private val context: Context) {
             val index = currentList.indexOfFirst { it.id == taskId }
             if (index != -1) {
                 val t = currentList[index]
-                val lockDuration = 12 * 60 * 60 * 1000L
+                val lockDuration = 8 * 60 * 60 * 1000L
                 val lockUntil = System.currentTimeMillis() + lockDuration
                 currentList[index] = t.copy(
                     isCompleted = true,
+                    watchedMillis = 0L,
                     rewardCoins = rewardCoins,
                     lockedUntilMillis = lockUntil
                 )
@@ -714,10 +744,18 @@ class DataStoreManager(private val context: Context) {
 
     private fun parseVideoTasksJson(json: String): List<VideoTaskItem> {
         val list = mutableListOf<VideoTaskItem>()
+        val now = System.currentTimeMillis()
         try {
             val array = JSONArray(json)
             for (i in 0 until array.length()) {
                 val obj = array.getJSONObject(i)
+                val rawLockedUntil = obj.optLong("lockedUntilMillis", 0L)
+                val lockExpired = rawLockedUntil in 1..now
+                val effectiveLockedUntil = if (lockExpired) 0L else rawLockedUntil
+                val rawCompleted = obj.optBoolean("isCompleted", false)
+                val effectiveCompleted = if (lockExpired || effectiveLockedUntil == 0L) false else rawCompleted
+                val effectiveWatched = if (lockExpired) 0L else obj.optLong("watchedMillis", 0L)
+
                 list.add(
                     VideoTaskItem(
                         id = obj.optString("id", UUID.randomUUID().toString()),
@@ -727,12 +765,12 @@ class DataStoreManager(private val context: Context) {
                         thumbnailUrl = obj.optString("thumbnailUrl", ""),
                         durationSeconds = obj.optInt("durationSeconds", 600),
                         isLive = obj.optBoolean("isLive", false),
-                        isCompleted = obj.optBoolean("isCompleted", false),
-                        watchedMillis = obj.optLong("watchedMillis", 0L),
+                        isCompleted = effectiveCompleted,
+                        watchedMillis = effectiveWatched,
                         selectedDurationSeconds = obj.optInt("selectedDurationSeconds", 180),
                         rewardCoins = obj.optInt("rewardCoins", 10),
                         createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
-                        lockedUntilMillis = obj.optLong("lockedUntilMillis", 0L)
+                        lockedUntilMillis = effectiveLockedUntil
                     )
                 )
             }

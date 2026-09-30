@@ -72,7 +72,7 @@ fun TaskIncompleteDialog(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
-                    text = "Task Not Completed!",
+                    text = "Task Incomplete!",
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Black,
                     color = AlertRed

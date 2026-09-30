@@ -35,6 +35,25 @@ import kotlinx.coroutines.launch
 
 class FloatingTimerOverlayManager(private val context: Context) {
 
+    companion object {
+        private val globalAttachedViews = mutableListOf<View>()
+
+        private fun removeAllGlobalViews(wm: WindowManager) {
+            val iterator = globalAttachedViews.iterator()
+            while (iterator.hasNext()) {
+                val v = iterator.next()
+                try {
+                    wm.removeViewImmediate(v)
+                } catch (_: Exception) {
+                    try {
+                        wm.removeView(v)
+                    } catch (_: Exception) {}
+                }
+                iterator.remove()
+            }
+        }
+    }
+
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val mainHandler = Handler(Looper.getMainLooper())
     private val overlayScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -49,6 +68,7 @@ class FloatingTimerOverlayManager(private val context: Context) {
     private var celebrationContainer: LinearLayout? = null
     private var celebrationText: TextView? = null
     private var lastCelebratedTier: WatchDurationTier? = null
+    private var incompletePopupView: FrameLayout? = null
 
     private var isAttached = false
     private var currentCommentCount = 0
@@ -66,14 +86,28 @@ class FloatingTimerOverlayManager(private val context: Context) {
     @SuppressLint("ClickableViewAccessibility", "SetTextI18n")
     fun showOverlay() {
         runOnMain {
-            // Clean up any stale view before re-attaching
-            if (isAttached || overlayRootView != null) {
-                try {
-                    overlayRootView?.let { windowManager.removeView(it) }
-                } catch (_: Exception) {}
-                overlayRootView = null
-                isAttached = false
+            if (WatchSessionRepository.sessionState.value != com.example.data.SessionState.ACTIVE ||
+                WatchSessionRepository.isAppInForeground
+            ) {
+                return@runOnMain
             }
+
+            // If already attached and active, do not recreate or duplicate the overlay
+            if (isAttached && overlayRootView != null && incompletePopupView == null) {
+                return@runOnMain
+            }
+
+            // Guarantee no stale or duplicate overlay views exist in WindowManager
+            removeAllGlobalViews(windowManager)
+            overlayRootView?.let {
+                try { windowManager.removeView(it) } catch (_: Exception) {}
+            }
+            incompletePopupView?.let {
+                try { windowManager.removeView(it) } catch (_: Exception) {}
+            }
+            overlayRootView = null
+            incompletePopupView = null
+            isAttached = false
 
             if (!Settings.canDrawOverlays(context)) {
                 WatchSessionRepository.addLog(
@@ -324,6 +358,7 @@ class FloatingTimerOverlayManager(private val context: Context) {
 
             try {
                 windowManager.addView(root, params)
+                globalAttachedViews.add(root)
                 overlayRootView = root
                 isAttached = true
                 WatchSessionRepository.addLog("Side floating watch pill active on screen!", LogType.SUCCESS)
@@ -534,14 +569,209 @@ class FloatingTimerOverlayManager(private val context: Context) {
         }, 3200)
     }
 
-    fun hideOverlay() {
+    @SuppressLint("SetTextI18n")
+    fun showTaskIncompletePopup(message: String, onDismissed: (() -> Unit)? = null) {
         runOnMain {
+            // Remove all floating timer pills and previous popups first
+            removeAllGlobalViews(windowManager)
             overlayRootView?.let { root ->
                 try {
                     windowManager.removeView(root)
                 } catch (_: Exception) {}
             }
             overlayRootView = null
+            isAttached = false
+
+            incompletePopupView?.let { prev ->
+                try {
+                    windowManager.removeView(prev)
+                } catch (_: Exception) {}
+            }
+            incompletePopupView = null
+
+            if (!Settings.canDrawOverlays(context) || WatchSessionRepository.isAppInForeground) {
+                onDismissed?.invoke()
+                return@runOnMain
+            }
+
+            density = context.resources.displayMetrics.density
+            val screenWidth = context.resources.displayMetrics.widthPixels.coerceAtLeast(600)
+            val cardWidth = (screenWidth * 0.88f).toInt().coerceAtMost((360 * density).toInt())
+
+            val params = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                } else {
+                    @Suppress("DEPRECATION")
+                    WindowManager.LayoutParams.TYPE_PHONE
+                },
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.CENTER
+            }
+
+            val scrimRoot = FrameLayout(context).apply {
+                setBackgroundColor(Color.parseColor("#B3000000"))
+                layoutParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
+            }
+
+            val dialogCard = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
+                val pad = (22 * density).toInt()
+                setPadding(pad, pad, pad, pad)
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = 24 * density
+                    setColor(Color.parseColor("#0F172A"))
+                    setStroke((2 * density).toInt(), Color.parseColor("#EF4444"))
+                }
+                elevation = 24 * density
+                layoutParams = FrameLayout.LayoutParams(
+                    cardWidth,
+                    FrameLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    gravity = Gravity.CENTER
+                }
+            }
+
+            val iconBadge = TextView(context).apply {
+                text = "⚠️"
+                textSize = 28f
+                gravity = Gravity.CENTER
+                val badgeSize = (64 * density).toInt()
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(Color.parseColor("#33EF4444"))
+                }
+                layoutParams = LinearLayout.LayoutParams(badgeSize, badgeSize).apply {
+                    bottomMargin = (14 * density).toInt()
+                }
+            }
+            dialogCard.addView(iconBadge)
+
+            val titleTv = TextView(context).apply {
+                text = "Task Incomplete!"
+                setTextColor(Color.parseColor("#EF4444"))
+                textSize = 20f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                gravity = Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    bottomMargin = (8 * density).toInt()
+                }
+            }
+            dialogCard.addView(titleTv)
+
+            val lockBadgeTv = TextView(context).apply {
+                text = "🔒 Locked for 12 Hours • Timer Stopped"
+                setTextColor(Color.parseColor("#F87171"))
+                textSize = 12f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                gravity = Gravity.CENTER
+                setPadding((12 * density).toInt(), (5 * density).toInt(), (12 * density).toInt(), (5 * density).toInt())
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = 8 * density
+                    setColor(Color.parseColor("#26EF4444"))
+                }
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    bottomMargin = (12 * density).toInt()
+                }
+            }
+            dialogCard.addView(lockBadgeTv)
+
+            val msgTv = TextView(context).apply {
+                text = message
+                setTextColor(Color.parseColor("#E2E8F0"))
+                textSize = 13.5f
+                gravity = Gravity.CENTER
+                setLineSpacing(4 * density, 1f)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    bottomMargin = (18 * density).toInt()
+                }
+            }
+            dialogCard.addView(msgTv)
+
+            val okBtn = TextView(context).apply {
+                text = "OK, Samjh Gaya"
+                setTextColor(Color.BLACK)
+                textSize = 14f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                gravity = Gravity.CENTER
+                setPadding((16 * density).toInt(), (12 * density).toInt(), (16 * density).toInt(), (12 * density).toInt())
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = 12 * density
+                    setColor(Color.parseColor("#F59E0B"))
+                }
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+                setOnClickListener {
+                    dismissIncompletePopup()
+                    WatchSessionRepository.dismissTaskIncompleteMessage()
+                    onDismissed?.invoke()
+                }
+            }
+            dialogCard.addView(okBtn)
+
+            scrimRoot.addView(dialogCard)
+
+            try {
+                windowManager.addView(scrimRoot, params)
+                globalAttachedViews.add(scrimRoot)
+                incompletePopupView = scrimRoot
+            } catch (_: Exception) {
+                incompletePopupView = null
+                onDismissed?.invoke()
+            }
+        }
+    }
+
+    fun dismissIncompletePopup() {
+        runOnMain {
+            incompletePopupView?.let { popup ->
+                try {
+                    windowManager.removeView(popup)
+                } catch (_: Exception) {}
+                globalAttachedViews.remove(popup)
+            }
+            incompletePopupView = null
+        }
+    }
+
+    fun hideOverlay() {
+        runOnMain {
+            removeAllGlobalViews(windowManager)
+            overlayRootView?.let { root ->
+                try {
+                    windowManager.removeView(root)
+                } catch (_: Exception) {}
+            }
+            overlayRootView = null
+            incompletePopupView?.let { popup ->
+                try {
+                    windowManager.removeView(popup)
+                } catch (_: Exception) {}
+            }
+            incompletePopupView = null
             isAttached = false
             lastCelebratedTier = null
             currentCommentCount = 0

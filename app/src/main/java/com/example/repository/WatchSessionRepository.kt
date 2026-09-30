@@ -37,6 +37,21 @@ object WatchSessionRepository {
     var isMediaSessionExplicitlyPaused: Boolean = false
         private set
 
+    @Volatile
+    var hasLeftAppForYouTube: Boolean = false
+        private set
+
+    private val _taskIncompleteMessage = MutableStateFlow<String?>(null)
+    val taskIncompleteMessage: StateFlow<String?> = _taskIncompleteMessage.asStateFlow()
+
+    fun dismissTaskIncompleteMessage() {
+        _taskIncompleteMessage.value = null
+    }
+
+    fun showTaskIncompleteMessage(message: String) {
+        _taskIncompleteMessage.value = message
+    }
+
     private val _matchResult = MutableStateFlow(MatchResult.UNKNOWN)
     val matchResult: StateFlow<MatchResult> = _matchResult.asStateFlow()
 
@@ -103,15 +118,45 @@ object WatchSessionRepository {
     // Listener for service notification triggers
     var onRedAlertTriggered: ((title: String, message: String) -> Unit)? = null
     var onCompletionTriggered: ((coins: Int, title: String) -> Unit)? = null
+    var onServiceCompletionTriggered: ((coins: Int, title: String) -> Unit)? = null
     var onSaveProgressNeeded: ((millis: Long) -> Unit)? = null
     var onTaskLikeDetected: (() -> Unit)? = null
     var onVideoAlreadyLikedDetected: ((taskId: String) -> Unit)? = null
+    var onOverlayVideoAlreadyLiked: ((taskId: String) -> Unit)? = null
     var onTaskCommentDetected: (() -> Unit)? = null
     var onRequestHideOverlay: (() -> Unit)? = null
     var onRequestShowOverlay: (() -> Unit)? = null
     var onSessionInterrupted: ((reason: String) -> Unit)? = null
     var onTaskIncompleteAndLocked: ((taskId: String, reason: String, lockDurationMillis: Long) -> Unit)? = null
+    var onServiceTaskIncomplete: ((taskId: String, reason: String, lockDurationMillis: Long) -> Unit)? = null
     var onMilestoneCoinsAwarded: ((coins: Int, title: String) -> Unit)? = null
+
+    fun triggerTaskIncomplete(reason: String) {
+        val currentState = _sessionState.value
+        if (currentState != SessionState.ACTIVE && currentState != SessionState.WAITING) {
+            return
+        }
+        addLog(reason, LogType.ERROR)
+
+        _watchedMillis.value = 0L
+        _currentMilestoneTier.value = null
+        lastTickRealtime = 0L
+        isMediaSessionExplicitlyPaused = false
+        hasLeftAppForYouTube = false
+        _playbackState.value = VideoPlaybackState.STOPPED
+        _sessionState.value = SessionState.INVALID
+        _redAlertMessage.value = reason
+        _taskIncompleteMessage.value = reason
+
+        onSaveProgressNeeded?.invoke(0L)
+        com.example.service.YouTubeLiveSearchService.disarm()
+
+        val activeId = _activeTaskId.value
+        if (activeId != null) {
+            onTaskIncompleteAndLocked?.invoke(activeId, reason, 12 * 60 * 60 * 1000L)
+        }
+        onServiceTaskIncomplete?.invoke(activeId ?: "", reason, 12 * 60 * 60 * 1000L)
+    }
 
     fun triggerTaskLike() {
         onTaskLikeDetected?.invoke()
@@ -177,9 +222,11 @@ object WatchSessionRepository {
         _watchedMillis.value = 0L
         _currentMilestoneTier.value = null
         isMilestoneAwarded = false
+        hasLeftAppForYouTube = false
         _rewardCoins.value = rewardCoins
         _activeTaskId.value = taskId
         _redAlertMessage.value = null
+        _taskIncompleteMessage.value = null
         _isGracePeriodActive.value = false
         _currentMediaTitle.value = taskTitle
         _currentMediaArtist.value = taskAuthor
@@ -191,6 +238,7 @@ object WatchSessionRepository {
         _sessionState.value = SessionState.ACTIVE
         com.example.service.YouTubeLiveSearchService.isYouTubeInForeground = true
         com.example.service.YouTubeLiveSearchService.isVideoExplicitlyPaused = false
+        com.example.service.YouTubeLiveSearchService.resetMonitoringCounters()
 
         addLog("Task started. Target: \"$taskTitle\". Continuous watch session initialized from 00:00!", LogType.SUCCESS)
 
@@ -206,6 +254,7 @@ object WatchSessionRepository {
         _currentMilestoneTier.value = null
         isMilestoneAwarded = false
         isMediaSessionExplicitlyPaused = false
+        hasLeftAppForYouTube = false
         _activeTaskId.value = taskId
         _redAlertMessage.value = null
         _isGracePeriodActive.value = false
@@ -215,14 +264,18 @@ object WatchSessionRepository {
     }
 
     /**
-     * Called by WatchListenerService when YouTube media metadata changes
+     * Called by WatchListenerService or WatchTimerService when YouTube media metadata is read
      */
     fun onMediaMetadataChanged(title: String?, artist: String?) {
+        if (title.isNullOrBlank()) return
+        val changed = title != _currentMediaTitle.value || artist != _currentMediaArtist.value
         _mediaSessionDetected.value = true
         _currentMediaTitle.value = title
         _currentMediaArtist.value = artist
 
-        addLog("YouTube metadata: \"$title\" by \"$artist\"", LogType.INFO)
+        if (changed) {
+            addLog("YouTube metadata: \"$title\" by \"$artist\"", LogType.INFO)
+        }
         recomputeMatchAndState()
     }
 
@@ -239,6 +292,7 @@ object WatchSessionRepository {
             else -> VideoPlaybackState.NONE
         }
 
+        val prevState = _playbackState.value
         val elapsedSinceLaunch = System.currentTimeMillis() - taskLaunchTimestampMillis
         when (state) {
             VideoPlaybackState.PLAYING, VideoPlaybackState.BUFFERING -> {
@@ -257,7 +311,9 @@ object WatchSessionRepository {
             }
         }
 
-        addLog("YouTube playback state: $state", LogType.INFO)
+        if (prevState != _playbackState.value) {
+            addLog("YouTube playback state: $state", LogType.INFO)
+        }
         recomputeMatchAndState()
     }
 
@@ -266,12 +322,15 @@ object WatchSessionRepository {
      */
     fun onYouTubeNotificationPosted(title: String?, text: String?) {
         _mediaSessionDetected.value = true
-        if (_currentMediaTitle.value.isNullOrBlank() && !title.isNullOrBlank()) {
+        if (!title.isNullOrBlank()) {
+            val changed = title != _currentMediaTitle.value || text != _currentMediaArtist.value
             _currentMediaTitle.value = title
             if (!text.isNullOrBlank()) {
                 _currentMediaArtist.value = text
             }
-            addLog("YouTube notification detected: \"$title\"", LogType.INFO)
+            if (changed) {
+                addLog("YouTube notification detected: \"$title\"", LogType.INFO)
+            }
             recomputeMatchAndState()
         }
     }
@@ -308,7 +367,7 @@ object WatchSessionRepository {
         _matchResult.value = match
 
         val currentState = _sessionState.value
-        if (currentState == SessionState.COMPLETED || currentState == SessionState.INVALID) {
+        if (currentState == SessionState.COMPLETED || currentState == SessionState.INVALID || currentState == SessionState.IDLE) {
             return
         }
 
@@ -330,32 +389,31 @@ object WatchSessionRepository {
 
             MatchResult.MISMATCH -> {
                 val detected = _currentMediaTitle.value ?: ""
-                val isLikelyAd = detected.contains("Ad", ignoreCase = true) || 
-                                 detected.contains("Sponsored", ignoreCase = true) || 
-                                 detected.length < 4
+                val isLikelyAd = detected.equals("Ad", ignoreCase = true) ||
+                        detected.startsWith("Ad ", ignoreCase = true) ||
+                        detected.startsWith("Ad:", ignoreCase = true) ||
+                        detected.contains("Sponsored", ignoreCase = true) ||
+                        detected.contains("Advertisement", ignoreCase = true) ||
+                        detected.length < 3
 
-                if (isLikelyAd) {
+                val elapsedSinceLaunch = System.currentTimeMillis() - taskLaunchTimestampMillis
+                val isLiveSearching = com.example.service.YouTubeLiveSearchService.currentPhase != com.example.service.YouTubeLiveSearchService.LiveSearchPhase.IDLE &&
+                        com.example.service.YouTubeLiveSearchService.currentPhase != com.example.service.YouTubeLiveSearchService.LiveSearchPhase.COMPLETED
+                val lastClick = com.example.service.YouTubeLiveSearchService.lastClickTime
+                val elapsedSinceLiveClick = if (lastClick > 0L) System.currentTimeMillis() - lastClick else elapsedSinceLaunch
+
+                if (elapsedSinceLaunch < 5500L || isLiveSearching || (lastClick > 0L && elapsedSinceLiveClick < 5000L)) {
+                    // Initial launch/search transition: do not count time yet, wait for target video to load
+                    lastTickRealtime = 0L
+                } else if (isLikelyAd) {
                     // Pre-roll ad or sponsor: pause timer progress so ad time is not counted
                     lastTickRealtime = 0L
                     addLog("Pre-roll ad or sponsor detected (\"$detected\"). Timer paused until target video plays.", LogType.INFO)
-                } else if (isPlaying && currentState == SessionState.ACTIVE) {
-                    // User played a DIFFERENT video!
-                    // Strictly cancel session, reset time to 0, and lock task for 12 hours!
+                } else if (currentState == SessionState.ACTIVE) {
+                    // User played a DIFFERENT video in YouTube!
                     val wrongTitle = detected.ifBlank { "Doosra video" }
-                    val message = "⚠️ Wrong Video Detected: Aapne doosra video open kiya (\"$wrongTitle\"). Sirf task targeted video dekhne par hi coins milte hain. Continuous watch cancel ho gayi, time reset ho gaya aur task 12 ghante ke liye lock ho gaya."
-                    addLog(message, LogType.ERROR)
-
-                    _watchedMillis.value = 0L
-                    _currentMilestoneTier.value = null
-                    lastTickRealtime = 0L
-                    onSaveProgressNeeded?.invoke(0L)
-                    _sessionState.value = SessionState.INVALID
-
-                    val activeId = _activeTaskId.value
-                    if (activeId != null) {
-                        onTaskIncompleteAndLocked?.invoke(activeId, message, 12 * 60 * 60 * 1000L)
-                    }
-                    onRedAlertTriggered?.invoke("Wrong Video Played", message)
+                    val message = "Task Incomplete! Aapne YouTube par target video (\"$target\") ke bajaye doosra video (\"$wrongTitle\") play kar diya. Sirf target title aur channel wala video play hone par hi timer chalega."
+                    triggerTaskIncomplete(message)
                 }
             }
 
@@ -370,12 +428,7 @@ object WatchSessionRepository {
      */
     fun onAppSwitchedOrMinimized() {
         if (_sessionState.value == SessionState.ACTIVE) {
-            val watchedSecs = (_watchedMillis.value / 1000).toInt()
-            val requiredSecs = (_requiredMillis.value / 1000).toInt()
-            addLog("Watching paused (${watchedSecs}s / ${requiredSecs}s). Re-open YouTube to resume.", LogType.INFO)
-            _playbackState.value = VideoPlaybackState.PAUSED
-            lastTickRealtime = 0L
-            onRequestHideOverlay?.invoke()
+            triggerTaskIncomplete("Task Incomplete! Aapne YouTube minimize kar diya ya YouTube se back kar ke doosre app mein switch kar liya.")
         }
     }
 
@@ -394,9 +447,15 @@ object WatchSessionRepository {
                 _playbackState.value = VideoPlaybackState.PAUSED
                 lastTickRealtime = 0L
                 onRequestHideOverlay?.invoke()
-                addLog("App opened in foreground - watching paused", LogType.INFO)
+                val elapsedSinceLaunch = System.currentTimeMillis() - taskLaunchTimestampMillis
+                if (_sessionState.value == SessionState.ACTIVE && hasLeftAppForYouTube && elapsedSinceLaunch > 2500L) {
+                    triggerTaskIncomplete("Task Incomplete! Aap task pura hone se pehle YouTube se back/switch kar ke bahar aa gaye. Pura reward pane ke liye timer khatam hone tak target video dekhna zaroori hai.")
+                } else {
+                    addLog("App opened in foreground - watching paused", LogType.INFO)
+                }
             } else {
                 if (_sessionState.value == SessionState.ACTIVE) {
+                    hasLeftAppForYouTube = true
                     com.example.service.YouTubeLiveSearchService.isYouTubeInForeground = true
                     com.example.service.YouTubeLiveSearchService.isVideoExplicitlyPaused = false
                     isMediaSessionExplicitlyPaused = false
@@ -500,7 +559,9 @@ object WatchSessionRepository {
         val earned = milestone.coins
         addLog("🎉 Task complete! Milestone reached: ${milestone.minutes}m continuous watch. +$earned coins rewarded.", LogType.SUCCESS)
         onMilestoneCoinsAwarded?.invoke(earned, "Task Completed (+${earned}c)")
-        onCompletionTriggered?.invoke(earned, _targetTaskTitle.value ?: "Video Task")
+        val completedTitle = _targetTaskTitle.value ?: "Video Task"
+        onCompletionTriggered?.invoke(earned, completedTitle)
+        onServiceCompletionTriggered?.invoke(earned, completedTitle)
     }
 
     fun abortOrStopSession() {

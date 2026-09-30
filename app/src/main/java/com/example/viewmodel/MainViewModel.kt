@@ -92,11 +92,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val cloudServerStatus: StateFlow<String> = dataStoreManager.cloudServerStatusFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, "Not Connected (Local Mode)")
 
-    private val _taskIncompleteMessage = MutableStateFlow<String?>(null)
-    val taskIncompleteMessage: StateFlow<String?> = _taskIncompleteMessage.asStateFlow()
+    val taskIncompleteMessage: StateFlow<String?> = WatchSessionRepository.taskIncompleteMessage
 
     fun dismissTaskIncompleteMessage() {
-        _taskIncompleteMessage.value = null
+        WatchSessionRepository.dismissTaskIncompleteMessage()
     }
 
     private val _adminServerRunning = MutableStateFlow(com.example.admin.AdminWebServer.isRunning)
@@ -178,11 +177,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _sessionInterruptedMessage.value = message
         }
 
-        WatchSessionRepository.onTaskIncompleteAndLocked = { taskId, reason, lockDuration ->
+        WatchSessionRepository.onTaskIncompleteAndLocked = { taskId, _, lockDuration ->
             viewModelScope.launch {
                 dataStoreManager.lockTask(taskId, lockDuration)
             }
-            _taskIncompleteMessage.value = reason
         }
 
         WatchSessionRepository.onVideoAlreadyLikedDetected = { taskId ->
@@ -227,7 +225,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
-            dataStoreManager.unlockAllTasks()
+            while (true) {
+                dataStoreManager.unlockExpiredTasks()
+                delay(30_000L)
+            }
         }
     }
 
@@ -568,11 +569,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return // Avoid duplicate search clicks
         }
 
-        // Check if task is currently locked for 12 hours
+        // Check if task is currently locked (8h for completed, 12h for incomplete)
         val currentTask = videoTasks.value.find { it.id == taskId }
         if (currentTask != null && currentTask.isLocked) {
             val remainStr = currentTask.getLockRemainingFormatted()
-            _taskIncompleteMessage.value = "⚠️ Yeh task abhi locked hai ($remainStr remaining). Incomplete task 12 ghante ke liye lock ho gaya tha."
+            if (currentTask.isCompleted) {
+                WatchSessionRepository.showTaskIncompleteMessage("🔒 Yeh task complete hone ke baad 8 ghante ke liye lock hai ($remainStr remaining). 8 ghante poore hone ke baad aap isse rewatch kar sakte hain.")
+            } else {
+                WatchSessionRepository.showTaskIncompleteMessage("⚠️ Yeh task incomplete hone ki wajah se 12 ghante ke liye lock hai ($remainStr remaining). 12 ghante poore hone ke baad yeh task rewatch hoga.")
+            }
             return
         }
 
@@ -587,22 +592,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 videoUrl
             }
 
-            // Ensure oEmbed metadata is loaded
-            var currentOEmbed = _oEmbedState.value
-            if (currentOEmbed !is OEmbedResult.Success) {
-                currentOEmbed = OEmbedFetcher.fetchOEmbed(effectiveUrl)
-                _oEmbedState.value = currentOEmbed
+            // Ensure oEmbed metadata is loaded for the exact target URL
+            val fetchedOEmbed = OEmbedFetcher.fetchOEmbed(effectiveUrl)
+            if (fetchedOEmbed is OEmbedResult.Success) {
+                _oEmbedState.value = fetchedOEmbed
             }
 
-            val title: String
-            val author: String
-            if (currentOEmbed is OEmbedResult.Success) {
-                title = currentOEmbed.title
-                author = currentOEmbed.authorName
-            } else {
-                title = "YouTube Video Task"
-                author = ""
+            val taskTitleCandidate = currentTask?.title?.takeIf {
+                it.isNotBlank() && it != "YouTube Video" && !it.startsWith("YouTube Video (") && it != "YouTube Video Task"
             }
+            val taskChannelCandidate = currentTask?.channelName?.takeIf {
+                it.isNotBlank() && it != "YouTube Creator" && it != "YouTube Channel"
+            }
+
+            val oEmbedSuccess = (fetchedOEmbed as? OEmbedResult.Success) ?: (_oEmbedState.value as? OEmbedResult.Success)
+            val oEmbedTitleCandidate = oEmbedSuccess?.title?.takeIf {
+                it.isNotBlank() && it != "YouTube Video" && !it.startsWith("YouTube Video (")
+            }
+            val oEmbedAuthorCandidate = oEmbedSuccess?.authorName?.takeIf {
+                it.isNotBlank() && it != "YouTube Creator" && it != "YouTube Channel"
+            }
+
+            val title: String = oEmbedTitleCandidate ?: taskTitleCandidate ?: currentTask?.title ?: "YouTube Video Task"
+            val author: String = oEmbedAuthorCandidate ?: taskChannelCandidate ?: currentTask?.channelName ?: ""
 
             val targetVideoId = TitleMatcher.extractVideoId(effectiveUrl)
 

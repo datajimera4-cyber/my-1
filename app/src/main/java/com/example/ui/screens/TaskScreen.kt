@@ -86,6 +86,7 @@ import com.example.data.OEmbedResult
 import com.example.data.SampleTask
 import com.example.data.SessionState
 import com.example.data.VideoPlaybackState
+import com.example.repository.WatchSessionRepository
 import com.example.ui.theme.AlertRed
 import com.example.ui.theme.AlertRedDark
 import com.example.ui.theme.AmberPrimary
@@ -905,7 +906,15 @@ fun TaskScreen(
                 onClick = {
                     if (isTaskLocked) {
                         val remainStr = currentSelectedTask?.getLockRemainingFormatted() ?: "12h"
-                        viewModel.lockTask(currentSelectedTask?.id ?: "", 0L)
+                        if (currentSelectedTask?.isCompleted == true) {
+                            WatchSessionRepository.showTaskIncompleteMessage(
+                                "🔒 Yeh task complete hone ke baad 8 ghante ke liye lock hai ($remainStr remaining). 8 ghante baad aap isse rewatch kar sakte hain."
+                            )
+                        } else {
+                            WatchSessionRepository.showTaskIncompleteMessage(
+                                "⚠️ Yeh task incomplete hone ki wajah se 12 ghante ke liye lock hai ($remainStr remaining). 12 ghante baad aap isse rewatch kar sakte hain."
+                            )
+                        }
                     } else if (!PermissionHelper.isOverlayPermissionGranted(context)) {
                         showOverlayPromptDialog = true
                     } else if (liveSearchMode && !PermissionHelper.isAccessibilityServiceEnabled(context)) {
@@ -937,6 +946,7 @@ fun TaskScreen(
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = when {
+                        isTaskLocked && currentSelectedTask?.isCompleted == true -> "Completed • Rewatch in ${currentSelectedTask?.getLockRemainingFormatted()}"
                         isTaskLocked -> "Task Locked (${currentSelectedTask?.getLockRemainingFormatted()})"
                         isTaskCompletedEffective -> "Task Already Completed"
                         sessionState == SessionState.ACTIVE -> "Resume in YouTube"

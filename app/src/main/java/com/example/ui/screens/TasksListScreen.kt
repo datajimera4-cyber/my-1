@@ -74,10 +74,12 @@ import coil.request.ImageRequest
 import com.example.data.SessionState
 import com.example.data.VideoTaskItem
 import com.example.data.WATCH_DURATION_TIERS
+import com.example.repository.WatchSessionRepository
 import com.example.ui.components.ActiveWatchTimerBanner
 import com.example.ui.components.AddVideoTaskDialog
 import com.example.ui.components.DurationSelectionDialog
 import com.example.ui.components.SearchLoadingOverlay
+import com.example.ui.theme.AlertRed
 import com.example.ui.theme.AmberDark
 import com.example.ui.theme.AmberPrimary
 import com.example.ui.theme.Slate700
@@ -354,9 +356,19 @@ fun TasksListScreen(
                     activeWatchedMillis = if (isCurrentlyActive) currentWatchedMillis else task.watchedMillis,
                     onStartClick = {
                         if (task.isLocked) {
-                            viewModel.unlockTask(task.id)
+                            val remainStr = task.getLockRemainingFormatted()
+                            if (task.isCompleted) {
+                                WatchSessionRepository.showTaskIncompleteMessage(
+                                    "🔒 Yeh task complete ho chuka hai aur 8 ghante ke liye lock hai ($remainStr remaining). 8 ghante baad yeh task rewatch hoga."
+                                )
+                            } else {
+                                WatchSessionRepository.showTaskIncompleteMessage(
+                                    "⚠️ Yeh task incomplete hone ki wajah se 12 ghante ke liye lock hai ($remainStr remaining). 12 ghante baad yeh task rewatch hoga."
+                                )
+                            }
+                        } else {
+                            taskForDurationSelection = task
                         }
-                        taskForDurationSelection = task
                     },
                     onLikeClick = {
                         viewModel.likeTask(task.id, task.title)
@@ -365,9 +377,6 @@ fun TasksListScreen(
                         viewModel.commentTask(task.id, task.title)
                     },
                     onCardClick = {
-                        if (task.isLocked) {
-                            viewModel.unlockTask(task.id)
-                        }
                         viewModel.selectTask(task)
                         viewModel.navigateTo(AppScreen.TASK)
                     }
@@ -772,14 +781,15 @@ fun VideoTaskCard(
                 // Tier range info
                 Text(
                     text = when {
-                        task.isLocked -> "Tap Unlock & Watch to play"
+                        task.isLocked && task.isCompleted -> "Completed • Rewatch in ${task.getLockRemainingFormatted()} (8h Lock)"
+                        task.isLocked -> "Incomplete • Rewatch in ${task.getLockRemainingFormatted()} (12h Lock)"
                         task.isLive -> "Live Stream • Goals: 3m - 30m"
                         task.durationSeconds >= 1800 -> "Goals: 3m, 5m, 10m, 20m, 30m"
                         task.durationSeconds >= 600 -> "Goals: 3m, 5m, 10m"
                         else -> "Goals: 3m"
                     },
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (task.isLocked) AlertRed else MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 11.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -793,23 +803,23 @@ fun VideoTaskCard(
                     onClick = onStartClick,
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (task.isLocked) AmberPrimary else if (task.isCompleted) MaterialTheme.colorScheme.surfaceVariant else AmberPrimary
+                        containerColor = if (task.isLocked) MaterialTheme.colorScheme.surfaceVariant else if (task.isCompleted) MaterialTheme.colorScheme.surfaceVariant else AmberPrimary
                     ),
                     modifier = Modifier
                         .height(36.dp)
                         .testTag("task_action_button_${task.id}")
                 ) {
                     Icon(
-                        imageVector = if (task.isCompleted) Icons.Default.CheckCircle else Icons.Default.PlayArrow,
+                        imageVector = if (task.isLocked) Icons.Default.Lock else if (task.isCompleted) Icons.Default.CheckCircle else Icons.Default.PlayArrow,
                         contentDescription = null,
-                        tint = if (task.isCompleted) MaterialTheme.colorScheme.onSurfaceVariant else Color.Black,
+                        tint = if (task.isLocked) AlertRed else if (task.isCompleted) MaterialTheme.colorScheme.onSurfaceVariant else Color.Black,
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = if (task.isLocked) "Unlock & Watch" else if (task.isCompleted) "Rewatch" else "Start Watch",
+                        text = if (task.isLocked) "Locked (${task.getLockRemainingFormatted()})" else if (task.isCompleted) "Rewatch" else "Start Watch",
                         fontWeight = FontWeight.Bold,
-                        color = if (task.isCompleted) MaterialTheme.colorScheme.onSurfaceVariant else Color.Black,
+                        color = if (task.isLocked) AlertRed else if (task.isCompleted) MaterialTheme.colorScheme.onSurfaceVariant else Color.Black,
                         fontSize = 12.sp
                     )
                 }
