@@ -75,6 +75,29 @@ android {
   }
 }
 
+// Ensure any stale files in src/main or src/user that were moved/removed are cleaned up before build
+listOf(
+  "src/main/java/com/example/MainActivity.kt",
+  "src/main/java/com/example/admin",
+  "src/main/java/com/example/ui/screens",
+  "src/main/java/com/example/ui/components",
+  "src/main/res/drawable",
+  "src/main/res/mipmap-anydpi-v26",
+  "src/main/res/mipmap-hdpi",
+  "src/main/res/mipmap-mdpi",
+  "src/main/res/mipmap-xhdpi",
+  "src/main/res/mipmap-xxhdpi",
+  "src/main/res/mipmap-xxxhdpi",
+  "src/user/java/com/example/ui/screens/DiagnosticsScreen.kt",
+  "src/user/java/com/example/ui/screens/SetupScreen.kt",
+  "src/user/java/com/example/ui/components/ChangeVideoLinkDialog.kt"
+).forEach { relativePath ->
+  val target = file(relativePath)
+  if (target.exists()) {
+    target.deleteRecursively()
+  }
+}
+
 // Configure the Secrets Gradle Plugin to use .env and .env.example files
 // to match the convention used in Web projects.
 secrets {
