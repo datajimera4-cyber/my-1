@@ -28,16 +28,12 @@ android {
       applicationId = "com.example.kingo.admin"
       resValue("string", "app_name", "Kingo Admin")
       buildConfigField("String", "APP_ROLE", "\"ADMIN\"")
-      manifestPlaceholders["appIcon"] = "@mipmap/ic_admin_launcher"
-      manifestPlaceholders["appRoundIcon"] = "@mipmap/ic_admin_launcher_round"
     }
     create("user") {
       dimension = "role"
       applicationId = "com.example.kingo.user"
       resValue("string", "app_name", "Kingo King")
       buildConfigField("String", "APP_ROLE", "\"USER\"")
-      manifestPlaceholders["appIcon"] = "@mipmap/ic_launcher"
-      manifestPlaceholders["appRoundIcon"] = "@mipmap/ic_launcher_round"
     }
   }
 
@@ -82,10 +78,10 @@ android {
   }
 }
 
-// Ensure any leftover src/admin or src/user directories are removed so all code compiles cleanly from src/main
+// Ensure any leftover src/admin/java or src/user/java directories are removed so all Kotlin code compiles cleanly from src/main, while keeping flavor-specific res/ icons intact
 listOf(
-  "src/admin",
-  "src/user"
+  "src/admin/java",
+  "src/user/java"
 ).forEach { relativePath ->
   val target = file(relativePath)
   if (target.exists()) {
