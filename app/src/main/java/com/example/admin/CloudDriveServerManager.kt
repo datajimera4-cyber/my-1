@@ -1,4 +1,4 @@
-package com.example.repository
+package com.example.admin
 
 import android.util.Log
 import com.example.data.AdminPostItem

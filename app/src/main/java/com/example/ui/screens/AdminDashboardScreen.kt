@@ -1129,7 +1129,7 @@ private fun GoogleDriveServerTabContent(
 
                     Button(
                         onClick = {
-                            val script = com.example.repository.CloudDriveServerManager.getGoogleAppsScriptTemplate()
+                            val script = com.example.admin.CloudDriveServerManager.getGoogleAppsScriptTemplate()
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                             clipboard.setPrimaryClip(ClipData.newPlainText("Google Apps Script", script))
                             Toast.makeText(context, "Full Server Script Copied to Clipboard!", Toast.LENGTH_LONG).show()

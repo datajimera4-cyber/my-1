@@ -244,7 +244,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val url = cloudServerUrl.value
                 if (url.isNotBlank()) {
                     try {
-                        com.example.repository.CloudDriveServerManager.syncData(url, dataStoreManager)
+                        com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager)
                     } catch (_: Exception) {}
                 }
                 delay(15_000L)
@@ -365,7 +365,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val url = cloudServerUrl.value
             if (url.isNotBlank()) {
                 try {
-                    com.example.repository.CloudDriveServerManager.syncData(url, dataStoreManager)
+                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager)
                 } catch (_: Exception) {}
             }
             WatchSessionRepository.addLog("Created new video task: \"$finalTitle\"", LogType.SUCCESS)
@@ -543,7 +543,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val url = cloudServerUrl.value
             if (url.isNotBlank()) {
                 try {
-                    com.example.repository.CloudDriveServerManager.syncData(url, dataStoreManager)
+                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager)
                 } catch (_: Exception) {}
             }
             WatchSessionRepository.addLog("Admin: Deleted task #$taskId", LogType.INFO)
@@ -556,7 +556,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val url = cloudServerUrl.value
             if (url.isNotBlank()) {
                 try {
-                    com.example.repository.CloudDriveServerManager.syncData(url, dataStoreManager)
+                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager)
                 } catch (_: Exception) {}
             }
             WatchSessionRepository.addLog(
@@ -606,7 +606,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val url = cloudServerUrl.value
             if (url.isNotBlank()) {
                 try {
-                    com.example.repository.CloudDriveServerManager.syncData(url, dataStoreManager)
+                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager)
                 } catch (_: Exception) {}
             }
             WatchSessionRepository.addLog("Admin published ${post.postType} to ${post.targetTab}: \"${post.title}\"", LogType.SUCCESS)
@@ -619,7 +619,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val url = cloudServerUrl.value
             if (url.isNotBlank()) {
                 try {
-                    com.example.repository.CloudDriveServerManager.syncData(url, dataStoreManager)
+                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager)
                 } catch (_: Exception) {}
             }
             WatchSessionRepository.addLog(
@@ -635,7 +635,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val url = cloudServerUrl.value
             if (url.isNotBlank()) {
                 try {
-                    com.example.repository.CloudDriveServerManager.syncData(url, dataStoreManager)
+                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager)
                 } catch (_: Exception) {}
             }
             WatchSessionRepository.addLog("Admin deleted post #$postId", LogType.INFO)
@@ -703,7 +703,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         viewModelScope.launch {
-            val res = com.example.repository.CloudDriveServerManager.syncData(url, dataStoreManager)
+            val res = com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager)
             onResult(res.first, res.second)
             if (res.first) {
                 WatchSessionRepository.addLog("Sync with Google Drive successful!", LogType.SUCCESS)
@@ -720,7 +720,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         viewModelScope.launch {
-            val res = com.example.repository.CloudDriveServerManager.testConnection(url)
+            val res = com.example.admin.CloudDriveServerManager.testConnection(url)
             onResult(res.first, res.second)
             if (res.first) {
                 dataStoreManager.setCloudServerStatus("Connected to Google Drive")

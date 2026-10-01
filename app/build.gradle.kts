@@ -26,11 +26,13 @@ android {
     create("admin") {
       dimension = "role"
       applicationId = "com.example.kingo.admin"
+      resValue("string", "app_name", "Kingo Admin")
       buildConfigField("String", "APP_ROLE", "\"ADMIN\"")
     }
     create("user") {
       dimension = "role"
       applicationId = "com.example.kingo.user"
+      resValue("string", "app_name", "Kingo King")
       buildConfigField("String", "APP_ROLE", "\"USER\"")
     }
   }
@@ -67,6 +69,7 @@ android {
   buildFeatures {
     compose = true
     buildConfig = true
+    resValues = true
   }
   testOptions { unitTests { isIncludeAndroidResources = true } }
   dependenciesInfo {
@@ -75,22 +78,10 @@ android {
   }
 }
 
-// Ensure any stale files in src/main or src/user that were moved/removed are cleaned up before build
+// Ensure any leftover src/admin or src/user directories are removed so all code compiles cleanly from src/main
 listOf(
-  "src/main/java/com/example/MainActivity.kt",
-  "src/main/java/com/example/admin",
-  "src/main/java/com/example/ui/screens",
-  "src/main/java/com/example/ui/components",
-  "src/main/res/drawable",
-  "src/main/res/mipmap-anydpi-v26",
-  "src/main/res/mipmap-hdpi",
-  "src/main/res/mipmap-mdpi",
-  "src/main/res/mipmap-xhdpi",
-  "src/main/res/mipmap-xxhdpi",
-  "src/main/res/mipmap-xxxhdpi",
-  "src/user/java/com/example/ui/screens/DiagnosticsScreen.kt",
-  "src/user/java/com/example/ui/screens/SetupScreen.kt",
-  "src/user/java/com/example/ui/components/ChangeVideoLinkDialog.kt"
+  "src/admin",
+  "src/user"
 ).forEach { relativePath ->
   val target = file(relativePath)
   if (target.exists()) {
