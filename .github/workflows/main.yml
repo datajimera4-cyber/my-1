@@ -22,22 +22,14 @@ jobs:
       - name: List APKs
         run: find . -name "*.apk"
 
-      - name: Upload all APKs
-        uses: actions/upload-artifact@v4
-        with:
-          name: all-apks
-          path: "**/build/outputs/apk/**/*.apk"
-
       - name: Upload Admin APK
         uses: actions/upload-artifact@v4
         with:
           name: Kingo-Admin-APK
           path: "**/build/outputs/apk/admin/debug/*.apk"
-          if-no-files-found: ignore
 
       - name: Upload User APK
         uses: actions/upload-artifact@v4
         with:
           name: Kingo-King-User-APK
           path: "**/build/outputs/apk/user/debug/*.apk"
-          if-no-files-found: ignore
