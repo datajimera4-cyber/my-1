@@ -111,7 +111,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _adminServerUrl = MutableStateFlow("")
     val adminServerUrl: StateFlow<String> = _adminServerUrl.asStateFlow()
 
-    private val _activeRewardCoins = MutableStateFlow(5)
+    private val _activeRewardCoins = MutableStateFlow(10)
     val activeRewardCoins: StateFlow<Int> = _activeRewardCoins.asStateFlow()
 
     val targetTaskTitle: StateFlow<String?> = WatchSessionRepository.targetTaskTitle
@@ -353,7 +353,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             com.example.service.NotificationChannels.sendAdminUpdateNotification(
                 context = getApplication(),
                 title = "🎬 New Video Task Live! (+${cleanedTask.rewardCoins} Coins)",
-                body = "Watch \"$finalTitle\" ($finalChannel) & earn up to 80 coins + Like/Comment bonus!"
+                body = "Watch \"$finalTitle\" ($finalChannel) & earn up to 110 coins + Like/Comment bonus!"
             )
             val url = cloudServerUrl.value
             if (url.isNotBlank()) {
@@ -547,7 +547,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun adminDeleteTask(taskId: String) {
         viewModelScope.launch {
             dataStoreManager.adminDeleteVideoTask(taskId)
+            val url = cloudServerUrl.value
+            if (url.isNotBlank()) {
+                try {
+                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager)
+                } catch (_: Exception) {}
+            }
             WatchSessionRepository.addLog("Admin: Deleted task #$taskId", LogType.INFO)
+        }
+    }
+
+    fun togglePinVideoTask(taskId: String) {
+        viewModelScope.launch {
+            val isPinned = dataStoreManager.togglePinVideoTask(taskId)
+            val url = cloudServerUrl.value
+            if (url.isNotBlank()) {
+                try {
+                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager)
+                } catch (_: Exception) {}
+            }
+            WatchSessionRepository.addLog(
+                if (isPinned) "Admin: Pinned task #$taskId to top" else "Admin: Unpinned task #$taskId",
+                LogType.INFO
+            )
         }
     }
 
@@ -557,18 +579,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         targetTab: String,
         postType: String,
         actionUrl: String = "",
-        imageUrl: String = ""
+        imageUrl: String = "",
+        isPinned: Boolean = false
     ) {
         viewModelScope.launch {
+            val now = System.currentTimeMillis()
             val post = com.example.data.AdminPostItem(
-                id = "post_${System.currentTimeMillis()}",
+                id = "post_${now}",
                 title = title.trim(),
                 message = message.trim(),
                 targetTab = targetTab.uppercase(),
                 postType = postType.uppercase(),
                 actionUrl = actionUrl.trim(),
                 imageUrl = imageUrl.trim(),
-                createdAt = System.currentTimeMillis()
+                createdAt = now,
+                isPinned = isPinned,
+                pinnedAt = if (isPinned) now else 0L
             )
             dataStoreManager.markItemsNotified(setOf(post.id))
             dataStoreManager.addAdminPost(post)
@@ -591,6 +617,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 } catch (_: Exception) {}
             }
             WatchSessionRepository.addLog("Admin published ${post.postType} to ${post.targetTab}: \"${post.title}\"", LogType.SUCCESS)
+        }
+    }
+
+    fun togglePinAdminPost(postId: String) {
+        viewModelScope.launch {
+            val isPinned = dataStoreManager.togglePinAdminPost(postId)
+            val url = cloudServerUrl.value
+            if (url.isNotBlank()) {
+                try {
+                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager)
+                } catch (_: Exception) {}
+            }
+            WatchSessionRepository.addLog(
+                if (isPinned) "Admin: Pinned post #$postId to top" else "Admin: Unpinned post #$postId",
+                LogType.INFO
+            )
         }
     }
 
@@ -921,8 +963,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         destination: String,
         onComplete: (success: Boolean, message: String) -> Unit
     ) {
-        if (coins < 200) {
-            onComplete(false, "Minimum payout is 200 Coins (₹10.00 INR).")
+        if (coins < 1000) {
+            onComplete(false, "Minimum payout is 1000 Coins (₹10.00 INR).")
             return
         }
         if (coins > walletBalance.value) {

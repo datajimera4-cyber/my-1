@@ -43,11 +43,15 @@ class DataStoreManager(private val context: Context) {
 
     val adminPostsFlow: Flow<List<AdminPostItem>> = context.dataStore.data.map { prefs ->
         val json = prefs[KEY_ADMIN_POSTS]
-        if (json == null) {
+        val list = if (json == null) {
             getDefaultAdminPosts()
         } else {
             parseAdminPostsJson(json)
         }
+        list.sortedWith(
+            compareByDescending<AdminPostItem> { it.isPinned }
+                .thenByDescending { if (it.isPinned) it.pinnedAt else 0L }
+        )
     }
 
     val notifiedItemIdsFlow: Flow<Set<String>> = context.dataStore.data.map { prefs ->
@@ -176,11 +180,15 @@ class DataStoreManager(private val context: Context) {
 
     val videoTasksFlow: Flow<List<VideoTaskItem>> = context.dataStore.data.map { prefs ->
         val json = prefs[KEY_VIDEO_TASKS]
-        if (json == null) {
+        val list = if (json == null) {
             getDefaultTasks()
         } else {
             parseVideoTasksJson(json)
         }
+        list.sortedWith(
+            compareByDescending<VideoTaskItem> { it.isPinned }
+                .thenByDescending { if (it.isPinned) it.pinnedAt else 0L }
+        )
     }
 
     val walletBalanceFlow: Flow<Int> = context.dataStore.data.map { prefs ->
@@ -689,10 +697,38 @@ class DataStoreManager(private val context: Context) {
         context.dataStore.edit { prefs ->
             val json = prefs[KEY_VIDEO_TASKS]
             val currentList = if (json.isNullOrBlank()) getDefaultTasks().toMutableList() else parseVideoTasksJson(json).toMutableList()
-            // Add new task at the top
+            currentList.removeAll { it.id == task.id }
             currentList.add(0, task)
-            prefs[KEY_VIDEO_TASKS] = serializeVideoTasksJson(currentList)
+            val sortedList = currentList.sortedWith(
+                compareByDescending<VideoTaskItem> { it.isPinned }
+                    .thenByDescending { if (it.isPinned) it.pinnedAt else 0L }
+            )
+            prefs[KEY_VIDEO_TASKS] = serializeVideoTasksJson(sortedList)
         }
+    }
+
+    suspend fun togglePinVideoTask(taskId: String): Boolean {
+        var newPinState = false
+        context.dataStore.edit { prefs ->
+            val json = prefs[KEY_VIDEO_TASKS]
+            val currentList = if (json.isNullOrBlank()) getDefaultTasks().toMutableList() else parseVideoTasksJson(json).toMutableList()
+            val index = currentList.indexOfFirst { it.id == taskId }
+            if (index != -1) {
+                val item = currentList[index]
+                newPinState = !item.isPinned
+                val now = System.currentTimeMillis()
+                currentList[index] = item.copy(
+                    isPinned = newPinState,
+                    pinnedAt = if (newPinState) now else 0L
+                )
+                val sortedList = currentList.sortedWith(
+                    compareByDescending<VideoTaskItem> { it.isPinned }
+                        .thenByDescending { if (it.isPinned) it.pinnedAt else 0L }
+                )
+                prefs[KEY_VIDEO_TASKS] = serializeVideoTasksJson(sortedList)
+            }
+        }
+        return newPinState
     }
 
     suspend fun updateVideoTask(updatedTask: VideoTaskItem) {
@@ -733,13 +769,15 @@ class DataStoreManager(private val context: Context) {
         return listOf(
             AdminPostItem(
                 id = "default_welcome_banner",
-                title = "🔥 Bonus Update: 200 Coins = ₹10 INR!",
-                message = "Watch tasks & earn: 3m=5c, 5m=10c, 10m=20c, 20m=45c, 30m=80c + Like (+5c) & Comment (+5c)!",
+                title = "🔥 Bonus Update: 1000 Coins = ₹10 INR!",
+                message = "Watch tasks & earn: 3m=10c, 5m=17c, 10m=35c, 20m=72c, 30m=110c + Like (+5c) & Comment (+5c)!",
                 targetTab = "ALL",
                 postType = "BANNER",
                 actionUrl = "",
                 imageUrl = "",
-                createdAt = 1700000000000L
+                createdAt = 1700000000000L,
+                isPinned = true,
+                pinnedAt = 1700000000000L
             )
         )
     }
@@ -750,8 +788,36 @@ class DataStoreManager(private val context: Context) {
             val currentList = if (json == null) getDefaultAdminPosts().toMutableList() else parseAdminPostsJson(json).toMutableList()
             currentList.removeAll { it.id == post.id }
             currentList.add(0, post)
-            prefs[KEY_ADMIN_POSTS] = serializeAdminPostsJson(currentList)
+            val sortedList = currentList.sortedWith(
+                compareByDescending<AdminPostItem> { it.isPinned }
+                    .thenByDescending { if (it.isPinned) it.pinnedAt else 0L }
+            )
+            prefs[KEY_ADMIN_POSTS] = serializeAdminPostsJson(sortedList)
         }
+    }
+
+    suspend fun togglePinAdminPost(postId: String): Boolean {
+        var newPinState = false
+        context.dataStore.edit { prefs ->
+            val json = prefs[KEY_ADMIN_POSTS]
+            val currentList = if (json == null) getDefaultAdminPosts().toMutableList() else parseAdminPostsJson(json).toMutableList()
+            val index = currentList.indexOfFirst { it.id == postId }
+            if (index != -1) {
+                val item = currentList[index]
+                newPinState = !item.isPinned
+                val now = System.currentTimeMillis()
+                currentList[index] = item.copy(
+                    isPinned = newPinState,
+                    pinnedAt = if (newPinState) now else 0L
+                )
+                val sortedList = currentList.sortedWith(
+                    compareByDescending<AdminPostItem> { it.isPinned }
+                        .thenByDescending { if (it.isPinned) it.pinnedAt else 0L }
+                )
+                prefs[KEY_ADMIN_POSTS] = serializeAdminPostsJson(sortedList)
+            }
+        }
+        return newPinState
     }
 
     suspend fun deleteAdminPost(postId: String) {
@@ -816,7 +882,7 @@ class DataStoreManager(private val context: Context) {
                 durationSeconds = 213, // 3 min 33 sec
                 isLive = false,
                 isCompleted = false,
-                rewardCoins = 5,
+                rewardCoins = 10,
                 selectedDurationSeconds = 180
             ),
             VideoTaskItem(
@@ -828,7 +894,7 @@ class DataStoreManager(private val context: Context) {
                 durationSeconds = 600, // 10 min 00 sec
                 isLive = false,
                 isCompleted = false,
-                rewardCoins = 20,
+                rewardCoins = 35,
                 selectedDurationSeconds = 600
             ),
             VideoTaskItem(
@@ -840,7 +906,7 @@ class DataStoreManager(private val context: Context) {
                 durationSeconds = 1980, // 33 min
                 isLive = false,
                 isCompleted = false,
-                rewardCoins = 80,
+                rewardCoins = 110,
                 selectedDurationSeconds = 1800
             ),
             VideoTaskItem(
@@ -852,7 +918,7 @@ class DataStoreManager(private val context: Context) {
                 durationSeconds = 0, // 0 = LIVE STREAM!
                 isLive = true,
                 isCompleted = false,
-                rewardCoins = 80,
+                rewardCoins = 110,
                 selectedDurationSeconds = 1800
             )
         )
@@ -872,13 +938,13 @@ class DataStoreManager(private val context: Context) {
                 val effectiveCompleted = if (lockExpired || effectiveLockedUntil == 0L) false else rawCompleted
                 val effectiveWatched = if (lockExpired) 0L else obj.optLong("watchedMillis", 0L)
                 val selSec = obj.optInt("selectedDurationSeconds", 180)
-                val rawCoins = obj.optInt("rewardCoins", 5)
+                val rawCoins = obj.optInt("rewardCoins", 10)
                 val tierCoins = WATCH_DURATION_TIERS.find { it.seconds == selSec }?.coins ?: when (rawCoins) {
-                    10 -> if (selSec == 180) 5 else 10
-                    15 -> 10
-                    40 -> 20
-                    100 -> 45
-                    160 -> 80
+                    5, 50 -> 10
+                    10, 85 -> if (selSec == 300) 17 else 10
+                    20, 175 -> 35
+                    45, 360 -> 72
+                    80, 550 -> 110
                     else -> rawCoins
                 }
 
@@ -896,7 +962,9 @@ class DataStoreManager(private val context: Context) {
                         selectedDurationSeconds = selSec,
                         rewardCoins = tierCoins,
                         createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
-                        lockedUntilMillis = effectiveLockedUntil
+                        lockedUntilMillis = effectiveLockedUntil,
+                        isPinned = obj.optBoolean("isPinned", false),
+                        pinnedAt = obj.optLong("pinnedAt", 0L)
                     )
                 )
             }
@@ -923,6 +991,8 @@ class DataStoreManager(private val context: Context) {
                 put("rewardCoins", item.rewardCoins)
                 put("createdAt", item.createdAt)
                 put("lockedUntilMillis", item.lockedUntilMillis)
+                put("isPinned", item.isPinned)
+                put("pinnedAt", item.pinnedAt)
             }
             array.put(obj)
         }
@@ -1066,16 +1136,26 @@ class DataStoreManager(private val context: Context) {
             val array = JSONArray(json)
             for (i in 0 until array.length()) {
                 val obj = array.getJSONObject(i)
+                val rawId = obj.optString("id", UUID.randomUUID().toString())
+                val rawTitle = obj.optString("title", "Announcement")
+                    .replace("200 Coins = ₹10 INR", "1000 Coins = ₹10 INR")
+                    .replace("5000 Coins = ₹10 INR", "1000 Coins = ₹10 INR")
+                val rawMessage = obj.optString("message", "")
+                    .replace("200 Coins = ₹10 INR", "1000 Coins = ₹10 INR")
+                    .replace("5000 Coins = ₹10 INR", "1000 Coins = ₹10 INR")
+                    .replace("3m=5c, 5m=10c, 10m=20c, 20m=45c, 30m=80c", "3m=10c, 5m=17c, 10m=35c, 20m=72c, 30m=110c")
                 list.add(
                     AdminPostItem(
-                        id = obj.optString("id", UUID.randomUUID().toString()),
-                        title = obj.optString("title", "Announcement"),
-                        message = obj.optString("message", ""),
+                        id = rawId,
+                        title = rawTitle,
+                        message = rawMessage,
                         targetTab = obj.optString("targetTab", "ALL"),
                         postType = obj.optString("postType", "BANNER"),
                         actionUrl = obj.optString("actionUrl", ""),
                         imageUrl = obj.optString("imageUrl", ""),
-                        createdAt = obj.optLong("createdAt", System.currentTimeMillis())
+                        createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
+                        isPinned = obj.optBoolean("isPinned", rawId == "default_welcome_banner"),
+                        pinnedAt = obj.optLong("pinnedAt", if (rawId == "default_welcome_banner") 1700000000000L else 0L)
                     )
                 )
             }
@@ -1097,6 +1177,8 @@ class DataStoreManager(private val context: Context) {
                 put("actionUrl", p.actionUrl)
                 put("imageUrl", p.imageUrl)
                 put("createdAt", p.createdAt)
+                put("isPinned", p.isPinned)
+                put("pinnedAt", p.pinnedAt)
             }
             array.put(obj)
         }

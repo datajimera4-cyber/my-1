@@ -71,11 +71,15 @@ fun AdminPostsBannerSection(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val relevantPosts = posts.filter { post ->
-        !dismissedIds.contains(post.id) &&
-                (post.targetTab.equals("ALL", ignoreCase = true) ||
-                        post.targetTab.equals(currentTab, ignoreCase = true))
-    }
+    val relevantPosts = posts
+        .filter { post ->
+            post.targetTab.equals("ALL", ignoreCase = true) ||
+                    post.targetTab.equals(currentTab, ignoreCase = true)
+        }
+        .sortedWith(
+            compareByDescending<AdminPostItem> { it.isPinned }
+                .thenByDescending { if (it.isPinned) it.pinnedAt else 0L }
+        )
 
     if (relevantPosts.isEmpty()) return
 
@@ -265,6 +269,21 @@ fun AdminPostsBannerSection(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
+                                        if (post.isPinned) {
+                                            Surface(
+                                                shape = RoundedCornerShape(5.dp),
+                                                color = GoldAmber
+                                            ) {
+                                                Text(
+                                                    text = "📌 PINNED",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Black,
+                                                    color = Color.Black,
+                                                    fontSize = 9.sp,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
                                         Surface(
                                             shape = RoundedCornerShape(5.dp),
                                             color = accentColor.copy(alpha = 0.2f)
@@ -301,18 +320,6 @@ fun AdminPostsBannerSection(
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 }
-                            }
-
-                            IconButton(
-                                onClick = { onDismissPost(post.id) },
-                                modifier = Modifier.size(28.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Dismiss",
-                                    tint = TextSecondary,
-                                    modifier = Modifier.size(16.dp)
-                                )
                             }
                         }
 

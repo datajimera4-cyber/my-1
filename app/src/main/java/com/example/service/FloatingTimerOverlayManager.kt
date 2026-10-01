@@ -78,6 +78,19 @@ class FloatingTimerOverlayManager(private val context: Context) {
     private var isTaskLiked = false
     private var density = context.resources.displayMetrics.density
 
+    init {
+        registerOverlayCallbacks()
+    }
+
+    fun registerOverlayCallbacks() {
+        WatchSessionRepository.onTaskLikeDetected = {
+            runOnMain { handleLikeDetected() }
+        }
+        WatchSessionRepository.onTaskCommentDetected = {
+            runOnMain { handleCommentDetected() }
+        }
+    }
+
     private fun runOnMain(action: () -> Unit) {
         if (Looper.myLooper() == Looper.getMainLooper()) {
             action()
@@ -241,7 +254,7 @@ class FloatingTimerOverlayManager(private val context: Context) {
 
             // Milestone / Reward Pill Badge
             val milestoneTv = TextView(context).apply {
-                text = "🎯 3m • +5c"
+                text = "🎯 3m • +10c"
                 setTextColor(Color.parseColor("#F59E0B"))
                 textSize = 9.5f
                 isSingleLine = true
@@ -259,33 +272,10 @@ class FloatingTimerOverlayManager(private val context: Context) {
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    rightMargin = (6 * density).toInt()
-                }
+                )
             }
             topRow.addView(milestoneTv)
             this.milestoneBadgeTextView = milestoneTv
-
-            // Neat Circular Close Button
-            val closeBtn = TextView(context).apply {
-                text = "✕"
-                setTextColor(Color.parseColor("#CBD5E1"))
-                textSize = 10f
-                gravity = Gravity.CENTER
-                includeFontPadding = false
-                typeface = android.graphics.Typeface.DEFAULT_BOLD
-                val btnSize = (18 * density).toInt()
-                layoutParams = LinearLayout.LayoutParams(btnSize, btnSize)
-                val closeBg = GradientDrawable().apply {
-                    shape = GradientDrawable.OVAL
-                    setColor(Color.parseColor("#334155"))
-                }
-                background = closeBg
-                setOnClickListener {
-                    hideOverlay()
-                }
-            }
-            topRow.addView(closeBtn)
             pillLayout.addView(topRow)
 
             // ================= PROGRESS BAR: Sleek Live Progress Track =================
@@ -531,7 +521,6 @@ class FloatingTimerOverlayManager(private val context: Context) {
      * award +5 coins ONCE, update DataStore, and update badge style to emerald "✓ Liked (+5c)".
      */
     private fun handleLikeDetected() {
-        if (isTaskLiked) return
         val taskId = WatchSessionRepository.activeTaskId.value ?: "default_task"
         val taskTitle = WatchSessionRepository.targetTaskTitle.value ?: "YouTube Video"
 
@@ -542,6 +531,11 @@ class FloatingTimerOverlayManager(private val context: Context) {
                 applyLikedBadgeStyle()
                 if (result.first) {
                     triggerCelebration("🪙 +5 COINS ADDED FOR YOUTUBE LIKE! 🎉")
+                    android.widget.Toast.makeText(
+                        context,
+                        "🎉 +5 Coins added for Liking the YouTube video!",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
                     WatchSessionRepository.addLog("Auto-detected genuine YouTube Like! +5 coins added (1-time reward).", LogType.SUCCESS)
                 }
             }
@@ -549,17 +543,23 @@ class FloatingTimerOverlayManager(private val context: Context) {
     }
 
     private fun handleCommentDetected() {
-        if (currentCommentCount >= 2) return
         val taskId = WatchSessionRepository.activeTaskId.value ?: "default_task"
         val taskTitle = WatchSessionRepository.targetTaskTitle.value ?: "YouTube Video"
 
         overlayScope.launch {
             val result = dataStoreManager.recordTaskComment(taskId, taskTitle)
+            val updatedCounts = dataStoreManager.commentCountsFlow.first()
+            val newCount = (updatedCounts[taskId] ?: (currentCommentCount + 1)).coerceAtMost(2)
             runOnMain {
+                currentCommentCount = newCount
+                updateCommentBadge()
                 if (result.first) {
-                    currentCommentCount = (currentCommentCount + 1).coerceAtMost(2)
-                    updateCommentBadge()
                     triggerCelebration("🪙 +5 COINS ADDED FOR YOUTUBE COMMENT! 🎉")
+                    android.widget.Toast.makeText(
+                        context,
+                        "🎉 +5 Coins added for Comment #$currentCommentCount on YouTube!",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
                     WatchSessionRepository.addLog("Auto-detected genuine YouTube Comment! +5 coins added (#$currentCommentCount).", LogType.SUCCESS)
                 }
             }
@@ -651,10 +651,10 @@ class FloatingTimerOverlayManager(private val context: Context) {
             } else {
                 val remainSec = (180 - watchedSecs).coerceAtLeast(0)
                 if (remainSec > 0) {
-                    milestoneBadgeTextView?.text = if (isPaused) "⏸ ${remainSec}s left" else "🎯 ${remainSec}s → +5c"
+                    milestoneBadgeTextView?.text = if (isPaused) "⏸ ${remainSec}s left" else "🎯 ${remainSec}s → +10c"
                     milestoneBadgeTextView?.setTextColor(Color.parseColor("#F59E0B"))
                 } else {
-                    milestoneBadgeTextView?.text = "🏆 +5c Ready"
+                    milestoneBadgeTextView?.text = "🏆 +10c Ready"
                     milestoneBadgeTextView?.setTextColor(Color.parseColor("#10B981"))
                 }
             }

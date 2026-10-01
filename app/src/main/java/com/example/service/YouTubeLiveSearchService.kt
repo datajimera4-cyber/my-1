@@ -81,7 +81,25 @@ class YouTubeLiveSearchService : AccessibilityService() {
         private var hasTypedCommentText: Boolean = false
 
         @Volatile
+        private var lastTypedCommentText: String = ""
+
+        @Volatile
         private var lastTypedCommentTime: Long = 0L
+
+        @Volatile
+        private var wasCommentComposerOpen: Boolean = false
+
+        @Volatile
+        private var wasCommentEditTextActive: Boolean = false
+
+        @Volatile
+        private var lastCommentComposerOpenTime: Long = 0L
+
+        @Volatile
+        private var lastCommentCancelClickTime: Long = 0L
+
+        @Volatile
+        private var lastCommentRewardTriggerTime: Long = 0L
 
         private val rewardedLikedTaskIds = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
@@ -96,7 +114,13 @@ class YouTubeLiveSearchService : AccessibilityService() {
             isPlayButtonCurrentlyVisible = false
             lockedWatchPageTitle = null
             hasTypedCommentText = false
+            lastTypedCommentText = ""
             lastTypedCommentTime = 0L
+            wasCommentComposerOpen = false
+            wasCommentEditTextActive = false
+            lastCommentComposerOpenTime = 0L
+            lastCommentCancelClickTime = 0L
+            lastCommentRewardTriggerTime = 0L
         }
 
         fun prepareForDirectWatch(title: String, channel: String?, videoUrl: String? = null, videoId: String? = null) {
@@ -233,29 +257,47 @@ class YouTubeLiveSearchService : AccessibilityService() {
             }
         }
 
+        // Check for YouTube "Comment added" / "Reply added" confirmation in any event
+        if (isSessionActive && elapsedSinceLaunch > 2500L && (pkg == "com.google.android.youtube" || isYouTubeInForeground)) {
+            try {
+                val evTxt = event.text?.joinToString(" ") { it.toString() }?.trim() ?: ""
+                val evDsc = event.contentDescription?.toString()?.trim() ?: ""
+                val evCombined = "$evTxt $evDsc".lowercase()
+                if (isCommentAddedConfirmationText(evCombined)) {
+                    triggerGenuineCommentReward("YouTube confirmation banner/announcement detected")
+                }
+            } catch (_: Exception) {}
+        }
+
         // Track genuine comment typing inside YouTube comment box (excluding top search bar)
-        if (pkg == "com.google.android.youtube" &&
+        if ((pkg == "com.google.android.youtube" || (isYouTubeInForeground && isTransientSystemPackage(pkg))) &&
             (event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED ||
-             event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED)
+             event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED ||
+             event.eventType == AccessibilityEvent.TYPE_VIEW_FOCUSED)
         ) {
             try {
                 val src = event.source
                 val vId = src?.viewIdResourceName?.lowercase() ?: ""
+                val cls = src?.className?.toString()?.lowercase() ?: ""
                 val isSearchField = vId.contains("search_edit_text") ||
                         vId.contains("search_src_text") ||
                         vId.contains("search_box") ||
                         (currentPhase != LiveSearchPhase.IDLE && currentPhase != LiveSearchPhase.COMPLETED && !hasClickedTarget)
                 if (!isSearchField) {
-                    val typed = (src?.text?.toString() ?: event.text?.joinToString(" ") { it.toString() } ?: "").trim()
-                    val lowerTyped = typed.lowercase()
-                    val isPlaceholder = lowerTyped.isEmpty() ||
-                            lowerTyped.startsWith("add a comment") ||
-                            lowerTyped.startsWith("add a reply") ||
-                            lowerTyped.startsWith("search youtube") ||
-                            lowerTyped.contains("टिप्पणी जोड़ें")
-                    if (!isPlaceholder && typed.length >= 2) {
+                    val srcText = src?.text?.toString()?.trim().orEmpty()
+                    val evTextStr = event.text?.joinToString(" ") { it.toString() }?.trim().orEmpty()
+                    val typed = if (srcText.isNotEmpty() && !isCommentPlaceholder(srcText)) srcText else evTextStr
+                    if (cls.contains("edittext") || src?.isEditable == true || vId.contains("comment")) {
+                        wasCommentComposerOpen = true
+                        lastCommentComposerOpenTime = System.currentTimeMillis()
+                    }
+                    if (typed.isNotEmpty() && !isCommentPlaceholder(typed)) {
                         hasTypedCommentText = true
+                        lastTypedCommentText = typed
                         lastTypedCommentTime = System.currentTimeMillis()
+                        wasCommentComposerOpen = true
+                        wasCommentEditTextActive = true
+                        lastCommentComposerOpenTime = System.currentTimeMillis()
                     }
                 }
                 src?.recycle()
@@ -263,7 +305,10 @@ class YouTubeLiveSearchService : AccessibilityService() {
         }
 
         // Detect user interactions INSIDE YouTube ONLY (ignore clicks on our own floating overlay!)
-        if (pkg == "com.google.android.youtube" && isYouTubeInForeground && event.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+        if ((pkg == "com.google.android.youtube" || activeRootPkg == "com.google.android.youtube") &&
+            isYouTubeInForeground &&
+            event.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED
+        ) {
             try {
                 val screenHeight = resources.displayMetrics.heightPixels.coerceAtLeast(800)
                 val screenWidth = resources.displayMetrics.widthPixels.coerceAtLeast(400)
@@ -276,7 +321,37 @@ class YouTubeLiveSearchService : AccessibilityService() {
                 val desc = node?.contentDescription?.toString()?.ifBlank { evDesc } ?: evDesc
                 val text = node?.text?.toString()?.ifBlank { evText } ?: evText
                 val viewId = node?.viewIdResourceName ?: ""
-                val combined = "$desc $text $evText $evDesc $viewId".lowercase()
+                val subtreeSb = StringBuilder()
+                if (node != null) {
+                    collectSubtreeText(node, subtreeSb, 0)
+                }
+                val subtreeText = subtreeSb.toString().trim()
+                val combined = "$desc $text $evText $evDesc $viewId $subtreeText".lowercase()
+
+                // Track if user clicked to open the comment box / composer
+                if (combined.contains("add a comment") ||
+                    combined.contains("add a reply") ||
+                    combined.contains("टिप्पणी जोड़ें") ||
+                    combined.contains("जवाब जोड़ें") ||
+                    viewId.contains("comment_composer", ignoreCase = true) ||
+                    viewId.contains("comments_entry_point", ignoreCase = true)
+                ) {
+                    wasCommentComposerOpen = true
+                    lastCommentComposerOpenTime = System.currentTimeMillis()
+                }
+
+                // Track if user clicked Cancel / Close / Discard on a comment draft
+                if (desc.equals("Cancel", ignoreCase = true) ||
+                    desc.equals("Discard", ignoreCase = true) ||
+                    text.equals("Cancel", ignoreCase = true) ||
+                    text.equals("Discard", ignoreCase = true) ||
+                    desc.contains("रद्द करें") ||
+                    text.contains("रद्द करें")
+                ) {
+                    lastCommentCancelClickTime = System.currentTimeMillis()
+                    hasTypedCommentText = false
+                    wasCommentEditTextActive = false
+                }
 
                 val statusBarHeight = getStatusBarHeight()
                 val playerBottomY = statusBarHeight + ((screenWidth * 9) / 16)
@@ -358,7 +433,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
                         !isUnlike &&
                         !isCommentLike &&
                         !looksLikeVideoCard &&
-                        combined.length < 95 && (
+                        combined.length < 140 && (
                                 desc.startsWith("like this video", ignoreCase = true) ||
                                 combined.contains("like this video") ||
                                 viewId.contains("like_button", ignoreCase = true) ||
@@ -366,38 +441,63 @@ class YouTubeLiveSearchService : AccessibilityService() {
                                 desc.contains("पसंद करें")
                         )
 
-                // Genuine Comment submission: user MUST have typed text in the comment box AND clicked Send/Post
-                val isRightSideSendIcon = hasTypedCommentText &&
-                        (System.currentTimeMillis() - lastTypedCommentTime) < 90_000L &&
-                        clickRect.left >= (screenWidth * 0.76f).toInt() &&
-                        clickRect.width() in 12..(96 * density).toInt() &&
-                        clickRect.height() in 12..(96 * density).toInt() &&
-                        !isPlayPauseBtnClick &&
-                        !isNextOrPrevOrCollapse &&
-                        !desc.equals("Close", ignoreCase = true) &&
-                        !desc.equals("Cancel", ignoreCase = true)
+                val now = System.currentTimeMillis()
+                val hadRecentCommentActivity = hasTypedCommentText ||
+                        wasCommentComposerOpen ||
+                        (now - lastTypedCommentTime) < 120_000L ||
+                        (now - lastCommentComposerOpenTime) < 120_000L
 
-                val isCommentSendButton = !looksLikeVideoCard && combined.length < 90 && (
+                val isExplicitCommentSendLabel =
                         desc.equals("Send", ignoreCase = true) ||
                         desc.equals("Send comment", ignoreCase = true) ||
                         desc.equals("Post", ignoreCase = true) ||
                         desc.equals("Post comment", ignoreCase = true) ||
                         desc.equals("Comment", ignoreCase = true) ||
                         desc.equals("Reply", ignoreCase = true) ||
+                        evDesc.equals("Send", ignoreCase = true) ||
+                        evDesc.equals("Send comment", ignoreCase = true) ||
+                        evDesc.equals("Post", ignoreCase = true) ||
+                        evDesc.equals("Post comment", ignoreCase = true) ||
+                        text.equals("Send", ignoreCase = true) ||
+                        text.equals("Post", ignoreCase = true) ||
+                        text.equals("Comment", ignoreCase = true) ||
+                        text.equals("Reply", ignoreCase = true) ||
                         desc.contains("टिप्पणी भेजें") ||
                         desc.contains("टिप्पणी करें") ||
                         desc.equals("भेजें", ignoreCase = true) ||
+                        evDesc.contains("टिप्पणी भेजें") ||
+                        evDesc.equals("भेजें", ignoreCase = true) ||
+                        text.equals("भेजें", ignoreCase = true) ||
+                        subtreeText.equals("Send", ignoreCase = true) ||
+                        subtreeText.equals("Send comment", ignoreCase = true) ||
+                        subtreeText.equals("Post", ignoreCase = true) ||
                         viewId.contains("send_button", ignoreCase = true) ||
                         viewId.contains("post_button", ignoreCase = true) ||
                         viewId.contains("comment_send", ignoreCase = true) ||
-                        viewId.contains("send", ignoreCase = true) ||
-                        isRightSideSendIcon
-                )
+                        viewId.contains("composer_send", ignoreCase = true) ||
+                        (viewId.contains("send", ignoreCase = true) && !viewId.contains("share", ignoreCase = true))
+
+                val isRightSideSendIcon = hadRecentCommentActivity &&
+                        clickRect.right >= (screenWidth * 0.72f).toInt() &&
+                        clickRect.left >= (screenWidth * 0.58f).toInt() &&
+                        clickRect.top >= (screenHeight * 0.25f).toInt() &&
+                        clickRect.width() in 10..(120 * density).toInt() &&
+                        clickRect.height() in 10..(120 * density).toInt() &&
+                        !inTopPlayerArea &&
+                        !isPlayPauseBtnClick &&
+                        !isNextOrPrevOrCollapse &&
+                        !isDislike &&
+                        !desc.startsWith("like", ignoreCase = true) &&
+                        !desc.equals("Close", ignoreCase = true) &&
+                        !desc.equals("Close comments", ignoreCase = true) &&
+                        !desc.equals("Cancel", ignoreCase = true) &&
+                        !desc.contains("More", ignoreCase = true) &&
+                        !desc.contains("Sort", ignoreCase = true)
+
                 val isGenuineCommentSubmitted = isSessionActive &&
                         elapsedSinceLaunch > 2500L &&
-                        isCommentSendButton &&
-                        hasTypedCommentText &&
-                        (System.currentTimeMillis() - lastTypedCommentTime) < 180_000L
+                        !looksLikeVideoCard &&
+                        (isExplicitCommentSendLabel || isRightSideSendIcon)
 
                 if (isGenuineVideoLikeClick) {
                     val activeId = WatchSessionRepository.activeTaskId.value ?: "default_rick"
@@ -405,9 +505,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
                         WatchSessionRepository.onTaskLikeDetected?.invoke()
                     }
                 } else if (isGenuineCommentSubmitted) {
-                    hasTypedCommentText = false
-                    lastTypedCommentTime = 0L
-                    WatchSessionRepository.onTaskCommentDetected?.invoke()
+                    triggerGenuineCommentReward("Clicked YouTube Comment Send button")
                 } else if (isPlayPauseBtnClick) {
                     // Toggle immediately for instant UI responsiveness, then verify actual post-click button state
                     updateVideoPausedState(!isVideoExplicitlyPaused)
@@ -928,6 +1026,79 @@ class YouTubeLiveSearchService : AccessibilityService() {
         return null
     }
 
+    private fun isCommentPlaceholder(raw: String): Boolean {
+        val lower = raw.trim().lowercase()
+        return lower.isEmpty() ||
+                lower.startsWith("add a comment") ||
+                lower.startsWith("add a public comment") ||
+                lower.startsWith("add a reply") ||
+                lower.startsWith("comment as ") ||
+                lower.startsWith("reply as ") ||
+                lower.startsWith("search youtube") ||
+                lower.contains("टिप्पणी जोड़ें") ||
+                lower.contains("जवाब जोड़ें")
+    }
+
+    private fun isCommentAddedConfirmationText(lowerText: String): Boolean {
+        if (lowerText.isBlank()) return false
+        return lowerText.contains("comment added") ||
+                lowerText.contains("comment posted") ||
+                lowerText.contains("reply added") ||
+                lowerText.contains("reply posted") ||
+                lowerText.contains("your comment was added") ||
+                lowerText.contains("टिप्पणी जोड़ी गई") ||
+                lowerText.contains("टिप्पणी पोस्ट की गई") ||
+                lowerText.contains("जवाब जोड़ा गया")
+    }
+
+    private fun triggerGenuineCommentReward(reason: String) {
+        val now = System.currentTimeMillis()
+        if (now - lastCommentRewardTriggerTime < 3500L) {
+            return
+        }
+        lastCommentRewardTriggerTime = now
+        hasTypedCommentText = false
+        lastTypedCommentText = ""
+        lastTypedCommentTime = 0L
+        wasCommentComposerOpen = false
+        wasCommentEditTextActive = false
+        lastCommentComposerOpenTime = 0L
+        WatchSessionRepository.addLog("Comment detected ($reason)", LogType.SUCCESS)
+        WatchSessionRepository.onTaskCommentDetected?.invoke()
+    }
+
+    private fun getAllYouTubeRootNodes(primaryRoot: AccessibilityNodeInfo? = null): List<AccessibilityNodeInfo> {
+        val roots = mutableListOf<AccessibilityNodeInfo>()
+        try {
+            if (primaryRoot != null && primaryRoot.packageName?.toString() == "com.google.android.youtube") {
+                roots.add(primaryRoot)
+            }
+            val active = try { rootInActiveWindow } catch (_: Exception) { null }
+            if (active != null && active.packageName?.toString() == "com.google.android.youtube" && !roots.contains(active)) {
+                roots.add(active)
+            }
+            val winList = try { windows } catch (_: Exception) { null }
+            if (!winList.isNullOrEmpty()) {
+                for (w in winList) {
+                    val wRoot = try { w.root } catch (_: Exception) { null }
+                    if (wRoot != null && wRoot.packageName?.toString() == "com.google.android.youtube" && !roots.contains(wRoot)) {
+                        roots.add(wRoot)
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return roots
+    }
+
+    private fun isSoftKeyboardVisible(): Boolean {
+        return try {
+            val winList = windows
+            winList?.any { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD } == true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     private fun getYouTubeRootNode(): AccessibilityNodeInfo? {
         try {
             val active = try { rootInActiveWindow } catch (_: Exception) { null }
@@ -1309,7 +1480,10 @@ class YouTubeLiveSearchService : AccessibilityService() {
         val text: String,
         val desc: String,
         val viewId: String,
-        val rect: android.graphics.Rect
+        val rect: android.graphics.Rect,
+        val className: String = "",
+        val isEditable: Boolean = false,
+        val isFocused: Boolean = false
     )
 
     private fun collectScreenNodes(
@@ -1325,6 +1499,9 @@ class YouTubeLiveSearchService : AccessibilityService() {
             val t = node.text?.toString()?.trim() ?: ""
             val d = node.contentDescription?.toString()?.trim() ?: ""
             val v = node.viewIdResourceName ?: ""
+            val cls = node.className?.toString() ?: ""
+            val editable = node.isEditable || cls.contains("EditText", ignoreCase = true)
+            val focused = node.isFocused
             val hasRelevantViewId = v.isNotEmpty() && (
                     v.contains("player", ignoreCase = true) ||
                     v.contains("reel", ignoreCase = true) ||
@@ -1337,15 +1514,17 @@ class YouTubeLiveSearchService : AccessibilityService() {
                     v.contains("search", ignoreCase = true) ||
                     v.contains("pivot", ignoreCase = true) ||
                     v.contains("comment", ignoreCase = true) ||
-                    v.contains("engagement", ignoreCase = true)
+                    v.contains("engagement", ignoreCase = true) ||
+                    v.contains("send", ignoreCase = true) ||
+                    v.contains("snackbar", ignoreCase = true)
             )
-            if (t.isNotEmpty() || d.isNotEmpty() || hasRelevantViewId) {
+            if (t.isNotEmpty() || d.isNotEmpty() || hasRelevantViewId || editable) {
                 val r = android.graphics.Rect()
                 node.getBoundsInScreen(r)
                 val screenHeight = resources.displayMetrics.heightPixels.coerceAtLeast(800)
                 val screenWidth = resources.displayMetrics.widthPixels.coerceAtLeast(400)
                 if (r.width() > 0 && r.height() > 0 && r.bottom > 0 && r.top < screenHeight && r.right > 0 && r.left < screenWidth) {
-                    out.add(UiNodeEntry(t, d, v, r))
+                    out.add(UiNodeEntry(t, d, v, r, cls, editable, focused))
                 }
             }
         }
@@ -1419,7 +1598,14 @@ class YouTubeLiveSearchService : AccessibilityService() {
 
         try {
             val entries = mutableListOf<UiNodeEntry>()
-            collectScreenNodes(rootNode, entries)
+            val allRoots = getAllYouTubeRootNodes(rootNode)
+            if (allRoots.isEmpty()) {
+                collectScreenNodes(rootNode, entries)
+            } else {
+                for (r in allRoots) {
+                    collectScreenNodes(r, entries)
+                }
+            }
             if (entries.isEmpty()) return
 
             val screenHeight = resources.displayMetrics.heightPixels.coerceAtLeast(800)
@@ -1427,6 +1613,87 @@ class YouTubeLiveSearchService : AccessibilityService() {
             val density = resources.displayMetrics.density
             val statusBarHeight = getStatusBarHeight()
             val playerBottomY = statusBarHeight + ((screenWidth * 9) / 16)
+            val now = System.currentTimeMillis()
+
+            // 0. Check for YouTube Comment Added / Composer State / Newly Posted Comment in real-time
+            if (entries.any { e -> isCommentAddedConfirmationText("${e.text} ${e.desc}".lowercase()) }) {
+                triggerGenuineCommentReward("YouTube 'Comment added' screen confirmation")
+            } else {
+                val activeCommentEditEntry = entries.firstOrNull { e ->
+                    val v = e.viewId.lowercase()
+                    val isSearch = v.contains("search_edit_text") || v.contains("search_src_text") || v.contains("search_box") || e.rect.top < (screenHeight * 0.16f).toInt()
+                    !isSearch && (
+                        e.isEditable ||
+                        e.className.contains("EditText", ignoreCase = true) ||
+                        v.contains("comment_composer") ||
+                        v.contains("comment_box")
+                    )
+                }
+
+                val isSendButtonCurrentlyVisible = entries.any { e ->
+                    val d = e.desc.trim()
+                    val t = e.text.trim()
+                    val v = e.viewId.lowercase()
+                    e.rect.top >= (screenHeight * 0.25f).toInt() && (
+                        d.equals("Send", ignoreCase = true) ||
+                        d.equals("Send comment", ignoreCase = true) ||
+                        d.equals("Post", ignoreCase = true) ||
+                        d.equals("Post comment", ignoreCase = true) ||
+                        d.contains("टिप्पणी भेजें") ||
+                        d.equals("भेजें", ignoreCase = true) ||
+                        t.equals("Send", ignoreCase = true) ||
+                        t.equals("Post", ignoreCase = true) ||
+                        v.contains("send_button") ||
+                        v.contains("comment_send") ||
+                        v.contains("post_button")
+                    )
+                }
+
+                if (activeCommentEditEntry != null || isSendButtonCurrentlyVisible) {
+                    wasCommentComposerOpen = true
+                    lastCommentComposerOpenTime = now
+                    val editTxt = activeCommentEditEntry?.text?.trim().orEmpty()
+                    if ((editTxt.isNotEmpty() && !isCommentPlaceholder(editTxt)) || isSendButtonCurrentlyVisible) {
+                        hasTypedCommentText = true
+                        if (editTxt.isNotEmpty() && !isCommentPlaceholder(editTxt)) {
+                            lastTypedCommentText = editTxt
+                        }
+                        lastTypedCommentTime = now
+                        wasCommentEditTextActive = true
+                    }
+                } else if (isSoftKeyboardVisible() && entries.any { e ->
+                        val comb = "${e.text} ${e.desc} ${e.viewId}".lowercase()
+                        comb.contains("comment") || comb.contains("reply") || comb.contains("टिप्पणी")
+                    }) {
+                    wasCommentComposerOpen = true
+                    lastCommentComposerOpenTime = now
+                } else {
+                    // Comment composer EditText is no longer open!
+                    // Check if user had typed a comment or had the Send button visible and the composer just closed after submission
+                    val notCancelled = (now - lastCommentCancelClickTime) > 3500L
+                    if (wasCommentEditTextActive && hasTypedCommentText && notCancelled && (now - lastTypedCommentTime) in 120L..30_000L) {
+                        triggerGenuineCommentReward("Comment composer submitted and closed")
+                    } else if ((hasTypedCommentText || wasCommentComposerOpen) && notCancelled && (now - lastCommentComposerOpenTime) < 90_000L) {
+                        // Also check if a newly posted comment ("0 seconds ago", "1 second ago", "Just now", or matching typed text) is visible in the comments list
+                        val freshCommentEntry = entries.firstOrNull { e ->
+                            val comb = "${e.text} ${e.desc}".lowercase()
+                            !e.isEditable && e.rect.top >= playerBottomY && (
+                                Regex("\\b(?:0|1|2|3|4|5|6|7|8)\\s*(?:seconds?|secs?|s)\\s+ago\\b", RegexOption.IGNORE_CASE).containsMatchIn(comb) ||
+                                comb.contains("just now") ||
+                                comb.contains("a moment ago") ||
+                                comb.contains("few seconds ago") ||
+                                comb.contains("अभी") ||
+                                comb.contains("कुछ सेकंड पहले") ||
+                                Regex("\\b[0-8]\\s*सेकंड\\s*पहले\\b").containsMatchIn(comb) ||
+                                (lastTypedCommentText.length >= 2 && comb.contains(lastTypedCommentText.lowercase()))
+                            )
+                        }
+                        if (freshCommentEntry != null) {
+                            triggerGenuineCommentReward("Newly posted comment visible in comments list")
+                        }
+                    }
+                }
+            }
 
             // 1. Check if user switched to YouTube Shorts player
             val isShortsPlayer = entries.any { e ->

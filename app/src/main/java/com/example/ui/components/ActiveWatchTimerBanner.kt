@@ -140,18 +140,6 @@ fun ActiveWatchTimerBanner(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-
-                    IconButton(
-                        onClick = { viewModel.stopTask(context) },
-                        modifier = Modifier.size(24.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Stop Watching Session",
-                            tint = Color.White.copy(alpha = 0.6f),
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
                 }
 
                 // Center row: Real-time Timer Counter & Progress
@@ -252,10 +240,10 @@ fun ActiveWatchTimerBanner(
                         )
                     } else {
                         val nextMilestoneText = when {
-                            watchedSecs < 300 -> "Next: 15 Coins at 5:00 min"
-                            watchedSecs < 600 -> "Next: 40 Coins at 10:00 min"
-                            watchedSecs < 1200 -> "Next: 100 Coins at 20:00 min"
-                            watchedSecs < 1800 -> "Next: 160 Coins at 30:00 min"
+                            watchedSecs < 300 -> "Next: 17 Coins at 5:00 min"
+                            watchedSecs < 600 -> "Next: 35 Coins at 10:00 min"
+                            watchedSecs < 1200 -> "Next: 72 Coins at 20:00 min"
+                            watchedSecs < 1800 -> "Next: 110 Coins at 30:00 min"
                             else -> "Maximum milestone reached!"
                         }
                         Text(

@@ -193,7 +193,7 @@ fun WalletScreen(
                                 .padding(horizontal = 8.dp, vertical = 3.dp)
                         ) {
                             Text(
-                                text = "200 Coins = 10 INR",
+                                text = "1000 Coins = 10 INR",
                                 color = Color.Black,
                                 fontWeight = FontWeight.ExtraBold,
                                 fontSize = 11.sp
@@ -203,7 +203,7 @@ fun WalletScreen(
 
                     // Watch Duration Coin Rate Summary Strip
                     Text(
-                        text = "Watch Rates: 3m = 5c • 5m = 10c • 10m = 20c • 20m = 45c • 30m = 80c",
+                        text = "Watch Rates: 3m = 10c • 5m = 17c • 10m = 35c • 20m = 72c • 30m = 110c",
                         style = MaterialTheme.typography.labelSmall,
                         color = Color.White.copy(alpha = 0.75f),
                         fontWeight = FontWeight.SemiBold,

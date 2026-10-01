@@ -742,6 +742,25 @@ fun VideoTaskCard(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
+                        if (task.isPinned) {
+                            Box(
+                                modifier = Modifier
+                                    .background(Color(0xFFFEF3C7), RoundedCornerShape(12.dp))
+                                    .border(1.dp, AmberPrimary, RoundedCornerShape(12.dp))
+                                    .padding(horizontal = 7.dp, vertical = 3.dp)
+                            ) {
+                                Text(
+                                    text = "📌 PINNED",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Black,
+                                    color = AmberDark,
+                                    fontSize = 9.5.sp,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                        }
+
                         Box(
                             modifier = Modifier
                                 .background(AmberPrimary.copy(alpha = 0.2f), RoundedCornerShape(12.dp))
@@ -755,7 +774,13 @@ fun VideoTaskCard(
                                     modifier = Modifier.size(13.dp)
                                 )
                                 Spacer(modifier = Modifier.width(3.dp))
-                                val maxCoins = if (task.isLive || task.durationSeconds >= 1800) 160 else if (task.durationSeconds >= 1200) 100 else if (task.durationSeconds >= 600) 40 else 15
+                                val maxCoins = when {
+                                    task.isLive || task.durationSeconds >= 1800 -> 110
+                                    task.durationSeconds >= 1200 -> 72
+                                    task.durationSeconds >= 600 -> 35
+                                    task.durationSeconds >= 300 -> 17
+                                    else -> 10
+                                }
                                 Text(
                                     text = if (task.isCompleted) "+${task.rewardCoins} Earned" else "Up to +$maxCoins Coins",
                                     style = MaterialTheme.typography.labelSmall,

@@ -17,7 +17,7 @@ object SampleTask {
     const val fallbackDemoUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
     // Reward given to local wallet upon successful task completion
-    const val rewardCoins = 5
+    const val rewardCoins = 10
 
     // Required watch duration in seconds
     // set to 20 for quick testing (default: 180 = 3 minutes)

@@ -303,7 +303,7 @@ fun TaskScreen(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "+${SampleTask.rewardCoins} coins",
+                                text = "+$selectedTierCoins coins",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = AmberPrimary

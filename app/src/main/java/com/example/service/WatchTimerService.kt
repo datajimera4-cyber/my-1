@@ -70,6 +70,7 @@ class WatchTimerService : Service() {
     }
 
     private fun registerRepositoryCallbacks() {
+        floatingOverlayManager.registerOverlayCallbacks()
         // Setup repository callbacks
         WatchSessionRepository.onRedAlertTriggered = { title, message ->
             completionJob?.cancel()

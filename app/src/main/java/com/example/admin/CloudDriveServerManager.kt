@@ -96,6 +96,8 @@ object CloudDriveServerManager {
                         put("isCompleted", t.isCompleted)
                         put("lockedUntilMillis", t.lockedUntilMillis)
                         put("createdAt", t.createdAt)
+                        put("isPinned", t.isPinned)
+                        put("pinnedAt", t.pinnedAt)
                     })
                 }
                 put("tasks", tasksArr)
@@ -111,6 +113,8 @@ object CloudDriveServerManager {
                         put("actionUrl", post.actionUrl)
                         put("imageUrl", post.imageUrl)
                         put("createdAt", post.createdAt)
+                        put("isPinned", post.isPinned)
+                        put("pinnedAt", post.pinnedAt)
                     })
                 }
                 put("posts", postsArr)
@@ -152,20 +156,31 @@ object CloudDriveServerManager {
                         for (i in 0 until remoteTasksArr.length()) {
                             val obj = remoteTasksArr.getJSONObject(i)
                             val taskId = obj.optString("id")
-                            if (taskId.isNotBlank() && !deletedIds.contains(taskId) && localTasks.none { it.id == taskId }) {
-                                val newTask = VideoTaskItem(
-                                    id = taskId,
-                                    title = obj.optString("title", "Remote Task"),
-                                    channelName = obj.optString("channelName", "YouTube Creator"),
-                                    videoUrl = obj.optString("videoUrl", "https://www.youtube.com"),
-                                    thumbnailUrl = obj.optString("thumbnailUrl", ""),
-                                    durationSeconds = obj.optInt("durationSeconds", 600),
-                                    rewardCoins = obj.optInt("rewardCoins", 5),
-                                    selectedDurationSeconds = obj.optInt("selectedDurationSeconds", 180),
-                                    createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
-                                    lockedUntilMillis = obj.optLong("lockedUntilMillis", 0L)
-                                )
-                                dataStoreManager.addVideoTask(newTask)
+                            if (taskId.isNotBlank() && !deletedIds.contains(taskId)) {
+                                val existing = localTasks.find { it.id == taskId }
+                                val remotePinned = obj.optBoolean("isPinned", false)
+                                val remotePinnedAt = obj.optLong("pinnedAt", 0L)
+                                if (existing == null) {
+                                    val newTask = VideoTaskItem(
+                                        id = taskId,
+                                        title = obj.optString("title", "Remote Task"),
+                                        channelName = obj.optString("channelName", "YouTube Creator"),
+                                        videoUrl = obj.optString("videoUrl", "https://www.youtube.com"),
+                                        thumbnailUrl = obj.optString("thumbnailUrl", ""),
+                                        durationSeconds = obj.optInt("durationSeconds", 600),
+                                        rewardCoins = obj.optInt("rewardCoins", 10),
+                                        selectedDurationSeconds = obj.optInt("selectedDurationSeconds", 180),
+                                        createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
+                                        lockedUntilMillis = obj.optLong("lockedUntilMillis", 0L),
+                                        isPinned = remotePinned,
+                                        pinnedAt = remotePinnedAt
+                                    )
+                                    dataStoreManager.addVideoTask(newTask)
+                                } else if (existing.isPinned != remotePinned) {
+                                    dataStoreManager.updateVideoTask(
+                                        existing.copy(isPinned = remotePinned, pinnedAt = remotePinnedAt)
+                                    )
+                                }
                             }
                         }
                     }
@@ -175,18 +190,25 @@ object CloudDriveServerManager {
                         for (i in 0 until remotePostsArr.length()) {
                             val obj = remotePostsArr.getJSONObject(i)
                             val postId = obj.optString("id")
-                            if (postId.isNotBlank() && localPosts.none { it.id == postId }) {
-                                val newPost = AdminPostItem(
-                                    id = postId,
-                                    title = obj.optString("title", "Announcement"),
-                                    message = obj.optString("message", ""),
-                                    targetTab = obj.optString("targetTab", "ALL"),
-                                    postType = obj.optString("postType", "BANNER"),
-                                    actionUrl = obj.optString("actionUrl", ""),
-                                    imageUrl = obj.optString("imageUrl", ""),
-                                    createdAt = obj.optLong("createdAt", System.currentTimeMillis())
-                                )
-                                dataStoreManager.addAdminPost(newPost)
+                            if (postId.isNotBlank()) {
+                                val existing = localPosts.find { it.id == postId }
+                                val remotePinned = obj.optBoolean("isPinned", false)
+                                val remotePinnedAt = obj.optLong("pinnedAt", 0L)
+                                if (existing == null || existing.isPinned != remotePinned) {
+                                    val newPost = AdminPostItem(
+                                        id = postId,
+                                        title = obj.optString("title", "Announcement"),
+                                        message = obj.optString("message", ""),
+                                        targetTab = obj.optString("targetTab", "ALL"),
+                                        postType = obj.optString("postType", "BANNER"),
+                                        actionUrl = obj.optString("actionUrl", ""),
+                                        imageUrl = obj.optString("imageUrl", ""),
+                                        createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
+                                        isPinned = remotePinned,
+                                        pinnedAt = remotePinnedAt
+                                    )
+                                    dataStoreManager.addAdminPost(newPost)
+                                }
                             }
                         }
                     }

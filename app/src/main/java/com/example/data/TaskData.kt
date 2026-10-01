@@ -109,14 +109,14 @@ data class WatchDurationTier(
     val label: String
 )
 
-const val COINS_PER_INR = 20 // 200 Coins = ₹10 INR
+const val COINS_PER_INR = 100 // 1000 Coins = ₹10 INR
 
 val WATCH_DURATION_TIERS = listOf(
-    WatchDurationTier(minutes = 3, seconds = 180, coins = 5, label = "3 Min"),
-    WatchDurationTier(minutes = 5, seconds = 300, coins = 10, label = "5 Min"),
-    WatchDurationTier(minutes = 10, seconds = 600, coins = 20, label = "10 Min"),
-    WatchDurationTier(minutes = 20, seconds = 1200, coins = 45, label = "20 Min"),
-    WatchDurationTier(minutes = 30, seconds = 1800, coins = 80, label = "30 Min")
+    WatchDurationTier(minutes = 3, seconds = 180, coins = 10, label = "3 Min"),
+    WatchDurationTier(minutes = 5, seconds = 300, coins = 17, label = "5 Min"),
+    WatchDurationTier(minutes = 10, seconds = 600, coins = 35, label = "10 Min"),
+    WatchDurationTier(minutes = 20, seconds = 1200, coins = 72, label = "20 Min"),
+    WatchDurationTier(minutes = 30, seconds = 1800, coins = 110, label = "30 Min")
 )
 
 /**
@@ -144,9 +144,11 @@ data class VideoTaskItem(
     val isCompleted: Boolean = false,
     val watchedMillis: Long = 0L,
     val selectedDurationSeconds: Int = 180,
-    val rewardCoins: Int = 5,
+    val rewardCoins: Int = 10,
     val createdAt: Long = System.currentTimeMillis(),
-    val lockedUntilMillis: Long = 0L
+    val lockedUntilMillis: Long = 0L,
+    val isPinned: Boolean = false,
+    val pinnedAt: Long = 0L
 ) {
     val isLocked: Boolean
         get() = System.currentTimeMillis() < lockedUntilMillis
@@ -219,7 +221,9 @@ data class AdminPostItem(
     val postType: String = "BANNER",
     val actionUrl: String = "",
     val imageUrl: String = "",
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val isPinned: Boolean = false,
+    val pinnedAt: Long = 0L
 )
 
 

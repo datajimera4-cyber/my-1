@@ -301,13 +301,21 @@ fun AdminDashboardScreen(
                 0 -> TasksTabContent(
                     tasks = videoTasks,
                     onAddTask = { showAddTaskDialog = true },
+                    onTogglePinTask = { taskId ->
+                        viewModel.togglePinVideoTask(taskId)
+                        Toast.makeText(context, "Updated task pin status!", Toast.LENGTH_SHORT).show()
+                    },
                     onDeleteTask = { viewModel.adminDeleteTask(it) }
                 )
                 1 -> AdminPostsTabContent(
                     posts = adminPosts,
-                    onPublishPost = { title, msg, tab, type, actionUrl, imgUrl ->
-                        viewModel.addAdminPost(title, msg, tab, type, actionUrl, imgUrl)
+                    onPublishPost = { title, msg, tab, type, actionUrl, imgUrl, isPinned ->
+                        viewModel.addAdminPost(title, msg, tab, type, actionUrl, imgUrl, isPinned)
                         Toast.makeText(context, "Published to $tab tab & sent instant notification!", Toast.LENGTH_SHORT).show()
+                    },
+                    onTogglePinPost = { postId ->
+                        viewModel.togglePinAdminPost(postId)
+                        Toast.makeText(context, "Updated post pin status!", Toast.LENGTH_SHORT).show()
                     },
                     onDeletePost = { viewModel.deleteAdminPost(it) }
                 )
@@ -417,6 +425,7 @@ private fun AdminStatCard(
 private fun TasksTabContent(
     tasks: List<VideoTaskItem>,
     onAddTask: () -> Unit,
+    onTogglePinTask: (String) -> Unit,
     onDeleteTask: (String) -> Unit
 ) {
     val context = LocalContext.current
@@ -459,7 +468,14 @@ private fun TasksTabContent(
                 Card(
                     shape = RoundedCornerShape(14.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    modifier = Modifier.fillMaxWidth().testTag("admin_task_item_${task.id}")
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(
+                            width = if (task.isPinned) 1.5.dp else 0.dp,
+                            color = if (task.isPinned) AmberPrimary else Color.Transparent,
+                            shape = RoundedCornerShape(14.dp)
+                        )
+                        .testTag("admin_task_item_${task.id}")
                 ) {
                     Row(
                         modifier = Modifier
@@ -489,6 +505,21 @@ private fun TasksTabContent(
                         Spacer(modifier = Modifier.width(12.dp))
 
                         Column(modifier = Modifier.weight(1f)) {
+                            if (task.isPinned) {
+                                Box(
+                                    modifier = Modifier
+                                        .background(AmberPrimary, RoundedCornerShape(4.dp))
+                                        .padding(horizontal = 6.dp, vertical = 1.dp)
+                                ) {
+                                    Text(
+                                        text = "📌 PINNED AT TOP",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = Color.Black
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(2.dp))
+                            }
                             Text(
                                 text = task.title,
                                 fontWeight = FontWeight.Bold,
@@ -505,6 +536,22 @@ private fun TasksTabContent(
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = AmberPrimary
+                            )
+                        }
+
+                        OutlinedButton(
+                            onClick = { onTogglePinTask(task.id) },
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier
+                                .height(34.dp)
+                                .testTag("admin_pin_task_${task.id}")
+                        ) {
+                            Text(
+                                text = if (task.isPinned) "📌 Unpin" else "📌 Pin",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (task.isPinned) AmberDark else MaterialTheme.colorScheme.onSurface
                             )
                         }
 
@@ -698,7 +745,7 @@ private fun UsersTabContent(
                         Text(text = user.email, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         Text(text = "ID: ${user.userId}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text(
-                            text = "${user.coinsBalance} Coins (≈ ₹${String.format(Locale.US, "%.2f", user.coinsBalance / 10.0)})",
+                            text = "${user.coinsBalance} Coins (≈ ₹${String.format(Locale.US, "%.2f", user.coinsBalance / com.example.data.COINS_PER_INR.toDouble())})",
                             fontWeight = FontWeight.Bold,
                             color = AmberPrimary,
                             fontSize = 12.sp
@@ -1126,7 +1173,8 @@ private fun GoogleDriveServerTabContent(
 @Composable
 private fun AdminPostsTabContent(
     posts: List<AdminPostItem>,
-    onPublishPost: (title: String, message: String, targetTab: String, postType: String, actionUrl: String, imageUrl: String) -> Unit,
+    onPublishPost: (title: String, message: String, targetTab: String, postType: String, actionUrl: String, imageUrl: String, isPinned: Boolean) -> Unit,
+    onTogglePinPost: (String) -> Unit,
     onDeletePost: (String) -> Unit
 ) {
     var titleInput by remember { mutableStateOf("") }
@@ -1135,6 +1183,7 @@ private fun AdminPostsTabContent(
     var selectedPostType by remember { mutableStateOf("BANNER") }
     var actionUrlInput by remember { mutableStateOf("") }
     var imageUrlInput by remember { mutableStateOf("") }
+    var isPinnedInput by remember { mutableStateOf(true) }
 
     val targetTabs = listOf(
         "ALL" to "All Tabs",
@@ -1283,6 +1332,38 @@ private fun AdminPostsTabContent(
                         modifier = Modifier.fillMaxWidth()
                     )
 
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "📌 Pin Banner / Post to Top",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "Keep this item fixed at the top even when new posts are published",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.White.copy(alpha = 0.72f),
+                                fontSize = 11.sp
+                            )
+                        }
+                        Switch(
+                            checked = isPinnedInput,
+                            onCheckedChange = { isPinnedInput = it },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.Black,
+                                checkedTrackColor = AmberPrimary
+                            )
+                        )
+                    }
+
                     Button(
                         onClick = {
                             if (titleInput.isNotBlank()) {
@@ -1292,7 +1373,8 @@ private fun AdminPostsTabContent(
                                     selectedTargetTab,
                                     selectedPostType,
                                     actionUrlInput,
-                                    imageUrlInput
+                                    imageUrlInput,
+                                    isPinnedInput
                                 )
                                 titleInput = ""
                                 messageInput = ""
@@ -1331,7 +1413,13 @@ private fun AdminPostsTabContent(
             Card(
                 shape = RoundedCornerShape(14.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(
+                        width = if (post.isPinned) 1.5.dp else 0.dp,
+                        color = if (post.isPinned) AmberPrimary else Color.Transparent,
+                        shape = RoundedCornerShape(14.dp)
+                    )
             ) {
                 Row(
                     modifier = Modifier
@@ -1341,7 +1429,24 @@ private fun AdminPostsTabContent(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            if (post.isPinned) {
+                                Box(
+                                    modifier = Modifier
+                                        .background(AmberPrimary, RoundedCornerShape(6.dp))
+                                        .padding(horizontal = 7.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "📌 PINNED",
+                                        fontSize = 9.5.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = Color.Black
+                                    )
+                                }
+                            }
                             Box(
                                 modifier = Modifier
                                     .background(
@@ -1372,6 +1477,23 @@ private fun AdminPostsTabContent(
                             )
                         }
                     }
+
+                    OutlinedButton(
+                        onClick = { onTogglePinPost(post.id) },
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                        modifier = Modifier
+                            .height(34.dp)
+                            .testTag("admin_pin_post_${post.id}")
+                    ) {
+                        Text(
+                            text = if (post.isPinned) "📌 Unpin" else "📌 Pin",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (post.isPinned) AmberDark else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
                     IconButton(onClick = { onDeletePost(post.id) }) {
                         Icon(
                             imageVector = Icons.Default.Delete,

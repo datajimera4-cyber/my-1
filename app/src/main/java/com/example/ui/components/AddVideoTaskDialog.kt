@@ -90,6 +90,7 @@ fun AddVideoTaskDialog(
     var channelInput by remember { mutableStateOf("") }
     var thumbnailUrl by remember { mutableStateOf("") }
     var isLive by remember { mutableStateOf(false) }
+    var isPinned by remember { mutableStateOf(false) }
     var durationMinutesText by remember { mutableStateOf("10") }
     var isFetching by remember { mutableStateOf(false) }
     var isSubmitting by remember { mutableStateOf(false) }
@@ -441,6 +442,45 @@ fun AddVideoTaskDialog(
                     }
                 }
 
+                // Pin Task to Top toggle
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isPinned) AmberPrimary.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "📌 Pin Task to Top",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Keep this task fixed at the top even when new tasks are added",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 11.sp
+                            )
+                        }
+                        Switch(
+                            checked = isPinned,
+                            onCheckedChange = { isPinned = it },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.Black,
+                                checkedTrackColor = AmberPrimary
+                            )
+                        )
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(6.dp))
 
                 // Create Task Button
@@ -477,6 +517,7 @@ fun AddVideoTaskDialog(
                                 .maxByOrNull { it.minutes }
                                 ?: com.example.data.WATCH_DURATION_TIERS.first()
 
+                            val now = System.currentTimeMillis()
                             val newTask = VideoTaskItem(
                                 id = UUID.randomUUID().toString(),
                                 title = finalTitle,
@@ -487,7 +528,10 @@ fun AddVideoTaskDialog(
                                 isLive = isLive,
                                 isCompleted = false,
                                 rewardCoins = targetTier.coins,
-                                selectedDurationSeconds = targetTier.seconds
+                                selectedDurationSeconds = targetTier.seconds,
+                                createdAt = now,
+                                isPinned = isPinned,
+                                pinnedAt = if (isPinned) now else 0L
                             )
                             isSubmitting = false
                             onTaskAdded(newTask)

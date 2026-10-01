@@ -213,7 +213,7 @@ fun HomeScreen(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
-                                text = "WALLET BALANCE • 200 Coins = 10 INR",
+                                text = "WALLET BALANCE • 1000 Coins = 10 INR",
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.SemiBold,
                                 color = AmberLight,
@@ -245,7 +245,7 @@ fun HomeScreen(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Coins (≈ ₹${String.format(java.util.Locale.US, "%.2f", walletBalance / 20.0)} INR)",
+                                text = "Coins (≈ ₹${String.format(java.util.Locale.US, "%.2f", walletBalance / com.example.data.COINS_PER_INR.toDouble())} INR)",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = AmberPrimary
