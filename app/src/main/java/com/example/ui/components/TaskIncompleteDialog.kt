@@ -72,37 +72,13 @@ fun TaskIncompleteDialog(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
-                    text = "Task Incomplete!",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Black,
-                    color = AlertRed
+                    text = "Watch Session Notice",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Box(
-                    modifier = Modifier
-                        .background(AlertRed.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Lock,
-                            contentDescription = null,
-                            tint = AlertRed,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Task Locked for 12 Hours",
-                            fontWeight = FontWeight.Bold,
-                            color = AlertRed,
-                            fontSize = 13.sp
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
                     text = message,
@@ -112,18 +88,7 @@ fun TaskIncompleteDialog(
                     lineHeight = 20.sp
                 )
 
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Text(
-                    text = "Note: Continuous watch rules require staying in YouTube until the goal finishes. Agar aap beech mein wapas aate hain to session cancel ho jata hai aur task 12 ghante ke baad unlock hota hai.",
-                    style = MaterialTheme.typography.bodySmall,
-                    textAlign = TextAlign.Center,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                    fontSize = 11.sp,
-                    lineHeight = 16.sp
-                )
-
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(22.dp))
 
                 Button(
                     onClick = onDismiss,
@@ -135,7 +100,7 @@ fun TaskIncompleteDialog(
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Text(
-                        text = "OK, Samjh Gaya",
+                        text = "OK",
                         fontWeight = FontWeight.Bold,
                         color = Color.Black
                     )

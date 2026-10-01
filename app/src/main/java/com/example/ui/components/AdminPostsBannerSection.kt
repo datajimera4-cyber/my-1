@@ -71,10 +71,17 @@ fun AdminPostsBannerSection(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val normalizedCurrentTab = if (currentTab.equals("TASK", ignoreCase = true)) "TASKS" else currentTab.uppercase()
     val relevantPosts = posts
         .filter { post ->
-            post.targetTab.equals("ALL", ignoreCase = true) ||
-                    post.targetTab.equals(currentTab, ignoreCase = true)
+            val postTab = if (post.targetTab.equals("ALL", ignoreCase = true) || post.targetTab.isBlank()) {
+                "HOME"
+            } else if (post.targetTab.equals("TASK", ignoreCase = true)) {
+                "TASKS"
+            } else {
+                post.targetTab.uppercase()
+            }
+            postTab == normalizedCurrentTab
         }
         .sortedWith(
             compareByDescending<AdminPostItem> { it.isPinned }
@@ -176,7 +183,7 @@ fun AdminPostsBannerSection(
                             shownAlertDialogForId = topAlertPost.id
                         }
                     ) {
-                        Text("OK, Got It", color = SuccessEmerald, fontWeight = FontWeight.Bold)
+                        Text("OK", color = SuccessEmerald, fontWeight = FontWeight.Bold)
                     }
                 }
             }

@@ -13,14 +13,26 @@ android {
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.example.kingo.user"
     minSdk = 26
     targetSdk = 36
     versionCode = 1
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-    buildConfigField("String", "APP_ROLE", "\"USER\"")
+  }
+
+  flavorDimensions += "role"
+  productFlavors {
+    create("admin") {
+      dimension = "role"
+      applicationId = "com.example.kingo.admin"
+      buildConfigField("String", "APP_ROLE", "\"ADMIN\"")
+    }
+    create("user") {
+      dimension = "role"
+      applicationId = "com.example.kingo.user"
+      buildConfigField("String", "APP_ROLE", "\"USER\"")
+    }
   }
 
   signingConfigs {

@@ -39,7 +39,6 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Warning
 import com.example.ui.components.ActiveWatchTimerBanner
-import com.example.ui.components.ChangeVideoLinkDialog
 import com.example.ui.components.DurationSelectionDialog
 import com.example.ui.components.SearchLoadingOverlay
 import com.example.ui.theme.Slate800
@@ -130,7 +129,6 @@ fun TaskScreen(
     val isTaskLocked = currentSelectedTask?.isLocked == true
     val isTaskCompletedEffective = currentSelectedTask?.isCompleted == true || sessionState == SessionState.COMPLETED
 
-    var showChangeLinkDialog by remember { mutableStateOf(false) }
     var showDurationDialog by remember { mutableStateOf(false) }
     var showAccessibilityPromptDialog by remember { mutableStateOf(false) }
     var showOverlayPromptDialog by remember { mutableStateOf(false) }
@@ -188,18 +186,6 @@ fun TaskScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back"
-                        )
-                    }
-                },
-                actions = {
-                    IconButton(
-                        onClick = { showChangeLinkDialog = true },
-                        modifier = Modifier.testTag("task_set_link_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Link,
-                            contentDescription = "Paste YouTube Video Link",
-                            tint = AmberPrimary
                         )
                     }
                 },
@@ -343,23 +329,6 @@ fun TaskScreen(
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            OutlinedButton(
-                                onClick = { showChangeLinkDialog = true },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(38.dp)
-                                    .testTag("task_change_link_btn"),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Link,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Change Video Link", fontSize = 12.sp)
-                            }
                         }
 
                         is OEmbedResult.Error -> {
@@ -725,7 +694,7 @@ fun TaskScreen(
                             onClick = {
                                 android.widget.Toast.makeText(
                                     context,
-                                    "YouTube par asli video Like karein (+5 coins 1st time auto-add honge)!",
+                                    "Like the video on YouTube to earn +5 bonus coins.",
                                     android.widget.Toast.LENGTH_SHORT
                                 ).show()
                             },
@@ -772,7 +741,7 @@ fun TaskScreen(
                             onClick = {
                                 android.widget.Toast.makeText(
                                     context,
-                                    "YouTube par asli Comment post karein (+5 coins auto-add honge)!",
+                                    "Post a comment on YouTube to earn +5 bonus coins.",
                                     android.widget.Toast.LENGTH_SHORT
                                 ).show()
                             },
@@ -916,11 +885,11 @@ fun TaskScreen(
                         val remainStr = currentSelectedTask?.getLockRemainingFormatted() ?: "12h"
                         if (currentSelectedTask?.isCompleted == true) {
                             WatchSessionRepository.showTaskIncompleteMessage(
-                                "🔒 Yeh task complete hone ke baad 8 ghante ke liye lock hai ($remainStr remaining). 8 ghante baad aap isse rewatch kar sakte hain."
+                                "This task is completed and locked for 8 hours ($remainStr remaining)."
                             )
                         } else {
                             WatchSessionRepository.showTaskIncompleteMessage(
-                                "⚠️ Yeh task incomplete hone ki wajah se 12 ghante ke liye lock hai ($remainStr remaining). 12 ghante baad aap isse rewatch kar sakte hain."
+                                "This task is locked for 12 hours ($remainStr remaining) due to an incomplete session."
                             )
                         }
                     } else if (!PermissionHelper.isOverlayPermissionGranted(context)) {
@@ -968,17 +937,6 @@ fun TaskScreen(
                 )
             }
         }
-    }
-
-    // Change Video Link Dialog
-    if (showChangeLinkDialog) {
-        ChangeVideoLinkDialog(
-            initialUrl = currentUrl,
-            onDismiss = { showChangeLinkDialog = false },
-            onSaveLink = { newUrl ->
-                viewModel.setVideoUrl(newUrl)
-            }
-        )
     }
 
     // Duration Goal Selection Dialog
@@ -1179,7 +1137,7 @@ fun TaskScreen(
                     onClick = { viewModel.dismissInterruptedMessage() },
                     colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary)
                 ) {
-                    Text("Understood", color = Color.Black, fontWeight = FontWeight.Bold)
+                    Text("OK", color = Color.Black, fontWeight = FontWeight.Bold)
                 }
             }
         )

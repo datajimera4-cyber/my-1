@@ -136,7 +136,16 @@ object WatchSessionRepository {
         if (currentState != SessionState.ACTIVE && currentState != SessionState.WAITING) {
             return
         }
-        addLog(reason, LogType.ERROR)
+        val cleanReason = when {
+            reason.contains("bajaye", ignoreCase = true) || reason.contains("Doosra video", ignoreCase = true) ->
+                "Target video playback stopped because a different video was opened."
+            reason.contains("scroll", ignoreCase = true) || reason.contains("feed", ignoreCase = true) || reason.contains("search", ignoreCase = true) ->
+                "Target video was closed before the watch timer finished."
+            reason.contains("Aapne", ignoreCase = true) || reason.contains("Aap ", ignoreCase = true) || reason.contains("zaroori", ignoreCase = true) ->
+                "Watch session ended before the timer completed."
+            else -> reason
+        }
+        addLog(cleanReason, LogType.ERROR)
 
         _watchedMillis.value = 0L
         _currentMilestoneTier.value = null
@@ -145,19 +154,19 @@ object WatchSessionRepository {
         hasLeftAppForYouTube = false
         _playbackState.value = VideoPlaybackState.STOPPED
         _sessionState.value = SessionState.INVALID
-        _redAlertMessage.value = reason
-        _taskIncompleteMessage.value = reason
+        _redAlertMessage.value = cleanReason
+        _taskIncompleteMessage.value = cleanReason
 
         onSaveProgressNeeded?.invoke(0L)
         com.example.service.YouTubeLiveSearchService.disarm()
 
         val activeId = _activeTaskId.value
         if (activeId != null) {
-            onTaskIncompleteAndLocked?.invoke(activeId, reason, 12 * 60 * 60 * 1000L)
+            onTaskIncompleteAndLocked?.invoke(activeId, cleanReason, 12 * 60 * 60 * 1000L)
         }
         val serviceCallback = onServiceTaskIncomplete
         if (serviceCallback != null) {
-            serviceCallback.invoke(activeId ?: "", reason, 12 * 60 * 60 * 1000L)
+            serviceCallback.invoke(activeId ?: "", cleanReason, 12 * 60 * 60 * 1000L)
         } else {
             onRequestHideOverlay?.invoke()
         }
@@ -416,8 +425,8 @@ object WatchSessionRepository {
                     addLog("Pre-roll ad or sponsor detected (\"$detected\"). Timer paused until target video plays.", LogType.INFO)
                 } else if (currentState == SessionState.ACTIVE) {
                     // User played a DIFFERENT video in YouTube!
-                    val wrongTitle = detected.ifBlank { "Doosra video" }
-                    val message = "Task Incomplete! Aapne YouTube par target video (\"$target\") ke bajaye doosra video (\"$wrongTitle\") play kar diya. Sirf target title aur channel wala video play hone par hi timer chalega."
+                    val wrongTitle = detected.ifBlank { "another video" }
+                    val message = "Different video detected (\"$wrongTitle\"). Please watch the assigned target video (\"$target\")."
                     triggerTaskIncomplete(message)
                 }
             }
@@ -433,7 +442,7 @@ object WatchSessionRepository {
      */
     fun onAppSwitchedOrMinimized() {
         if (_sessionState.value == SessionState.ACTIVE) {
-            triggerTaskIncomplete("Task Incomplete! Aapne YouTube minimize kar diya ya YouTube se back kar ke doosre app mein switch kar liya.")
+            triggerTaskIncomplete("Watch session ended because YouTube was minimized or closed before completion.")
         }
     }
 
@@ -454,7 +463,7 @@ object WatchSessionRepository {
                 onRequestHideOverlay?.invoke()
                 val elapsedSinceLaunch = System.currentTimeMillis() - taskLaunchTimestampMillis
                 if (_sessionState.value == SessionState.ACTIVE && hasLeftAppForYouTube && elapsedSinceLaunch > 2500L) {
-                    triggerTaskIncomplete("Task Incomplete! Aap task pura hone se pehle YouTube se back/switch kar ke bahar aa gaye. Pura reward pane ke liye timer khatam hone tak target video dekhna zaroori hai.")
+                    triggerTaskIncomplete("Watch session ended before the timer completed.")
                 } else {
                     addLog("App opened in foreground - watching paused", LogType.INFO)
                 }

@@ -209,15 +209,15 @@ data class PayoutRequest(
 )
 
 /**
- * Admin Banner / Post / Alert Notification item targeted at specific tabs in the User App.
- * targetTab: "ALL", "HOME", "TASKS", "WALLET", "ME"
+ * Admin Banner / Post / Alert Notification item targeted at a specific tab in the User App.
+ * targetTab: "HOME", "TASKS", "WALLET", "ME"
  * postType: "BANNER", "ALERT", "POST"
  */
 data class AdminPostItem(
     val id: String,
     val title: String,
     val message: String,
-    val targetTab: String = "ALL",
+    val targetTab: String = "HOME",
     val postType: String = "BANNER",
     val actionUrl: String = "",
     val imageUrl: String = "",

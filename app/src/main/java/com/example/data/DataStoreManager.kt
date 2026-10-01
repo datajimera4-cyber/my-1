@@ -771,7 +771,7 @@ class DataStoreManager(private val context: Context) {
                 id = "default_welcome_banner",
                 title = "🔥 Bonus Update: 1000 Coins = ₹10 INR!",
                 message = "Watch tasks & earn: 3m=10c, 5m=17c, 10m=35c, 20m=72c, 30m=110c + Like (+5c) & Comment (+5c)!",
-                targetTab = "ALL",
+                targetTab = "HOME",
                 postType = "BANNER",
                 actionUrl = "",
                 imageUrl = "",
@@ -1144,12 +1144,14 @@ class DataStoreManager(private val context: Context) {
                     .replace("200 Coins = ₹10 INR", "1000 Coins = ₹10 INR")
                     .replace("5000 Coins = ₹10 INR", "1000 Coins = ₹10 INR")
                     .replace("3m=5c, 5m=10c, 10m=20c, 20m=45c, 30m=80c", "3m=10c, 5m=17c, 10m=35c, 20m=72c, 30m=110c")
+                val rawTab = obj.optString("targetTab", "HOME").uppercase()
+                val effectiveTab = if (rawTab == "ALL" || rawTab.isBlank()) "HOME" else rawTab
                 list.add(
                     AdminPostItem(
                         id = rawId,
                         title = rawTitle,
                         message = rawMessage,
-                        targetTab = obj.optString("targetTab", "ALL"),
+                        targetTab = effectiveTab,
                         postType = obj.optString("postType", "BANNER"),
                         actionUrl = obj.optString("actionUrl", ""),
                         imageUrl = obj.optString("imageUrl", ""),

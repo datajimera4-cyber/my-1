@@ -107,7 +107,7 @@ fun SuccessDialog(
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Text(
-                        text = "Awesome!",
+                        text = "OK",
                         fontWeight = FontWeight.Bold,
                         color = Color.Black
                     )

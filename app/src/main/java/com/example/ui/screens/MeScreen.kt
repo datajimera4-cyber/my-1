@@ -69,13 +69,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.data.PayoutStatus
 import com.example.ui.components.AdminPostsBannerSection
-import com.example.ui.components.ChangeVideoLinkDialog
-import com.example.ui.theme.AlertRed
 import com.example.ui.theme.AmberDark
 import com.example.ui.theme.AmberPrimary
-import com.example.ui.theme.Slate800
 import com.example.ui.theme.SuccessGreen
 import com.example.viewmodel.AppScreen
 import com.example.viewmodel.MainViewModel
@@ -92,15 +88,9 @@ fun MeScreen(
     val videoTasks by viewModel.videoTasks.collectAsState()
     val adminPosts by viewModel.adminPosts.collectAsState()
     val dismissedPostIds by viewModel.dismissedPostIds.collectAsState()
-    val activeUrl by viewModel.currentVideoUrl.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
-    val payoutRequests by viewModel.payoutRequests.collectAsState()
 
     val completedCount = videoTasks.count { it.isCompleted }
-    val pendingPayoutsCount = payoutRequests.count { it.status == PayoutStatus.PENDING }
-
-    var showResetDialog by remember { mutableStateOf(false) }
-    var showLinkDialog by remember { mutableStateOf(false) }
 
     // Authentication form state
     var authTabIndex by remember { mutableIntStateOf(0) } // 0 = Login, 1 = Sign Up
@@ -452,11 +442,11 @@ fun MeScreen(
                 }
             }
 
-            // Controls & Settings Section
+            // Account & Wallet Section
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "Features & Navigation",
+                        text = "Account & Rewards",
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -500,7 +490,7 @@ fun MeScreen(
                                         style = MaterialTheme.typography.bodyMedium
                                     )
                                     Text(
-                                        text = "Withdraw coins to UPI, Paytm or Bank",
+                                        text = "Withdraw coins to UPI, Paytm or Bank (1000 Coins = ₹10 INR)",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         fontSize = 11.sp
@@ -517,89 +507,14 @@ fun MeScreen(
                         }
                     }
 
-                    // Admin Dashboard Row (Only accessible in ADMIN role flavor)
-                    if (com.example.BuildConfig.APP_ROLE == "ADMIN") {
-                        Card(
-                            shape = RoundedCornerShape(14.dp),
-                            colors = CardDefaults.cardColors(containerColor = Slate800),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { viewModel.navigateTo(AppScreen.ADMIN) }
-                                .testTag("me_admin_dashboard_row")
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(16.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .background(AmberPrimary.copy(alpha = 0.2f), CircleShape),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.AdminPanelSettings,
-                                            contentDescription = null,
-                                            tint = AmberPrimary,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Column {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(
-                                                text = "Admin Control Panel",
-                                                fontWeight = FontWeight.Bold,
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = Color.White
-                                            )
-                                            if (pendingPayoutsCount > 0) {
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Box(
-                                                    modifier = Modifier
-                                                        .background(AlertRed, RoundedCornerShape(4.dp))
-                                                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                                                ) {
-                                                    Text(
-                                                        text = "$pendingPayoutsCount PENDING",
-                                                        color = Color.White,
-                                                        fontSize = 9.sp,
-                                                        fontWeight = FontWeight.Bold
-                                                    )
-                                                }
-                                            }
-                                        }
-                                        Text(
-                                            text = "Manage tasks, review payouts, adjust coins & web server",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = AmberPrimary,
-                                            fontSize = 11.sp
-                                        )
-                                    }
-                                }
-
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                    contentDescription = null,
-                                    tint = AmberPrimary,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    // Zero-Permission Privacy Row
+                    // Active Tasks Row
                     Card(
                         shape = RoundedCornerShape(14.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { viewModel.navigateTo(AppScreen.SETUP) }
-                            .testTag("me_setup_row")
+                            .clickable { viewModel.switchTab(AppScreen.TASKS) }
+                            .testTag("me_tasks_row")
                     ) {
                         Row(
                             modifier = Modifier
@@ -616,7 +531,7 @@ fun MeScreen(
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.Security,
+                                        imageVector = Icons.Default.CheckCircle,
                                         contentDescription = null,
                                         tint = SuccessGreen,
                                         modifier = Modifier.size(20.dp)
@@ -625,67 +540,12 @@ fun MeScreen(
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column {
                                     Text(
-                                        text = "Zero-Permission Video Tracking",
+                                        text = "Video Watch Tasks",
                                         fontWeight = FontWeight.Bold,
                                         style = MaterialTheme.typography.bodyMedium
                                     )
                                     Text(
-                                        text = "No notification reading required • 100% Privacy Protected",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = SuccessGreen,
-                                        fontSize = 11.sp
-                                    )
-                                }
-                            }
-
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-
-                    // Diagnostics Screen
-                    Card(
-                        shape = RoundedCornerShape(14.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { viewModel.navigateTo(AppScreen.DIAGNOSTICS) }
-                            .testTag("me_diagnostics_row")
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Analytics,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column {
-                                    Text(
-                                        text = "Live Diagnostics & Telemetry",
-                                        fontWeight = FontWeight.Bold,
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
-                                    Text(
-                                        text = "Inspect search events & session logs",
+                                        text = "$completedCount of ${videoTasks.size} tasks completed",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         fontSize = 11.sp
@@ -701,125 +561,8 @@ fun MeScreen(
                             )
                         }
                     }
-
-                    // Paste Custom Link row
-                    Card(
-                        shape = RoundedCornerShape(14.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { showLinkDialog = true }
-                            .testTag("me_paste_link_row")
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Link,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column {
-                                    Text(
-                                        text = "Paste Any Video Link",
-                                        fontWeight = FontWeight.Bold,
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
-                                    Text(
-                                        text = "Current URL: ${activeUrl.take(28)}...",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        fontSize = 11.sp
-                                    )
-                                }
-                            }
-
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Reset Section
-            item {
-                Button(
-                    onClick = { showResetDialog = true },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                        .testTag("me_reset_all_button"),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    ),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Reset App State (Clear Wallet & History)")
                 }
             }
         }
-    }
-
-    // Reset Confirmation Dialog
-    if (showResetDialog) {
-        AlertDialog(
-            onDismissRequest = { showResetDialog = false },
-            title = { Text("Reset Kingo King?") },
-            text = {
-                Text("This will clear your local wallet balance, completion flag, and transaction history. You can then test earning coins again.")
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.resetAll(context)
-                        showResetDialog = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                ) {
-                    Text("Reset All", color = Color.White)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showResetDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
-
-    // Change Video Link Dialog
-    if (showLinkDialog) {
-        ChangeVideoLinkDialog(
-            initialUrl = activeUrl,
-            onDismiss = { showLinkDialog = false },
-            onSaveLink = { newUrl ->
-                viewModel.setVideoUrl(newUrl)
-            }
-        )
     }
 }

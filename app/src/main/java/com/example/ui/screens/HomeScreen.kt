@@ -45,7 +45,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import com.example.ui.components.ActiveWatchTimerBanner
-import com.example.ui.components.ChangeVideoLinkDialog
 import com.example.ui.components.SearchLoadingOverlay
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -99,9 +98,6 @@ fun HomeScreen(
     val searchProgress by viewModel.searchProgress.collectAsState()
     val liveSearchMode by viewModel.liveSearchMode.collectAsState()
 
-    var showResetConfirmDialog by remember { mutableStateOf(false) }
-    var showChangeLinkDialog by remember { mutableStateOf(false) }
-
     val thumbnailUrl = remember(activeUrl) {
         val effectiveUrl = if (activeUrl == "PASTE_MY_YOUTUBE_LINK_HERE") {
             SampleTask.fallbackDemoUrl
@@ -145,18 +141,6 @@ fun HomeScreen(
                                 fontSize = 10.sp
                             )
                         }
-                    }
-                },
-                actions = {
-                    IconButton(
-                        onClick = { showChangeLinkDialog = true },
-                        modifier = Modifier.testTag("topbar_set_link_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Link,
-                            contentDescription = "Paste YouTube Video Link",
-                            tint = AmberPrimary
-                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -464,25 +448,6 @@ fun HomeScreen(
                                 modifier = Modifier.size(18.dp)
                             )
                         }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        OutlinedButton(
-                            onClick = { showChangeLinkDialog = true },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(44.dp)
-                                .testTag("change_video_link_button"),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Link,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Paste Any Video Link", fontSize = 13.sp)
-                        }
                     }
                 }
             }
@@ -505,120 +470,12 @@ fun HomeScreen(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "View All Video Tasks (+ Add New)",
+                    text = "View All Video Tasks",
                     fontWeight = FontWeight.Bold,
                     color = Color.Black
                 )
             }
-
-            // 4. Quick Action Buttons
-            Text(
-                text = "Controls & Settings",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                OutlinedButton(
-                    onClick = { viewModel.navigateTo(AppScreen.WALLET) },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp)
-                        .testTag("wallet_button"),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.AccountBalanceWallet,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Wallet")
-                }
-
-                OutlinedButton(
-                    onClick = { viewModel.navigateTo(AppScreen.DIAGNOSTICS) },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp)
-                        .testTag("diagnostics_button"),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Troubleshoot,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Diagnostics")
-                }
-            }
-
-            // Reset Button
-            Button(
-                onClick = { showResetConfirmDialog = true },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .testTag("reset_button"),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                ),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Refresh,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Reset (Clear Wallet, Completion, History)")
-            }
         }
-    }
-
-    // Reset Confirmation Dialog
-    if (showResetConfirmDialog) {
-        AlertDialog(
-            onDismissRequest = { showResetConfirmDialog = false },
-            title = { Text("Reset WatchEarn?") },
-            text = {
-                Text("This will clear your local wallet balance, completion flag, saved watch time, and transaction history. You will be able to perform the task again.")
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.resetAll(context)
-                        showResetConfirmDialog = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                    modifier = Modifier.testTag("confirm_reset_button")
-                ) {
-                    Text("Reset All", color = Color.White)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showResetConfirmDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
-
-    // Change Video Link Dialog
-    if (showChangeLinkDialog) {
-        ChangeVideoLinkDialog(
-            initialUrl = activeUrl,
-            onDismiss = { showChangeLinkDialog = false },
-            onSaveLink = { newUrl ->
-                viewModel.setVideoUrl(newUrl)
-            }
-        )
     }
 
     // Organic Search Discovery Loading Overlay

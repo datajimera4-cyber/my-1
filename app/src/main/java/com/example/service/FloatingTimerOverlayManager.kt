@@ -530,10 +530,10 @@ class FloatingTimerOverlayManager(private val context: Context) {
                 isTaskLiked = true
                 applyLikedBadgeStyle()
                 if (result.first) {
-                    triggerCelebration("🪙 +5 COINS ADDED FOR YOUTUBE LIKE! 🎉")
+                    triggerCelebration("✓ +5 Coins Added (Like)")
                     android.widget.Toast.makeText(
                         context,
-                        "🎉 +5 Coins added for Liking the YouTube video!",
+                        "+5 Coins added for liking the video",
                         android.widget.Toast.LENGTH_SHORT
                     ).show()
                     WatchSessionRepository.addLog("Auto-detected genuine YouTube Like! +5 coins added (1-time reward).", LogType.SUCCESS)
@@ -554,10 +554,10 @@ class FloatingTimerOverlayManager(private val context: Context) {
                 currentCommentCount = newCount
                 updateCommentBadge()
                 if (result.first) {
-                    triggerCelebration("🪙 +5 COINS ADDED FOR YOUTUBE COMMENT! 🎉")
+                    triggerCelebration("✓ +5 Coins Added (Comment)")
                     android.widget.Toast.makeText(
                         context,
-                        "🎉 +5 Coins added for Comment #$currentCommentCount on YouTube!",
+                        "+5 Coins added for Comment #$currentCommentCount",
                         android.widget.Toast.LENGTH_SHORT
                     ).show()
                     WatchSessionRepository.addLog("Auto-detected genuine YouTube Comment! +5 coins added (#$currentCommentCount).", LogType.SUCCESS)
@@ -765,9 +765,9 @@ class FloatingTimerOverlayManager(private val context: Context) {
                 setPadding(pad, pad, pad, pad)
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.RECTANGLE
-                    cornerRadius = 24 * density
+                    cornerRadius = 20 * density
                     setColor(Color.parseColor("#0F172A"))
-                    setStroke((2 * density).toInt(), Color.parseColor("#EF4444"))
+                    setStroke((1.5f * density).toInt(), Color.parseColor("#334155"))
                 }
                 elevation = 24 * density
                 layoutParams = FrameLayout.LayoutParams(
@@ -779,59 +779,38 @@ class FloatingTimerOverlayManager(private val context: Context) {
             }
 
             val iconBadge = TextView(context).apply {
-                text = "⚠️"
-                textSize = 28f
+                text = "ℹ️"
+                textSize = 24f
                 gravity = Gravity.CENTER
-                val badgeSize = (64 * density).toInt()
+                val badgeSize = (54 * density).toInt()
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
-                    setColor(Color.parseColor("#33EF4444"))
+                    setColor(Color.parseColor("#1E293B"))
                 }
                 layoutParams = LinearLayout.LayoutParams(badgeSize, badgeSize).apply {
-                    bottomMargin = (14 * density).toInt()
+                    bottomMargin = (12 * density).toInt()
                 }
             }
             dialogCard.addView(iconBadge)
 
             val titleTv = TextView(context).apply {
-                text = "Task Incomplete!"
-                setTextColor(Color.parseColor("#EF4444"))
-                textSize = 20f
+                text = "Watch Session Notice"
+                setTextColor(Color.WHITE)
+                textSize = 18f
                 typeface = android.graphics.Typeface.DEFAULT_BOLD
                 gravity = Gravity.CENTER
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
                 ).apply {
-                    bottomMargin = (8 * density).toInt()
+                    bottomMargin = (10 * density).toInt()
                 }
             }
             dialogCard.addView(titleTv)
 
-            val lockBadgeTv = TextView(context).apply {
-                text = "🔒 Locked for 12 Hours • Timer Stopped"
-                setTextColor(Color.parseColor("#F87171"))
-                textSize = 12f
-                typeface = android.graphics.Typeface.DEFAULT_BOLD
-                gravity = Gravity.CENTER
-                setPadding((12 * density).toInt(), (5 * density).toInt(), (12 * density).toInt(), (5 * density).toInt())
-                background = GradientDrawable().apply {
-                    shape = GradientDrawable.RECTANGLE
-                    cornerRadius = 8 * density
-                    setColor(Color.parseColor("#26EF4444"))
-                }
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    bottomMargin = (12 * density).toInt()
-                }
-            }
-            dialogCard.addView(lockBadgeTv)
-
             val msgTv = TextView(context).apply {
                 text = message
-                setTextColor(Color.parseColor("#E2E8F0"))
+                setTextColor(Color.parseColor("#CBD5E1"))
                 textSize = 13.5f
                 gravity = Gravity.CENTER
                 setLineSpacing(4 * density, 1f)
@@ -845,7 +824,7 @@ class FloatingTimerOverlayManager(private val context: Context) {
             dialogCard.addView(msgTv)
 
             val okBtn = TextView(context).apply {
-                text = "OK, Samjh Gaya"
+                text = "OK"
                 setTextColor(Color.BLACK)
                 textSize = 14f
                 typeface = android.graphics.Typeface.DEFAULT_BOLD

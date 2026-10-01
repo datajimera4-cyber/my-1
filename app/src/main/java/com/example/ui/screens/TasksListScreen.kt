@@ -76,7 +76,6 @@ import com.example.data.VideoTaskItem
 import com.example.data.WATCH_DURATION_TIERS
 import com.example.repository.WatchSessionRepository
 import com.example.ui.components.ActiveWatchTimerBanner
-import com.example.ui.components.AddVideoTaskDialog
 import com.example.ui.components.AdminPostsBannerSection
 import com.example.ui.components.DurationSelectionDialog
 import com.example.ui.components.SearchLoadingOverlay
@@ -114,7 +113,6 @@ fun TasksListScreen(
     val commentCounts by viewModel.commentCounts.collectAsState()
     val sessionInterruptedMessage by viewModel.sessionInterruptedMessage.collectAsState()
 
-    var showAddDialog by remember { mutableStateOf(false) }
     var taskForDurationSelection by remember { mutableStateOf<VideoTaskItem?>(null) }
     var pendingTaskAndTier by remember { mutableStateOf<Pair<VideoTaskItem, com.example.data.WatchDurationTier>?>(null) }
     var showOverlayPromptDialog by remember { mutableStateOf(false) }
@@ -190,36 +188,11 @@ fun TasksListScreen(
                             )
                         }
                     }
-
-                    Spacer(modifier = Modifier.width(6.dp))
-
-                    // Plus icon action in top bar
-                    IconButton(
-                        onClick = { showAddDialog = true },
-                        modifier = Modifier.testTag("topbar_add_task_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "Add New Video Task",
-                            tint = AmberPrimary
-                        )
-                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface
                 )
             )
-        },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = { showAddDialog = true },
-                containerColor = AmberPrimary,
-                contentColor = Color.Black,
-                shape = CircleShape,
-                modifier = Modifier.testTag("fab_add_task")
-            ) {
-                Icon(imageVector = Icons.Default.Add, contentDescription = "Add Video Task")
-            }
         },
         modifier = modifier
     ) { innerPadding ->
@@ -373,11 +346,11 @@ fun TasksListScreen(
                             val remainStr = task.getLockRemainingFormatted()
                             if (task.isCompleted) {
                                 WatchSessionRepository.showTaskIncompleteMessage(
-                                    "🔒 Yeh task complete ho chuka hai aur 8 ghante ke liye lock hai ($remainStr remaining). 8 ghante baad yeh task rewatch hoga."
+                                    "This task is completed and locked for 8 hours ($remainStr remaining)."
                                 )
                             } else {
                                 WatchSessionRepository.showTaskIncompleteMessage(
-                                    "⚠️ Yeh task incomplete hone ki wajah se 12 ghante ke liye lock hai ($remainStr remaining). 12 ghante baad yeh task rewatch hoga."
+                                    "This task is locked for 12 hours ($remainStr remaining) due to an incomplete session."
                                 )
                             }
                         } else {
@@ -387,14 +360,14 @@ fun TasksListScreen(
                     onLikeClick = {
                         android.widget.Toast.makeText(
                             context,
-                            "Start Watch karein aur YouTube par asli video Like karein (+5 coins 1st time auto-add honge)!",
+                            "Start watching and like the video on YouTube to earn +5 bonus coins.",
                             android.widget.Toast.LENGTH_SHORT
                         ).show()
                     },
                     onCommentClick = {
                         android.widget.Toast.makeText(
                             context,
-                            "Start Watch karein aur YouTube par asli Comment post karein (+5 coins auto-add honge)!",
+                            "Start watching and post a comment on YouTube to earn +5 bonus coins.",
                             android.widget.Toast.LENGTH_SHORT
                         ).show()
                     },
@@ -421,33 +394,14 @@ fun TasksListScreen(
                             modifier = Modifier.size(48.dp)
                         )
                         Text(
-                            text = "No tasks found in this section",
+                            text = "No tasks available in this section",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Button(
-                            onClick = { showAddDialog = true },
-                            colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary)
-                        ) {
-                            Icon(imageVector = Icons.Default.Add, contentDescription = null, tint = Color.Black)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Add a YouTube Video", color = Color.Black)
-                        }
                     }
                 }
             }
         }
-    }
-
-    // Add Video Dialog
-    if (showAddDialog) {
-        AddVideoTaskDialog(
-            onDismiss = { showAddDialog = false },
-            onTaskAdded = { newTask ->
-                viewModel.addVideoTask(newTask)
-                showAddDialog = false
-            }
-        )
     }
 
     // Duration & Tier Selection Dialog
@@ -587,7 +541,7 @@ fun TasksListScreen(
                     onClick = { viewModel.dismissInterruptedMessage() },
                     colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary)
                 ) {
-                    Text("Understood", color = Color.Black, fontWeight = FontWeight.Bold)
+                    Text("OK", color = Color.Black, fontWeight = FontWeight.Bold)
                 }
             }
         )

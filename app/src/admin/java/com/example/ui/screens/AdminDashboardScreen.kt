@@ -135,7 +135,9 @@ fun AdminDashboardScreen(
 
     LaunchedEffect(Unit) {
         if (!serverRunning) {
-            viewModel.toggleAdminServer(context, true)
+            com.example.admin.AdminWebServer.startServer(context, viewModel.getDataStoreManager()) { running, url ->
+                viewModel.updateAdminServerState(running, url)
+            }
         }
     }
 
@@ -336,7 +338,17 @@ fun AdminDashboardScreen(
                     context = context,
                     serverRunning = serverRunning,
                     serverUrl = serverUrl,
-                    onToggleServer = { enabled -> viewModel.toggleAdminServer(context, enabled) }
+                    onToggleServer = { enabled ->
+                        if (enabled) {
+                            com.example.admin.AdminWebServer.startServer(context, viewModel.getDataStoreManager()) { running, url ->
+                                viewModel.updateAdminServerState(running, url)
+                            }
+                        } else {
+                            com.example.admin.AdminWebServer.stopServer { running, url ->
+                                viewModel.updateAdminServerState(running, url)
+                            }
+                        }
+                    }
                 )
                 5 -> GoogleDriveServerTabContent(
                     context = context,
@@ -1117,7 +1129,7 @@ private fun GoogleDriveServerTabContent(
 
                     Button(
                         onClick = {
-                            val script = com.example.admin.CloudDriveServerManager.getGoogleAppsScriptTemplate()
+                            val script = com.example.repository.CloudDriveServerManager.getGoogleAppsScriptTemplate()
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                             clipboard.setPrimaryClip(ClipData.newPlainText("Google Apps Script", script))
                             Toast.makeText(context, "Full Server Script Copied to Clipboard!", Toast.LENGTH_LONG).show()
@@ -1179,18 +1191,17 @@ private fun AdminPostsTabContent(
 ) {
     var titleInput by remember { mutableStateOf("") }
     var messageInput by remember { mutableStateOf("") }
-    var selectedTargetTab by remember { mutableStateOf("ALL") }
+    var selectedTargetTab by remember { mutableStateOf("HOME") }
     var selectedPostType by remember { mutableStateOf("BANNER") }
     var actionUrlInput by remember { mutableStateOf("") }
     var imageUrlInput by remember { mutableStateOf("") }
     var isPinnedInput by remember { mutableStateOf(true) }
 
     val targetTabs = listOf(
-        "ALL" to "All Tabs",
         "HOME" to "Home Tab",
         "TASKS" to "Tasks Tab",
         "WALLET" to "Wallet Tab",
-        "ME" to "Profile Tab"
+        "ME" to "Me Tab"
     )
     val postTypes = listOf(
         "BANNER" to "📢 Banner",

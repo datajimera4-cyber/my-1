@@ -1,4 +1,4 @@
-package com.example.admin
+package com.example.repository
 
 import android.util.Log
 import com.example.data.AdminPostItem
@@ -194,12 +194,14 @@ object CloudDriveServerManager {
                                 val existing = localPosts.find { it.id == postId }
                                 val remotePinned = obj.optBoolean("isPinned", false)
                                 val remotePinnedAt = obj.optLong("pinnedAt", 0L)
-                                if (existing == null || existing.isPinned != remotePinned) {
+                                val rawTab = obj.optString("targetTab", "HOME").uppercase()
+                                val remoteTab = if (rawTab == "ALL" || rawTab.isBlank()) "HOME" else rawTab
+                                if (existing == null || existing.isPinned != remotePinned || existing.targetTab != remoteTab) {
                                     val newPost = AdminPostItem(
                                         id = postId,
                                         title = obj.optString("title", "Announcement"),
                                         message = obj.optString("message", ""),
-                                        targetTab = obj.optString("targetTab", "ALL"),
+                                        targetTab = remoteTab,
                                         postType = obj.optString("postType", "BANNER"),
                                         actionUrl = obj.optString("actionUrl", ""),
                                         imageUrl = obj.optString("imageUrl", ""),
