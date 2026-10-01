@@ -99,6 +99,17 @@ class WatchTimerService : Service() {
             floatingOverlayManager.showCoinAddedCelebration(coins, "+$coins COINS ADDED!")
         }
 
+        WatchSessionRepository.onPlaybackStateUpdated = { isPlaying ->
+            if (floatingOverlayManager.isOverlayAttached()) {
+                floatingOverlayManager.updateProgress(
+                    watchedMillis = WatchSessionRepository.watchedMillis.value,
+                    requiredMillis = WatchSessionRepository.requiredMillis.value,
+                    milestone = WatchSessionRepository.currentMilestoneTier.value,
+                    isPaused = !isPlaying
+                )
+            }
+        }
+
         WatchSessionRepository.onServiceTaskIncomplete = { taskId, reason, lockDuration ->
             completionJob?.cancel()
             timerLoopJob?.cancel()
@@ -200,6 +211,7 @@ class WatchTimerService : Service() {
             var lastNotificationUpdateSec = -1
             var hasSeenAudioPlaying = false
             var silentTicksCount = 0
+            var wasAudioSilentWhileExplicitlyPaused = false
             while (isActive) {
                 pollActiveYouTubeMediaSession()
                 YouTubeLiveSearchService.instance?.inspectCurrentYouTubeState()
@@ -216,20 +228,34 @@ class WatchTimerService : Service() {
                 if (!sessionActive) {
                     hasSeenAudioPlaying = false
                     silentTicksCount = 0
+                    wasAudioSilentWhileExplicitlyPaused = false
                     delay(500L)
                     continue
+                }
+
+                if (!YouTubeLiveSearchService.isVideoExplicitlyPaused) {
+                    wasAudioSilentWhileExplicitlyPaused = false
                 }
 
                 if (isAudioPlaying) {
                     hasSeenAudioPlaying = true
                     silentTicksCount = 0
-                    if (System.currentTimeMillis() - YouTubeLiveSearchService.lastExplicitPauseTime > 1200L &&
-                        !WatchSessionRepository.isMediaSessionExplicitlyPaused
+                    // Only allow audio resumption to clear explicit pause if audio had actually stopped while paused
+                    // AND the "Play video" button is not currently visible on screen
+                    if (YouTubeLiveSearchService.isVideoExplicitlyPaused &&
+                        wasAudioSilentWhileExplicitlyPaused &&
+                        !YouTubeLiveSearchService.isPlayButtonCurrentlyVisible &&
+                        !WatchSessionRepository.isMediaSessionExplicitlyPaused &&
+                        System.currentTimeMillis() - YouTubeLiveSearchService.lastExplicitPauseTime > 1500L
                     ) {
                         YouTubeLiveSearchService.isVideoExplicitlyPaused = false
+                        wasAudioSilentWhileExplicitlyPaused = false
                     }
                 } else {
                     silentTicksCount++
+                    if (YouTubeLiveSearchService.isVideoExplicitlyPaused) {
+                        wasAudioSilentWhileExplicitlyPaused = true
+                    }
                 }
 
                 val elapsedSinceLaunch = System.currentTimeMillis() - WatchSessionRepository.taskLaunchTimestampMillis

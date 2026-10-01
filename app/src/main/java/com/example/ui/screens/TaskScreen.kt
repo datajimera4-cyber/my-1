@@ -925,7 +925,7 @@ fun TaskScreen(
                         }
                     } else if (!PermissionHelper.isOverlayPermissionGranted(context)) {
                         showOverlayPromptDialog = true
-                    } else if (liveSearchMode && !PermissionHelper.isAccessibilityServiceEnabled(context)) {
+                    } else if (!PermissionHelper.isAccessibilityServiceEnabled(context)) {
                         showAccessibilityPromptDialog = true
                     } else {
                         viewModel.startTask(context)
@@ -1002,20 +1002,26 @@ fun TaskScreen(
             onDismiss = { showDurationDialog = false },
             onConfirmSelection = { tier ->
                 showDurationDialog = false
-                viewModel.startTaskWithTier(
-                    task = com.example.data.VideoTaskItem(
-                        id = viewModel.selectedTaskId.value ?: "active_task",
-                        title = titleStr,
-                        channelName = authorStr,
-                        videoUrl = currentUrl,
-                        thumbnailUrl = TitleMatcher.getThumbnailUrl(currentUrl) ?: "",
-                        durationSeconds = 1980,
-                        selectedDurationSeconds = tier.seconds,
-                        rewardCoins = tier.coins
-                    ),
-                    tier = tier,
-                    context = context
-                )
+                if (!PermissionHelper.isOverlayPermissionGranted(context)) {
+                    showOverlayPromptDialog = true
+                } else if (!PermissionHelper.isAccessibilityServiceEnabled(context)) {
+                    showAccessibilityPromptDialog = true
+                } else {
+                    viewModel.startTaskWithTier(
+                        task = com.example.data.VideoTaskItem(
+                            id = viewModel.selectedTaskId.value ?: "active_task",
+                            title = titleStr,
+                            channelName = authorStr,
+                            videoUrl = currentUrl,
+                            thumbnailUrl = TitleMatcher.getThumbnailUrl(currentUrl) ?: "",
+                            durationSeconds = 1980,
+                            selectedDurationSeconds = tier.seconds,
+                            rewardCoins = tier.coins
+                        ),
+                        tier = tier,
+                        context = context
+                    )
+                }
             }
         )
     }
@@ -1060,13 +1066,13 @@ fun TaskScreen(
             },
             title = {
                 Text(
-                    text = "Enable Auto-Search & Auto-Click",
+                    text = "Enable YouTube Task Monitor",
                     fontWeight = FontWeight.Bold
                 )
             },
             text = {
                 Text(
-                    text = "To allow Kingo King to automatically open YouTube, clear and type the task title in the search bar, and locate & click the target video card for you, please enable 'Kingo King' in Android Accessibility settings.\n\nWithout Accessibility enabled, you can still continue and YouTube will open with the search results directly."
+                    text = "To verify that the target video is playing, detect likes & comments inside YouTube, and automatically stop the timer if you change the video, please enable 'Kingo King' in Android Accessibility settings."
                 )
             },
             confirmButton = {
@@ -1086,10 +1092,9 @@ fun TaskScreen(
                 TextButton(
                     onClick = {
                         showAccessibilityPromptDialog = false
-                        viewModel.startTask(context)
                     }
                 ) {
-                    Text("Continue Without Auto-Click")
+                    Text("Cancel")
                 }
             }
         )
@@ -1134,7 +1139,7 @@ fun TaskScreen(
                 TextButton(
                     onClick = {
                         showOverlayPromptDialog = false
-                        if (liveSearchMode && !PermissionHelper.isAccessibilityServiceEnabled(context)) {
+                        if (!PermissionHelper.isAccessibilityServiceEnabled(context)) {
                             showAccessibilityPromptDialog = true
                         } else {
                             viewModel.startTask(context)

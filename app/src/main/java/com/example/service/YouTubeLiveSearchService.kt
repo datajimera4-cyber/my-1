@@ -39,6 +39,12 @@ class YouTubeLiveSearchService : AccessibilityService() {
         var lastExplicitPauseTime: Long = 0L
 
         @Volatile
+        var lastExplicitPlayClickTime: Long = 0L
+
+        @Volatile
+        var isPlayButtonCurrentlyVisible: Boolean = false
+
+        @Volatile
         var targetSearchTitle: String? = null
 
         @Volatile
@@ -86,6 +92,8 @@ class YouTubeLiveSearchService : AccessibilityService() {
             notInYouTubeStrikeCount = 0
             lastWatchHeaderCheckTime = 0L
             lastExplicitPauseTime = 0L
+            lastExplicitPlayClickTime = 0L
+            isPlayButtonCurrentlyVisible = false
             lockedWatchPageTitle = null
             hasTypedCommentText = false
             lastTypedCommentTime = 0L
@@ -241,6 +249,8 @@ class YouTubeLiveSearchService : AccessibilityService() {
         if (pkg == "com.google.android.youtube" && isYouTubeInForeground && event.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
             try {
                 val screenHeight = resources.displayMetrics.heightPixels.coerceAtLeast(800)
+                val screenWidth = resources.displayMetrics.widthPixels.coerceAtLeast(400)
+                val density = resources.displayMetrics.density
                 val node = event.source
                 val clickRect = android.graphics.Rect()
                 node?.getBoundsInScreen(clickRect)
@@ -251,9 +261,50 @@ class YouTubeLiveSearchService : AccessibilityService() {
                 val viewId = node?.viewIdResourceName ?: ""
                 val combined = "$desc $text $evText $evDesc $viewId".lowercase()
 
-                val isTopPlayerControl = (clickRect.bottom in 1..(screenHeight * 0.38f).toInt()) ||
+                val statusBarHeight = getStatusBarHeight()
+                val playerBottomY = statusBarHeight + ((screenWidth * 9) / 16)
+                val topPlayerMaxBottom = (playerBottomY + (48 * density).toInt()).coerceAtMost((screenHeight * 0.42f).toInt())
+                val inTopPlayerArea = (clickRect.top in 0..topPlayerMaxBottom && clickRect.bottom <= (topPlayerMaxBottom + (30 * density).toInt())) ||
                         viewId.contains("player_control", ignoreCase = true) ||
-                        viewId.contains("play_pause_replay_button", ignoreCase = true)
+                        viewId.contains("play_pause_replay_button", ignoreCase = true) ||
+                        viewId.contains("player_overlay", ignoreCase = true) ||
+                        viewId.contains("player_view", ignoreCase = true)
+
+                val isNextOrPrevOrCollapse = desc.equals("Next video", ignoreCase = true) ||
+                        desc.equals("Previous video", ignoreCase = true) ||
+                        evDesc.equals("Next video", ignoreCase = true) ||
+                        evDesc.equals("Previous video", ignoreCase = true) ||
+                        desc.contains("अगला वीडियो") ||
+                        desc.contains("पिछला वीडियो") ||
+                        desc.equals("Minimize", ignoreCase = true) ||
+                        desc.equals("Collapse", ignoreCase = true) ||
+                        viewId.contains("player_control_next", ignoreCase = true) ||
+                        viewId.contains("player_control_previous", ignoreCase = true) ||
+                        viewId.contains("player_collapse_button", ignoreCase = true) ||
+                        viewId.contains("autonav", ignoreCase = true)
+
+                val isPlayPauseBtnClick = inTopPlayerArea && !isNextOrPrevOrCollapse && (
+                        viewId.contains("play_pause_replay_button", ignoreCase = true) ||
+                        viewId.contains("player_control_play_pause", ignoreCase = true) ||
+                        evDesc.equals("Pause video", ignoreCase = true) ||
+                        evDesc.equals("Pause", ignoreCase = true) ||
+                        evDesc.equals("Play video", ignoreCase = true) ||
+                        evDesc.equals("Replay video", ignoreCase = true) ||
+                        evDesc.equals("Play", ignoreCase = true) ||
+                        evDesc.equals("Replay", ignoreCase = true) ||
+                        evDesc.contains("वीडियो रोकें") ||
+                        evDesc.contains("वीडियो चलाएं") ||
+                        evDesc.contains("फिर से चलाएं") ||
+                        desc.equals("Pause video", ignoreCase = true) ||
+                        desc.equals("Pause", ignoreCase = true) ||
+                        desc.equals("Play video", ignoreCase = true) ||
+                        desc.equals("Replay video", ignoreCase = true) ||
+                        desc.equals("Play", ignoreCase = true) ||
+                        desc.equals("Replay", ignoreCase = true) ||
+                        desc.contains("वीडियो रोकें") ||
+                        desc.contains("वीडियो चलाएं") ||
+                        desc.contains("फिर से चलाएं")
+                )
 
                 val looksLikeVideoCard = combined.contains("views") ||
                         combined.contains("go to channel") ||
@@ -272,7 +323,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
                         node?.isSelected == true ||
                         node?.isChecked == true
 
-                val inWatchActionBarBand = clickRect.top in (screenHeight * 0.22f).toInt()..(screenHeight * 0.62f).toInt()
+                val inWatchActionBarBand = clickRect.top in (screenHeight * 0.20f).toInt()..(screenHeight * 0.62f).toInt()
 
                 // Genuine first-time Like click on the target YouTube video's Like button
                 val isGenuineVideoLikeClick = isSessionActive &&
@@ -316,27 +367,45 @@ class YouTubeLiveSearchService : AccessibilityService() {
                     hasTypedCommentText = false
                     lastTypedCommentTime = 0L
                     WatchSessionRepository.onTaskCommentDetected?.invoke()
-                } else if (isTopPlayerControl && (desc.equals("Pause video", ignoreCase = true) || desc.contains("वीडियो रोकें"))) {
-                    isVideoExplicitlyPaused = true
-                    lastExplicitPauseTime = System.currentTimeMillis()
-                    WatchSessionRepository.setPlaybackPlaying(false)
-                } else if (isTopPlayerControl && (
-                    desc.equals("Play video", ignoreCase = true) ||
-                    desc.equals("Replay video", ignoreCase = true) ||
-                    desc.contains("वीडियो चलाएं")
-                )) {
-                    isVideoExplicitlyPaused = false
-                    WatchSessionRepository.setPlaybackPlaying(true)
+                } else if (isPlayPauseBtnClick) {
+                    when {
+                        evDesc.equals("Pause video", ignoreCase = true) ||
+                        evDesc.equals("Pause", ignoreCase = true) ||
+                        evDesc.contains("वीडियो रोकें") -> {
+                            updateVideoPausedState(true)
+                        }
+                        evDesc.equals("Play video", ignoreCase = true) ||
+                        evDesc.equals("Replay video", ignoreCase = true) ||
+                        evDesc.equals("Play", ignoreCase = true) ||
+                        evDesc.equals("Replay", ignoreCase = true) ||
+                        evDesc.contains("वीडियो चलाएं") ||
+                        evDesc.contains("फिर से चलाएं") -> {
+                            updateVideoPausedState(false)
+                        }
+                        else -> {
+                            // Play/Pause toggle button clicked without pre-click event label: toggle current state
+                            updateVideoPausedState(!isVideoExplicitlyPaused)
+                        }
+                    }
+                    val handler = android.os.Handler(android.os.Looper.getMainLooper())
+                    handler.postDelayed({ checkPlaybackControls(getYouTubeRootNode()) }, 620L)
+                    handler.postDelayed({ checkPlaybackControls(getYouTubeRootNode()) }, 1100L)
+                } else if (inTopPlayerArea && !isNextOrPrevOrCollapse) {
+                    // User tapped video surface to show/hide controls or tapped player settings/seekbar:
+                    // Never treat this as a video switch! Just inspect playback controls shortly after.
+                    val handler = android.os.Handler(android.os.Looper.getMainLooper())
+                    handler.postDelayed({ checkPlaybackControls(getYouTubeRootNode()) }, 220L)
+                    handler.postDelayed({ checkPlaybackControls(getYouTubeRootNode()) }, 550L)
                 } else if (isSessionActive && isReadyForWatchVerification()) {
                     checkIfUserClickedDifferentVideo(node, desc, text, viewId, "$evText $evDesc".trim())
                 }
 
                 if (isSessionActive && isReadyForWatchVerification()) {
                     val handler = android.os.Handler(android.os.Looper.getMainLooper())
-                    handler.postDelayed({ inspectCurrentYouTubeState() }, 450L)
-                    handler.postDelayed({ inspectCurrentYouTubeState() }, 1000L)
-                    handler.postDelayed({ inspectCurrentYouTubeState() }, 1800L)
-                    handler.postDelayed({ inspectCurrentYouTubeState() }, 2800L)
+                    handler.postDelayed({ inspectCurrentYouTubeState() }, 350L)
+                    handler.postDelayed({ inspectCurrentYouTubeState() }, 800L)
+                    handler.postDelayed({ inspectCurrentYouTubeState() }, 1500L)
+                    handler.postDelayed({ inspectCurrentYouTubeState() }, 2500L)
                 }
                 node?.recycle()
             } catch (_: Exception) {}
@@ -354,7 +423,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
                     checkPlaybackControls(ytRoot)
                     if (isSessionActive && isReadyForWatchVerification()) {
                         val now = System.currentTimeMillis()
-                        if (now - lastWatchHeaderCheckTime >= 650L) {
+                        if (now - lastWatchHeaderCheckTime >= 400L) {
                             lastWatchHeaderCheckTime = now
                             verifyActiveYouTubeVideo(ytRoot)
                         }
@@ -623,49 +692,63 @@ class YouTubeLiveSearchService : AccessibilityService() {
     ): Boolean {
         if (hasClickedTarget) return true
 
+        val cls = node.className?.toString() ?: ""
+        val viewId = node.viewIdResourceName ?: ""
+        if (cls.contains("EditText", ignoreCase = true) ||
+            viewId.contains("search_edit_text", ignoreCase = true) ||
+            viewId.contains("search_box", ignoreCase = true) ||
+            viewId.contains("search_query", ignoreCase = true)
+        ) {
+            return false
+        }
+
         val text = node.text?.toString() ?: ""
         val desc = node.contentDescription?.toString() ?: ""
         val combinedText = "$text $desc"
 
-        if (combinedText.isNotBlank()) {
-            val normText = TitleMatcher.normalize(combinedText)
-            val normTarget = TitleMatcher.normalize(targetTitle)
+        if (combinedText.isNotBlank() && node.isVisibleToUser) {
+            val screenHeight = resources.displayMetrics.heightPixels.coerceAtLeast(800)
+            val nodeRect = android.graphics.Rect()
+            node.getBoundsInScreen(nodeRect)
 
-            // Distinctive keywords from target title (length >= 3, skipping generic stopwords)
-            val stopWords = setOf("the", "and", "official", "video", "audio", "with", "from", "feat", "music", "song", "lyrics", "full", "hd")
-            val targetWords = normTarget.split(" ").map { it.trim() }.filter { it.length >= 3 && !stopWords.contains(it) }
+            // Skip nodes in the top search bar header (top 15% of screen)
+            if (nodeRect.top >= (screenHeight * 0.15f).toInt() && nodeRect.height() > 10) {
+                val normText = TitleMatcher.normalize(combinedText)
+                val normTarget = TitleMatcher.normalize(targetTitle)
 
-            val directSubstringMatch = (normTarget.length >= 4 && normText.contains(normTarget)) ||
-                    (normTarget.length >= 8 && normText.contains(normTarget.take(12)))
-            val matchingWordCount = targetWords.count { word -> normText.contains(word) }
-            val keywordMatch = targetWords.isNotEmpty() && matchingWordCount >= 1 &&
-                    (matchingWordCount.toFloat() / targetWords.size.coerceAtLeast(1)) >= 0.30f
+                // Distinctive keywords from target title (length >= 3, skipping generic stopwords)
+                val stopWords = setOf("the", "and", "official", "video", "audio", "with", "from", "feat", "music", "song", "lyrics", "full", "hd")
+                val targetWords = normTarget.split(" ").map { it.trim() }.filter { it.length >= 3 && !stopWords.contains(it) }
 
-            if (directSubstringMatch || keywordMatch) {
-                var channelMatches = true
-                if (!targetChannel.isNullOrBlank() && targetChannel.length >= 3) {
-                    val normChannel = TitleMatcher.normalize(targetChannel)
-                    val compactChannel = normChannel.replace(" ", "")
-                    val compactText = normText.replace(" ", "")
-                    channelMatches = compactText.contains(compactChannel) ||
-                            normText.contains(normChannel) ||
-                            matchingWordCount >= 2 ||
-                            directSubstringMatch
-                }
+                val directSubstringMatch = (normTarget.length >= 4 && normText.contains(normTarget)) ||
+                        (normTarget.length >= 8 && normText.contains(normTarget.take(12)))
+                val matchingWordCount = targetWords.count { word -> normText.contains(word) }
+                val keywordMatch = targetWords.isNotEmpty() && matchingWordCount >= 1 &&
+                        (matchingWordCount.toFloat() / targetWords.size.coerceAtLeast(1)) >= 0.30f
 
-                if (channelMatches) {
-                    // Climb up to nearest clickable container/card
-                    var clickTarget: AccessibilityNodeInfo? = node
-                    while (clickTarget != null && !clickTarget.isClickable) {
-                        clickTarget = clickTarget.parent
+                if (directSubstringMatch || keywordMatch) {
+                    var channelMatches = true
+                    if (!targetChannel.isNullOrBlank() && targetChannel.length >= 3) {
+                        val normChannel = TitleMatcher.normalize(targetChannel)
+                        val compactChannel = normChannel.replace(" ", "")
+                        val compactText = normText.replace(" ", "")
+                        channelMatches = compactText.contains(compactChannel) ||
+                                normText.contains(normChannel) ||
+                                matchingWordCount >= 2 ||
+                                directSubstringMatch
                     }
 
-                    val toClick = if (clickTarget != null && clickTarget.isClickable) clickTarget else node
+                    if (channelMatches) {
+                        // Climb up to nearest clickable container/card
+                        var clickTarget: AccessibilityNodeInfo? = node
+                        while (clickTarget != null && !clickTarget.isClickable) {
+                            clickTarget = clickTarget.parent
+                        }
 
-                    val nodeRect = android.graphics.Rect()
-                    node.getBoundsInScreen(nodeRect)
-                    val cardRect = android.graphics.Rect()
-                    toClick.getBoundsInScreen(cardRect)
+                        val toClick = if (clickTarget != null && clickTarget.isClickable) clickTarget else node
+
+                        val cardRect = android.graphics.Rect()
+                        toClick.getBoundsInScreen(cardRect)
 
                     // Calculate real screen coordinates to simulate a human finger tap on the TITLE
                     val tapX = if (nodeRect.width() > 0) nodeRect.centerX() else cardRect.centerX()
@@ -707,6 +790,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
                     }
 
                     return true
+                    }
                 }
             }
         }
@@ -721,23 +805,53 @@ class YouTubeLiveSearchService : AccessibilityService() {
         return false
     }
 
+    private fun getStatusBarHeight(): Int {
+        return try {
+            val resId = resources.getIdentifier("status_bar_height", "dimen", "android")
+            if (resId > 0) {
+                resources.getDimensionPixelSize(resId)
+            } else {
+                (32 * resources.displayMetrics.density).toInt()
+            }
+        } catch (_: Exception) {
+            (32 * resources.displayMetrics.density).toInt()
+        }
+    }
+
+    private fun updateVideoPausedState(paused: Boolean) {
+        if (paused) {
+            isVideoExplicitlyPaused = true
+            lastExplicitPauseTime = System.currentTimeMillis()
+            WatchSessionRepository.setPlaybackPlaying(false)
+        } else {
+            isVideoExplicitlyPaused = false
+            lastExplicitPlayClickTime = System.currentTimeMillis()
+            WatchSessionRepository.setPlaybackPlaying(true)
+        }
+    }
+
     private fun checkPlaybackControls(node: AccessibilityNodeInfo?) {
         if (node == null) return
         try {
             val state = findPlayerControlState(node)
+            val now = System.currentTimeMillis()
             when (state) {
                 true -> {
                     // Explicit "Play video" / "Replay video" player control is visible -> video is paused
-                    isVideoExplicitlyPaused = true
-                    lastExplicitPauseTime = System.currentTimeMillis()
-                    WatchSessionRepository.setPlaybackPlaying(false)
+                    if (now - lastExplicitPlayClickTime > 550L) {
+                        isPlayButtonCurrentlyVisible = true
+                        updateVideoPausedState(true)
+                    }
                 }
                 false -> {
                     // Explicit "Pause video" player control is visible -> video is playing
-                    isVideoExplicitlyPaused = false
-                    WatchSessionRepository.setPlaybackPlaying(true)
+                    if (now - lastExplicitPauseTime > 550L) {
+                        isPlayButtonCurrentlyVisible = false
+                        updateVideoPausedState(false)
+                    }
                 }
                 null -> {
+                    isPlayButtonCurrentlyVisible = false
                     // Controls overlay not visible in this node; preserve current pause state
                 }
             }
@@ -752,29 +866,36 @@ class YouTubeLiveSearchService : AccessibilityService() {
         if (node == null) return null
         if (node.isVisibleToUser) {
             val desc = node.contentDescription?.toString()?.trim() ?: ""
+            val text = node.text?.toString()?.trim() ?: ""
+            val label = desc.ifBlank { text }
             val viewId = node.viewIdResourceName ?: ""
             val isPlayerControlBtn = viewId.contains("player_control_play_pause_replay_button", ignoreCase = true) ||
                     viewId.contains("play_pause_replay_button", ignoreCase = true) ||
-                    viewId.contains("player_control", ignoreCase = true)
+                    viewId.contains("player_control_play_pause", ignoreCase = true)
 
-            if (desc.isNotEmpty() || isPlayerControlBtn) {
+            if (label.isNotEmpty() || isPlayerControlBtn) {
                 val screenHeight = resources.displayMetrics.heightPixels.coerceAtLeast(800)
+                val screenWidth = resources.displayMetrics.widthPixels.coerceAtLeast(400)
+                val density = resources.displayMetrics.density
+                val topPlayerMaxBottom = (getStatusBarHeight() + ((screenWidth * 9) / 16) + (48 * density).toInt())
+                    .coerceAtMost((screenHeight * 0.42f).toInt())
                 val r = android.graphics.Rect()
                 node.getBoundsInScreen(r)
-                val inPlayerRegion = isPlayerControlBtn || (r.bottom in 1..(screenHeight * 0.38f).toInt())
+                val inPlayerRegion = isPlayerControlBtn || (r.bottom in 1..topPlayerMaxBottom && r.top >= 0)
 
                 if (inPlayerRegion) {
-                    if (desc.equals("Play video", ignoreCase = true) ||
-                        desc.equals("Replay video", ignoreCase = true) ||
-                        desc.contains("वीडियो चलाएं") ||
-                        desc.contains("फिर से चलाएं") ||
-                        (isPlayerControlBtn && (desc.equals("Play", ignoreCase = true) || desc.equals("Replay", ignoreCase = true)))
+                    if (label.equals("Play video", ignoreCase = true) ||
+                        label.equals("Replay video", ignoreCase = true) ||
+                        label.equals("Play", ignoreCase = true) ||
+                        label.equals("Replay", ignoreCase = true) ||
+                        label.contains("वीडियो चलाएं") ||
+                        label.contains("फिर से चलाएं")
                     ) {
                         return true
                     }
-                    if (desc.equals("Pause video", ignoreCase = true) ||
-                        desc.contains("वीडियो रोकें") ||
-                        (isPlayerControlBtn && desc.equals("Pause", ignoreCase = true))
+                    if (label.equals("Pause video", ignoreCase = true) ||
+                        label.equals("Pause", ignoreCase = true) ||
+                        label.contains("वीडियो रोकें")
                     ) {
                         return false
                     }
@@ -822,7 +943,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
         }
         val isLiveSearching = currentPhase != LiveSearchPhase.IDLE && currentPhase != LiveSearchPhase.COMPLETED
         val elapsedSinceClick = if (lastClickTime > 0L) System.currentTimeMillis() - lastClickTime else elapsedSinceLaunch
-        return !isLiveSearching && elapsedSinceLaunch > 4200L && elapsedSinceClick > 3500L
+        return !isLiveSearching && elapsedSinceLaunch > 3000L && elapsedSinceClick > 2500L
     }
 
     fun inspectCurrentYouTubeState() {
@@ -830,7 +951,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
         if (!isSessionActive) return
 
         val elapsedSinceLaunch = System.currentTimeMillis() - WatchSessionRepository.taskLaunchTimestampMillis
-        if (elapsedSinceLaunch < 4000L || !WatchSessionRepository.hasLeftAppForYouTube) return
+        if (elapsedSinceLaunch < 3200L || !WatchSessionRepository.hasLeftAppForYouTube) return
 
         val myPkg = packageName ?: "com.example"
         var ytAppRoot: AccessibilityNodeInfo? = null
@@ -906,7 +1027,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
                 if (rootToInspect != null) {
                     checkPlaybackControls(rootToInspect)
                     val now = System.currentTimeMillis()
-                    if (now - lastWatchHeaderCheckTime >= 650L) {
+                    if (now - lastWatchHeaderCheckTime >= 400L) {
                         lastWatchHeaderCheckTime = now
                         verifyActiveYouTubeVideo(rootToInspect)
                     }
@@ -939,7 +1060,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
             return
         }
 
-        if ((desc.equals("Shorts", ignoreCase = true) || text.equals("Shorts", ignoreCase = true)) &&
+        if ((desc.equals("Shorts", ignoreCase = true) || text.equals("Shorts", ignoreCase = true) || viewId.contains("reel", ignoreCase = true)) &&
             !targetTitle.contains("shorts", ignoreCase = true)
         ) {
             WatchSessionRepository.triggerTaskIncomplete(
@@ -968,26 +1089,62 @@ class YouTubeLiveSearchService : AccessibilityService() {
         }
 
         val screenHeight = resources.displayMetrics.heightPixels.coerceAtLeast(800)
+        val screenWidth = resources.displayMetrics.widthPixels.coerceAtLeast(400)
         val density = resources.displayMetrics.density
+        val statusBarHeight = getStatusBarHeight()
+        val playerBottomY = statusBarHeight + ((screenWidth * 9) / 16)
+        val topPlayerMaxBottom = (playerBottomY + (48 * density).toInt()).coerceAtMost((screenHeight * 0.42f).toInt())
         val clickRect = android.graphics.Rect()
         clickedNode?.getBoundsInScreen(clickRect)
 
-        // Check if the directly clicked element itself is a harmless watch header or comment control
+        // Never treat clicks inside the top video player (Pause, Play, Seekbar, Settings, Video surface) as clicking a different video
+        if (clickRect.bottom in 1..topPlayerMaxBottom) {
+            return
+        }
+
+        // Check if the directly clicked element itself is a harmless watch header, player setting, pause/play, or comment control
         val selfText = "$desc $text $eventSummary $viewId".lowercase()
         if (selfText.contains("reply") ||
             selfText.contains("add a comment") ||
             selfText.contains("pinned by") ||
+            desc.equals("Pause video", ignoreCase = true) ||
+            desc.equals("Play video", ignoreCase = true) ||
+            desc.equals("Replay video", ignoreCase = true) ||
+            desc.equals("Pause", ignoreCase = true) ||
+            desc.equals("Play", ignoreCase = true) ||
+            desc.equals("Replay", ignoreCase = true) ||
+            desc.equals("Video player", ignoreCase = true) ||
+            desc.contains("वीडियो रोकें") ||
+            desc.contains("वीडियो चलाएं") ||
+            desc.contains("फिर से चलाएं") ||
             desc.equals("Subscribe", ignoreCase = true) ||
             desc.equals("Subscribed", ignoreCase = true) ||
             desc.startsWith("Subscribe to", ignoreCase = true) ||
             desc.equals("Share", ignoreCase = true) ||
+            desc.startsWith("Share ", ignoreCase = true) ||
             desc.equals("Download", ignoreCase = true) ||
+            desc.startsWith("Download ", ignoreCase = true) ||
             desc.equals("Remix", ignoreCase = true) ||
             desc.equals("Save", ignoreCase = true) ||
+            desc.equals("Clip", ignoreCase = true) ||
             desc.equals("Close", ignoreCase = true) ||
+            desc.equals("Settings", ignoreCase = true) ||
+            desc.equals("Captions", ignoreCase = true) ||
+            desc.equals("More options", ignoreCase = true) ||
+            desc.equals("Hide controls", ignoreCase = true) ||
+            desc.equals("Show controls", ignoreCase = true) ||
+            desc.equals("Enter full screen", ignoreCase = true) ||
+            desc.equals("Exit full screen", ignoreCase = true) ||
+            desc.equals("Full screen", ignoreCase = true) ||
             desc.equals("Expand description", ignoreCase = true) ||
+            desc.equals("Collapse description", ignoreCase = true) ||
             text.equals("...more", ignoreCase = true) ||
+            text.equals("Show more", ignoreCase = true) ||
+            text.equals("Show less", ignoreCase = true) ||
             selfText.contains("skip ad") ||
+            viewId.contains("play_pause", ignoreCase = true) ||
+            viewId.contains("player_control", ignoreCase = true) ||
+            viewId.contains("player_overlay", ignoreCase = true) ||
             viewId.contains("comment", ignoreCase = true) ||
             viewId.contains("subscribe", ignoreCase = true) ||
             viewId.contains("like_button", ignoreCase = true) ||
@@ -997,14 +1154,16 @@ class YouTubeLiveSearchService : AccessibilityService() {
             return
         }
 
-        // Climb at most 2 parent levels and NEVER into a container taller than 36% of screen height
+        // Climb up to 3 parent levels to reach the full video card container (up to 54% screen height),
+        // but NEVER climb into a scrollable container (RecyclerView / ScrollView)!
         var cardNode: AccessibilityNodeInfo? = clickedNode
         var depth = 0
-        while (cardNode != null && depth < 2) {
+        while (cardNode != null && depth < 3) {
             val parent = cardNode.parent ?: break
+            if (parent.isScrollable) break
             val pRect = android.graphics.Rect()
             parent.getBoundsInScreen(pRect)
-            if (pRect.top >= (screenHeight * 0.28f).toInt() && pRect.height() in 48..(screenHeight * 0.36f).toInt()) {
+            if (pRect.top >= (playerBottomY - (10 * density).toInt()) && pRect.height() in 40..(screenHeight * 0.54f).toInt()) {
                 cardNode = parent
             } else {
                 break
@@ -1027,15 +1186,16 @@ class YouTubeLiveSearchService : AccessibilityService() {
             collectSubtreeText(cardNode, sb, 0)
         }
 
-        // If clicked on a thumbnail ImageView or Litho child below the player that had no direct text,
-        // gather sibling text nodes in the same vertical card band (including title right below thumbnail)!
-        val isBelowPlayer = cardRect.top >= (screenHeight * 0.28f).toInt()
-        if (isBelowPlayer && sb.length < 25 && cardRect.height() >= (44 * density).toInt()) {
+        // Gather sibling text nodes in the same vertical card band (at or below cardRect.top)
+        // when clicked on a thumbnail ImageView or a standalone title node!
+        val isBelowPlayer = cardRect.bottom > (playerBottomY + (20 * density).toInt()) &&
+                cardRect.top >= (playerBottomY - (10 * density).toInt())
+        if (isBelowPlayer && !sb.toString().lowercase().contains("views") && cardRect.height() >= (18 * density).toInt()) {
             val ytRoot = getYouTubeRootNode()
             if (ytRoot != null) {
                 val allNodes = mutableListOf<UiNodeEntry>()
                 collectScreenNodes(ytRoot, allNodes)
-                val bandTop = (cardRect.top - (16 * density).toInt()).coerceAtLeast((screenHeight * 0.28f).toInt())
+                val bandTop = (cardRect.top - (6 * density).toInt()).coerceAtLeast(playerBottomY)
                 val bandBottom = cardRect.bottom + (110 * density).toInt()
                 for (n in allNodes) {
                     if (n.rect.top in bandTop..bandBottom) {
@@ -1051,16 +1211,19 @@ class YouTubeLiveSearchService : AccessibilityService() {
         val cardViewId = (cardNode?.viewIdResourceName ?: viewId).lowercase()
 
         val hasDurationTimestamp = Regex("\\b\\d{1,2}:\\d{2}\\b").containsMatchIn(lowerCard)
-        val isLargeThumbnailTap = cardRect.top >= (screenHeight * 0.36f).toInt() &&
-                cardRect.width() >= (110 * density).toInt() &&
-                cardRect.height() >= (65 * density).toInt()
+        val isLargeThumbnailTap = cardRect.top >= (playerBottomY + (40 * density).toInt()) &&
+                cardRect.width() >= (105 * density).toInt() &&
+                cardRect.height() >= (58 * density).toInt()
+        val isClickableFeedCardBelowHeader = clickRect.top >= (screenHeight * 0.42f).toInt() &&
+                cardText.length >= 8 &&
+                !lowerCard.startsWith("comments")
 
-        val isVideoListingCard = (cardText.length >= 6 && (
+        val isVideoListingCard = (cardText.length >= 5 && (
                 lowerCard.contains("go to channel") ||
-                lowerCard.contains("play video") ||
                 lowerCard.contains("views") ||
                 lowerCard.contains("watching") ||
                 lowerCard.contains("streamed") ||
+                lowerCard.contains("ago") ||
                 lowerCard.contains("बार देखा गया") ||
                 (isBelowPlayer && (lowerCard.contains("minutes") || lowerCard.contains("seconds") || hasDurationTimestamp)) ||
                 cardViewId.contains("video_lockup") ||
@@ -1070,15 +1233,9 @@ class YouTubeLiveSearchService : AccessibilityService() {
                 cardViewId.contains("reel_item") ||
                 cardViewId.contains("related_item") ||
                 cardViewId.contains("endscreen")
-        )) || (isBelowPlayer && lowerCard.equals("play video", ignoreCase = true)) || isLargeThumbnailTap
+        )) || isLargeThumbnailTap || isClickableFeedCardBelowHeader
 
         if (isVideoListingCard) {
-            if (lowerCard.equals("play video", ignoreCase = true)) {
-                WatchSessionRepository.triggerTaskIncomplete(
-                    "Task Incomplete! Aapne YouTube mein target video (\"$targetTitle\") ke bajaye doosra video play kar diya. Sirf target title aur channel wala video play hone par hi timer chalega."
-                )
-                return
-            }
             val cleanClickedTitle = extractCleanTitleCandidate(cardText).ifBlank { cardText }
             val match = TitleMatcher.evaluateMatch(
                 playingTitle = cleanClickedTitle,
@@ -1086,7 +1243,11 @@ class YouTubeLiveSearchService : AccessibilityService() {
                 playingArtist = null,
                 taskAuthor = targetAuthor
             )
-            if (match != com.example.data.MatchResult.MATCH) {
+            val lockedTitle = lockedWatchPageTitle
+            val matchesLocked = lockedTitle == null ||
+                    TitleMatcher.evaluateMatch(cleanClickedTitle, lockedTitle, null, null) == com.example.data.MatchResult.MATCH
+
+            if (match != com.example.data.MatchResult.MATCH || !matchesLocked) {
                 WatchSessionRepository.triggerTaskIncomplete(
                     "Task Incomplete! Aapne YouTube mein target video (\"$targetTitle\") ke bajaye doosra video play kar diya. Sirf target title aur channel wala video play hone par hi timer chalega."
                 )
@@ -1161,8 +1322,20 @@ class YouTubeLiveSearchService : AccessibilityService() {
      * from a combined Litho watch header node while discarding standalone view-count/subscriber strings.
      */
     private fun extractCleanTitleCandidate(raw: String): String {
-        val singleLine = raw.replace("\n", " ").replace(Regex("\\s+"), " ").trim()
+        var singleLine = raw.replace("\n", " ").replace(Regex("\\s+"), " ").trim()
         if (singleLine.length < 4) return ""
+
+        // Strip leading "Expand description" or "Description" prefixes added by accessibility labels
+        singleLine = singleLine
+            .replace(Regex("^(?:expand description|collapse description|description)\\s*[:,\\-•·|]?\\s*", RegexOption.IGNORE_CASE), "")
+            .trim()
+
+        // Strip leading hashtags if followed by actual title words
+        val withoutLeadingHashtags = singleLine.replace(Regex("^(?:#\\S+\\s+)+"), "").trim()
+        if (withoutLeadingHashtags.length >= 4) {
+            singleLine = withoutLeadingHashtags
+        }
+        if (singleLine.startsWith("#") && !singleLine.contains(" ")) return ""
 
         // Discard player seekbar / duration strings ("0 minutes 15 seconds of 4 minutes 30 seconds")
         if (Regex("^\\d+\\s*(?:hours?|minutes?|seconds?|घंटे|मिनट|सेकंड)\\b.*\\b(?:of|में से)\\b.*$", RegexOption.IGNORE_CASE).matches(singleLine)) {
@@ -1179,12 +1352,12 @@ class YouTubeLiveSearchService : AccessibilityService() {
         }
 
         var cleaned = singleLine
-            .replace(Regex("(?:\\.\\.\\.more|…more|\\bshow more\\b)\\s*$", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("(?:\\.\\.\\.more|…more|\\bshow more\\b|\\bexpand description\\b)\\s*$", RegexOption.IGNORE_CASE), "")
             .trim()
 
-        // Strip trailing "<number> views / watching ..." metadata appended to the title in YouTube's Litho header
+        // Strip trailing "<number> views / watching / No views ..." metadata appended to the title in YouTube's Litho header
         cleaned = cleaned.replace(
-            Regex("(?:[,\\-•·|]|\\s)+\\d[0-9.,]*\\s*(?:k|m|b|lakh|lakhs|crore|crores|हज़ार|लाख|करोड़)?\\s*(?:views|view|watching|subscribers|बार देखा गया|लोग देख रहे हैं)\\b.*$", RegexOption.IGNORE_CASE),
+            Regex("(?:[,\\-•·|]|\\s)+(?:no\\s+views|\\d[0-9.,]*\\s*(?:k|m|b|lakh|lakhs|crore|crores|हज़ार|लाख|करोड़)?\\s*(?:views|view|watching|subscribers|बार देखा गया|लोग देख रहे हैं))\\b.*$", RegexOption.IGNORE_CASE),
             ""
         ).trim()
 
@@ -1208,26 +1381,12 @@ class YouTubeLiveSearchService : AccessibilityService() {
             if (entries.isEmpty()) return
 
             val screenHeight = resources.displayMetrics.heightPixels.coerceAtLeast(800)
+            val screenWidth = resources.displayMetrics.widthPixels.coerceAtLeast(400)
             val density = resources.displayMetrics.density
+            val statusBarHeight = getStatusBarHeight()
+            val playerBottomY = statusBarHeight + ((screenWidth * 9) / 16)
 
-            // 1. Check if a video Ad is currently playing INSIDE the top video player (check text/desc only!)
-            val isAdPlayingInPlayer = entries.any { e ->
-                val inTopPlayer = e.rect.bottom in 1..(screenHeight * 0.36f).toInt()
-                val textAndDesc = "${e.text} ${e.desc}".lowercase()
-                inTopPlayer && (
-                        textAndDesc.contains("skip ad") ||
-                        textAndDesc.contains("skip ads") ||
-                        textAndDesc.contains("विज्ञापन छोड़ें") ||
-                        e.text.startsWith("Ad ·", ignoreCase = true) ||
-                        e.text.startsWith("Sponsored ·", ignoreCase = true)
-                )
-            }
-            if (isAdPlayingInPlayer) {
-                wrongVideoStrikeCount = 0
-                return
-            }
-
-            // 2. Check if user switched to YouTube Shorts player
+            // 1. Check if user switched to YouTube Shorts player
             val isShortsPlayer = entries.any { e ->
                 val v = e.viewId.lowercase()
                 v.contains("reel_player") || v.contains("reel_recycler") || v.contains("reel_dyn_")
@@ -1247,7 +1406,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
                 }
             }
 
-            // 3. Check if user minimized the video into YouTube's bottom Miniplayer bar or navigated to Search / Home / Subscriptions
+            // 2. Check if user minimized the video into YouTube's bottom Miniplayer bar or navigated to Search / Home / Subscriptions
             val hasMiniplayerBarAtBottom = entries.any { e ->
                 val v = e.viewId.lowercase()
                 val d = e.desc.lowercase()
@@ -1256,12 +1415,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
                         v.contains("miniplayer") ||
                         v.contains("floaty_bar") ||
                         d.equals("expand miniplayer", ignoreCase = true) ||
-                        d.equals("close miniplayer", ignoreCase = true) ||
-                        (e.rect.top >= (screenHeight * 0.72f).toInt() && (
-                                d == "play video" ||
-                                d == "pause video" ||
-                                v.contains("play_pause_replay_button")
-                        ))
+                        d.equals("close miniplayer", ignoreCase = true)
                 )
             }
 
@@ -1290,7 +1444,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
                 return
             }
 
-            // 3b. Check explicit player title if visible
+            // 3. Check explicit player title if visible
             val explicitPlayerTitleNode = entries.firstOrNull { e ->
                 val v = e.viewId.lowercase()
                 (v.contains("player_video_title") || v.contains("miniplayer_title") || v.contains("floaty_bar_title")) &&
@@ -1323,18 +1477,26 @@ class YouTubeLiveSearchService : AccessibilityService() {
             }
 
             // 4. Check Watch Metadata Header (right below the 16:9 video player, above Like/Share/Comments)
+            val maxButtonHeight = (75 * density).toInt()
             val likeOrShareAnchor = entries.filter { e ->
                 val t = e.text.lowercase()
                 val d = e.desc.lowercase()
                 val v = e.viewId.lowercase()
-                val inMiddleBand = e.rect.top in (screenHeight * 0.24f).toInt()..(screenHeight * 0.64f).toInt()
+                val inMiddleBand = e.rect.top in (screenHeight * 0.21f).toInt()..(screenHeight * 0.64f).toInt() &&
+                        e.rect.height() <= maxButtonHeight
                 inMiddleBand && (
                         d.startsWith("like this video") ||
                         d.startsWith("dislike this video") ||
+                        d.equals("like", ignoreCase = true) ||
+                        d.equals("share", ignoreCase = true) ||
+                        d.startsWith("share ") ||
+                        d.equals("remix", ignoreCase = true) ||
+                        d.startsWith("download") ||
+                        d.contains("पसंद करें") ||
+                        d.contains("शेयर करें") ||
                         v.contains("like_button") ||
                         v.contains("share_button") ||
                         t == "share" ||
-                        d == "share" ||
                         t == "remix" ||
                         t == "download"
                 )
@@ -1344,7 +1506,8 @@ class YouTubeLiveSearchService : AccessibilityService() {
                 val t = e.text.lowercase()
                 val d = e.desc.lowercase()
                 val v = e.viewId.lowercase()
-                val inMiddleBand = e.rect.top in (screenHeight * 0.22f).toInt()..(screenHeight * 0.60f).toInt()
+                val inMiddleBand = e.rect.top in (screenHeight * 0.20f).toInt()..(screenHeight * 0.60f).toInt() &&
+                        e.rect.height() <= maxButtonHeight
                 inMiddleBand && (
                         t == "subscribe" ||
                         t == "subscribed" ||
@@ -1359,16 +1522,18 @@ class YouTubeLiveSearchService : AccessibilityService() {
             val commentsAnchor = entries.filter { e ->
                 val t = e.text.lowercase()
                 val d = e.desc.lowercase()
-                val inMiddleBand = e.rect.top in (screenHeight * 0.28f).toInt()..(screenHeight * 0.70f).toInt()
-                inMiddleBand && (t.startsWith("comments") || d.startsWith("comments"))
+                val inMiddleBand = e.rect.top in (screenHeight * 0.25f).toInt()..(screenHeight * 0.70f).toInt() &&
+                        e.rect.height() <= (110 * density).toInt()
+                inMiddleBand && (t.startsWith("comments") || d.startsWith("comments") || t.contains("टिप्पणियां"))
             }.minByOrNull { it.rect.top }
 
-            val headerTopY = (screenHeight * 0.22f).toInt()
-            var headerBottomY = when {
-                likeOrShareAnchor != null -> (likeOrShareAnchor.rect.top + (12 * density).toInt()).coerceAtMost((screenHeight * 0.52f).toInt())
-                subscribeAnchor != null -> (subscribeAnchor.rect.bottom + (24 * density).toInt()).coerceAtMost((screenHeight * 0.50f).toInt())
-                commentsAnchor != null -> (commentsAnchor.rect.top - (4 * density).toInt()).coerceAtMost((screenHeight * 0.50f).toInt())
-                else -> (screenHeight * 0.43f).toInt()
+            val headerTopY = (playerBottomY - (8 * density).toInt()).coerceAtLeast((screenHeight * 0.22f).toInt())
+            val minTitleBottomY = (playerBottomY + (8 * density).toInt()).coerceAtLeast((screenHeight * 0.24f).toInt())
+            val headerBottomY = when {
+                likeOrShareAnchor != null -> (likeOrShareAnchor.rect.top + (12 * density).toInt()).coerceAtMost((screenHeight * 0.54f).toInt())
+                subscribeAnchor != null -> (subscribeAnchor.rect.bottom + (24 * density).toInt()).coerceAtMost((screenHeight * 0.52f).toInt())
+                commentsAnchor != null -> (commentsAnchor.rect.top - (4 * density).toInt()).coerceAtMost((screenHeight * 0.52f).toInt())
+                else -> (screenHeight * 0.44f).toInt()
             }
 
             if (headerBottomY > headerTopY) {
@@ -1380,23 +1545,34 @@ class YouTubeLiveSearchService : AccessibilityService() {
                     "collapse", "minimize", "close", "sponsored", "visit site", "live chat",
                     "next video", "previous video", "settings", "captions", "video player",
                     "hide controls", "show controls", "more options", "expand description",
-                    "collapse description", "description", "seek slider"
+                    "collapse description", "description", "seek slider", "skip ad", "skip ads",
+                    "pull up for precise seeking", "slide left or right to seek", "release to cancel",
+                    "more videos", "tap to unmute", "double-tap to seek", "playing next", "auto-dubbed"
                 )
 
                 val sortedHeaderEntries = entries
                     .filter { e ->
                         val vLow = e.viewId.lowercase()
-                        val isPlayerControlView = vLow.contains("time_bar") ||
+                        val isPlayerControlView = vLow.contains("player") ||
+                                vLow.contains("time_bar") ||
                                 vLow.contains("scrubber") ||
-                                vLow.contains("player_control") ||
-                                vLow.contains("player_overlay") ||
-                                vLow.contains("inline_player")
+                                vLow.contains("control") ||
+                                vLow.contains("overlay") ||
+                                vLow.contains("inline") ||
+                                vLow.contains("autonav") ||
+                                vLow.contains("seek") ||
+                                vLow.contains("chapter") ||
+                                vLow.contains("caption") ||
+                                vLow.contains("subtitle") ||
+                                vLow.contains("live_chat") ||
+                                vLow.contains("tooltip") ||
+                                vLow.contains("hint")
                         !isPlayerControlView &&
                                 e.rect.top in headerTopY..headerBottomY &&
-                                e.rect.bottom > (screenHeight * 0.28f).toInt() &&
-                                e.rect.height() <= (screenHeight * 0.36f).toInt()
+                                e.rect.bottom > minTitleBottomY &&
+                                e.rect.height() <= (screenHeight * 0.38f).toInt()
                     }
-                    .sortedBy { it.rect.top }
+                    .sortedWith(compareBy<UiNodeEntry> { it.rect.top }.thenByDescending { it.rect.width() })
 
                 val rawHeaderTexts = mutableListOf<String>()
                 val cleanedTitleCandidates = mutableListOf<String>()
@@ -1413,10 +1589,13 @@ class YouTubeLiveSearchService : AccessibilityService() {
                             val isJustChannel = normAuthor.isNotEmpty() &&
                                     (normTxt == normAuthor || normTxt.replace(" ", "") == normAuthor.replace(" ", ""))
 
-                            if (extracted.length >= 5 &&
+                            if (extracted.length >= 4 &&
                                 !isJustChannel &&
                                 !chromeLabels.contains(low) &&
                                 !low.matches(Regex("^[0-9:\\s/•·.,%-]+$")) &&
+                                !low.startsWith("ad ·") &&
+                                !low.startsWith("sponsored ·") &&
+                                !low.startsWith("skip ad") &&
                                 !low.startsWith("like this video") &&
                                 !low.startsWith("dislike this video") &&
                                 !low.startsWith("subscribe to") &&
@@ -1425,10 +1604,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
                                 !low.startsWith("save to") &&
                                 !low.startsWith("share") &&
                                 !low.startsWith("comments") &&
-                                !low.startsWith("go to channel") &&
-                                !low.startsWith("expand") &&
-                                !low.startsWith("collapse") &&
-                                !low.startsWith("#")
+                                !low.startsWith("go to channel")
                             ) {
                                 if (!cleanedTitleCandidates.contains(extracted)) {
                                     cleanedTitleCandidates.add(extracted)
@@ -1439,22 +1615,20 @@ class YouTubeLiveSearchService : AccessibilityService() {
                 }
 
                 if (cleanedTitleCandidates.isNotEmpty()) {
-                    val topWatchTitle = cleanedTitleCandidates.first()
-                    val primaryCandidates = cleanedTitleCandidates.take(2)
                     val isGenericTarget = targetTitle.equals("YouTube Video Task", ignoreCase = true) ||
                             targetTitle.equals("YouTube Video", ignoreCase = true) ||
                             targetTitle.startsWith("YouTube Video (", ignoreCase = true)
 
-                    val anyTitleMatch = isGenericTarget || primaryCandidates.any { cand ->
-                        TitleMatcher.evaluateMatch(cand, targetTitle, null, targetAuthor) == com.example.data.MatchResult.MATCH
-                    }
-
                     val lockedTitle = lockedWatchPageTitle
-                    val matchesLockedTitle = lockedTitle == null ||
-                            TitleMatcher.evaluateMatch(topWatchTitle, lockedTitle, null, null) == com.example.data.MatchResult.MATCH ||
-                            primaryCandidates.any { cand ->
-                                TitleMatcher.evaluateMatch(cand, lockedTitle, null, null) == com.example.data.MatchResult.MATCH
-                            }
+
+                    // Check if any candidate in the Watch Header above the Subscribe/Like row matches our target video
+                    val matchingCandidate = cleanedTitleCandidates.firstOrNull { candidate ->
+                        val matchesTarget = isGenericTarget ||
+                                TitleMatcher.evaluateMatch(candidate, targetTitle, null, targetAuthor) == com.example.data.MatchResult.MATCH
+                        val matchesLocked = lockedTitle == null ||
+                                TitleMatcher.evaluateMatch(candidate, lockedTitle, null, null) == com.example.data.MatchResult.MATCH
+                        matchesTarget && matchesLocked
+                    }
 
                     // Also verify channel if targetAuthor is specified and Subscribe row is visible
                     var channelMatch = true
@@ -1473,15 +1647,15 @@ class YouTubeLiveSearchService : AccessibilityService() {
                                 (authorWords.isNotEmpty() && authorWords.all { normHeader.contains(it) })
                     }
 
-                    if (anyTitleMatch && channelMatch && matchesLockedTitle) {
+                    if (matchingCandidate != null && channelMatch) {
                         if (lockedWatchPageTitle == null) {
-                            lockedWatchPageTitle = topWatchTitle
+                            lockedWatchPageTitle = matchingCandidate
                         }
                         wrongVideoStrikeCount = 0
                     } else {
                         wrongVideoStrikeCount++
                         if (wrongVideoStrikeCount >= 2) {
-                            val detectedWrong = topWatchTitle.ifBlank { "Doosra video" }
+                            val detectedWrong = cleanedTitleCandidates.first().ifBlank { "Doosra video" }
                             wrongVideoStrikeCount = 0
                             WatchSessionRepository.triggerTaskIncomplete(
                                 "Task Incomplete! Aapne YouTube par target video (\"$targetTitle\") ke bajaye doosra video (\"$detectedWrong\") play kar diya. Sirf target title aur channel wala video play hone par hi timer chalega."

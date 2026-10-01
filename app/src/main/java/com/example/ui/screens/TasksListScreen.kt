@@ -115,6 +115,7 @@ fun TasksListScreen(
     var taskForDurationSelection by remember { mutableStateOf<VideoTaskItem?>(null) }
     var pendingTaskAndTier by remember { mutableStateOf<Pair<VideoTaskItem, com.example.data.WatchDurationTier>?>(null) }
     var showOverlayPromptDialog by remember { mutableStateOf(false) }
+    var showAccessibilityPromptDialog by remember { mutableStateOf(false) }
     var selectedFilter by remember { mutableStateOf("All") }
 
     val filteredTasks = remember(videoTasks, selectedFilter) {
@@ -452,6 +453,9 @@ fun TasksListScreen(
                 if (!PermissionHelper.isOverlayPermissionGranted(context)) {
                     pendingTaskAndTier = Pair(chosenTask, tier)
                     showOverlayPromptDialog = true
+                } else if (!PermissionHelper.isAccessibilityServiceEnabled(context)) {
+                    pendingTaskAndTier = Pair(chosenTask, tier)
+                    showAccessibilityPromptDialog = true
                 } else {
                     viewModel.startTaskWithTier(chosenTask, tier, context)
                 }
@@ -493,12 +497,56 @@ fun TasksListScreen(
                 androidx.compose.material3.TextButton(
                     onClick = {
                         showOverlayPromptDialog = false
-                        pendingTaskAndTier?.let { (task, tier) ->
-                            viewModel.startTaskWithTier(task, tier, context)
+                        if (!PermissionHelper.isAccessibilityServiceEnabled(context)) {
+                            showAccessibilityPromptDialog = true
+                        } else {
+                            pendingTaskAndTier?.let { (task, tier) ->
+                                viewModel.startTaskWithTier(task, tier, context)
+                            }
                         }
                     }
                 ) {
                     Text("Continue Without Overlay")
+                }
+            }
+        )
+    }
+
+    if (showAccessibilityPromptDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showAccessibilityPromptDialog = false },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = null,
+                    tint = AmberPrimary,
+                    modifier = Modifier.size(36.dp)
+                )
+            },
+            title = {
+                Text("Enable YouTube Task Monitor", fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Text("To verify that the target video is playing, detect likes & comments inside YouTube, and stop the timer if the video changes, please enable 'Kingo King' in Accessibility Settings.")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showAccessibilityPromptDialog = false
+                        try {
+                            context.startActivity(PermissionHelper.createAccessibilitySettingsIntent())
+                        } catch (_: Exception) {}
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary)
+                ) {
+                    Text("Enable in Settings", color = Color.Black, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = { showAccessibilityPromptDialog = false }
+                ) {
+                    Text("Cancel")
                 }
             }
         )
