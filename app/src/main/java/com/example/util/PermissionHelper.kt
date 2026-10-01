@@ -170,18 +170,39 @@ object PermissionHelper {
     }
 
     /**
-     * Strictly opens the YouTube app via its Home Launcher Intent so YouTubeLiveSearchService
-     * finds and plays the video via YouTube Search or Browse Features (never via external video URL).
+     * Opens YouTube's internal Search Results page using Android's standard ACTION_SEARCH intent
+     * with ONLY the text query (Title + Channel Name).
+     * NEVER uses any video URL or watch?v= link, so clicking the video card in search results
+     * is 100% recorded as "YouTube search" in YouTube Studio Analytics.
      */
-    fun openVideoIntent(context: Context, videoUrl: String, searchTitle: String? = null): Intent {
+    fun openYouTubeSearchResultsIntent(context: Context, query: String): Intent {
+        if (isYouTubeAppInstalled(context)) {
+            return Intent(Intent.ACTION_SEARCH).apply {
+                setPackage(YOUTUBE_PACKAGE)
+                putExtra(android.app.SearchManager.QUERY, query)
+                putExtra("query", query)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+        }
         return openYouTubeAppHomeIntent(context)
     }
 
     /**
      * Strictly opens the YouTube app via its Home Launcher Intent so YouTubeLiveSearchService
-     * types the search query inside YouTube's native search bar (ensuring YouTube Search / Browse traffic source).
+     * finds and plays the video via YouTube Search or Browse Features (never via external video URL).
+     */
+    fun openVideoIntent(context: Context, videoUrl: String, searchTitle: String? = null): Intent {
+        return if (!searchTitle.isNullOrBlank()) {
+            openYouTubeSearchResultsIntent(context, searchTitle)
+        } else {
+            openYouTubeAppHomeIntent(context)
+        }
+    }
+
+    /**
+     * Opens the YouTube app to search the query inside YouTube (never via external video URL).
      */
     fun openYouTubeSearchIntent(context: Context, query: String): Intent {
-        return openYouTubeAppHomeIntent(context)
+        return openYouTubeSearchResultsIntent(context, query)
     }
 }
