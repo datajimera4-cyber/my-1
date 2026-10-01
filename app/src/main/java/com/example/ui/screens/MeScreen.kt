@@ -22,18 +22,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.AccountBalanceWallet
-import androidx.compose.material.icons.filled.AdminPanelSettings
-import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Email
-import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -89,6 +83,12 @@ fun MeScreen(
     val adminPosts by viewModel.adminPosts.collectAsState()
     val dismissedPostIds by viewModel.dismissedPostIds.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
+    val cloudServerUrl by viewModel.cloudServerUrl.collectAsState()
+    val cloudServerStatus by viewModel.cloudServerStatus.collectAsState()
+
+    var serverUrlInput by remember(cloudServerUrl) { mutableStateOf(cloudServerUrl) }
+    var showServerUrlEditor by remember { mutableStateOf(false) }
+    var isSyncingDrive by remember { mutableStateOf(false) }
 
     val completedCount = videoTasks.count { it.isCompleted }
 
@@ -209,7 +209,7 @@ fun MeScreen(
                                     },
                                     shape = RoundedCornerShape(8.dp)
                                 ) {
-                                    Icon(Icons.Default.Logout, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null, modifier = Modifier.size(14.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text("Log out", fontSize = 11.sp)
                                 }
@@ -559,6 +559,89 @@ fun MeScreen(
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(18.dp)
                             )
+                        }
+                    }
+
+                    // Google Drive Cloud Server Sync Row
+                    Card(
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("me_cloud_sync_card")
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { showServerUrlEditor = !showServerUrlEditor },
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Google Drive Cloud Server",
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    Text(
+                                        text = if (cloudServerUrl.isNotBlank()) cloudServerStatus else "Not connected • Tap to set Drive Server URL",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (cloudServerUrl.isNotBlank()) SuccessGreen else AmberDark,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                                TextButton(onClick = { showServerUrlEditor = !showServerUrlEditor }) {
+                                    Text(
+                                        text = if (showServerUrlEditor) "Hide" else "Server URL",
+                                        color = AmberDark,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp
+                                    )
+                                }
+                            }
+
+                            if (showServerUrlEditor || cloudServerUrl.isBlank()) {
+                                OutlinedTextField(
+                                    value = serverUrlInput,
+                                    onValueChange = { serverUrlInput = it },
+                                    label = { Text("Google Apps Script Web App URL (/exec)") },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Button(
+                                    onClick = {
+                                        val clean = serverUrlInput.trim()
+                                        if (clean.isBlank()) {
+                                            Toast.makeText(context, "Please paste your Google Script Web App URL", Toast.LENGTH_SHORT).show()
+                                            return@Button
+                                        }
+                                        isSyncingDrive = true
+                                        viewModel.saveCloudServerUrl(clean)
+                                        viewModel.syncWithGoogleDriveServer { ok, msg ->
+                                            isSyncingDrive = false
+                                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                            if (ok) showServerUrlEditor = false
+                                        }
+                                    },
+                                    enabled = !isSyncingDrive,
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        text = if (isSyncingDrive) "Syncing with Drive..." else "Save & Sync Now",
+                                        color = Color.Black,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
                     }
                 }

@@ -153,22 +153,19 @@ class DataStoreManager(private val context: Context) {
 
     val currentUserFlow: Flow<UserProfile?> = context.dataStore.data.map { prefs ->
         val currentEmail = prefs[KEY_CURRENT_USER_EMAIL]
-        val usersJson = prefs[KEY_USERS] ?: "[]"
-        val users = parseUsersJson(usersJson)
         if (currentEmail.isNullOrBlank()) {
-            // Default guest profile if not logged in
-            UserProfile(
-                userId = "user_guest",
-                email = "guest@watchearn.com",
-                name = "VIP Watcher",
-                coinsBalance = prefs[KEY_WALLET_BALANCE] ?: 0
-            )
+            null
         } else {
-            users.find { it.email.equals(currentEmail, ignoreCase = true) } ?: UserProfile(
-                userId = "user_${currentEmail.hashCode()}",
+            val usersJson = prefs[KEY_USERS] ?: "[]"
+            val users = parseUsersJson(usersJson)
+            val walletBal = prefs[KEY_WALLET_BALANCE] ?: 0
+            users.find { it.email.equals(currentEmail, ignoreCase = true) }?.copy(
+                coinsBalance = walletBal
+            ) ?: UserProfile(
+                userId = "usr_${Math.abs(currentEmail.hashCode()) % 100000}",
                 email = currentEmail,
                 name = currentEmail.substringBefore("@"),
-                coinsBalance = prefs[KEY_WALLET_BALANCE] ?: 0
+                coinsBalance = walletBal
             )
         }
     }
@@ -261,7 +258,9 @@ class DataStoreManager(private val context: Context) {
                     timestampMillis = System.currentTimeMillis()
                 )
             )
-            prefs[KEY_TRANSACTIONS] = serializeTransactionsJson(list)
+            val serializedTx = serializeTransactionsJson(list)
+            prefs[KEY_TRANSACTIONS] = serializedTx
+            syncActiveUserIntoUsersList(prefs, newBalanceOverride = newBalance, newTxJsonOverride = serializedTx)
         }
     }
 
@@ -305,7 +304,14 @@ class DataStoreManager(private val context: Context) {
                         timestampMillis = System.currentTimeMillis()
                     )
                 )
-                prefs[KEY_TRANSACTIONS] = serializeTransactionsJson(list)
+                val serializedTx = serializeTransactionsJson(list)
+                prefs[KEY_TRANSACTIONS] = serializedTx
+                syncActiveUserIntoUsersList(
+                    prefs,
+                    newBalanceOverride = currentBalance + 5,
+                    newTxJsonOverride = serializedTx,
+                    newLikedJsonOverride = arr.toString()
+                )
                 added = true
                 message = "🎉 +5 Coins added for Liking the video!"
             }
@@ -437,7 +443,14 @@ class DataStoreManager(private val context: Context) {
                         timestampMillis = System.currentTimeMillis()
                     )
                 )
-                prefs[KEY_TRANSACTIONS] = serializeTransactionsJson(list)
+                val serializedTx = serializeTransactionsJson(list)
+                prefs[KEY_TRANSACTIONS] = serializedTx
+                syncActiveUserIntoUsersList(
+                    prefs,
+                    newBalanceOverride = currentBalance + 5,
+                    newTxJsonOverride = serializedTx,
+                    newCommentsJsonOverride = obj.toString()
+                )
                 added = true
                 message = "🎉 +5 Coins added for Comment #$newCount on video!"
             }
@@ -488,6 +501,11 @@ class DataStoreManager(private val context: Context) {
                     )
                 )
                 prefs[KEY_PAYOUT_REQUESTS] = serializePayoutRequestsJson(payoutList)
+                syncActiveUserIntoUsersList(
+                    prefs,
+                    newBalanceOverride = newBalance,
+                    newTxJsonOverride = prefs[KEY_TRANSACTIONS]
+                )
                 success = true
             }
         }
@@ -574,20 +592,28 @@ class DataStoreManager(private val context: Context) {
         context.dataStore.edit { prefs ->
             val users = parseUsersJson(prefs[KEY_USERS] ?: "[]").toMutableList()
             if (users.any { it.email.equals(cleanEmail, ignoreCase = true) }) {
-                result = Pair(false, "Account with this email already exists.")
+                result = Pair(false, "Account with this email already exists. Please sign in.")
                 return@edit
             }
+            val now = System.currentTimeMillis()
             val newUser = UserProfile(
                 userId = "usr_${Math.abs(cleanEmail.hashCode()) % 100000}",
                 email = cleanEmail,
                 name = name.ifBlank { cleanEmail.substringBefore("@") },
                 passwordHash = password,
-                coinsBalance = prefs[KEY_WALLET_BALANCE] ?: 0,
-                joinedAtMillis = System.currentTimeMillis()
+                coinsBalance = 0,
+                completedTasksCount = 0,
+                joinedAtMillis = now,
+                transactionsJson = "[]",
+                likedTasksJson = "[]",
+                commentCountsJson = "{}",
+                taskLocksJson = "{}",
+                lastUpdatedMillis = now
             )
             users.add(newUser)
             prefs[KEY_USERS] = serializeUsersJson(users)
             prefs[KEY_CURRENT_USER_EMAIL] = cleanEmail
+            applyUserProfileToSessionPrefs(prefs, newUser)
         }
         return result
     }
@@ -597,31 +623,33 @@ class DataStoreManager(private val context: Context) {
         if (cleanEmail.isEmpty() || !cleanEmail.contains("@")) {
             return Pair(false, "Please enter a valid email address.")
         }
+        if (password.isBlank()) {
+            return Pair(false, "Please enter your password.")
+        }
         var result = Pair(false, "Invalid email or password.")
         context.dataStore.edit { prefs ->
             val users = parseUsersJson(prefs[KEY_USERS] ?: "[]").toMutableList()
             val existing = users.find { it.email.equals(cleanEmail, ignoreCase = true) }
             if (existing != null) {
                 if (existing.passwordHash == password || existing.passwordHash.isEmpty()) {
+                    val updatedUser = if (existing.passwordHash.isEmpty()) {
+                        existing.copy(passwordHash = password, lastUpdatedMillis = System.currentTimeMillis())
+                    } else {
+                        existing
+                    }
+                    val idx = users.indexOfFirst { it.email.equals(cleanEmail, ignoreCase = true) }
+                    if (idx != -1) {
+                        users[idx] = updatedUser
+                        prefs[KEY_USERS] = serializeUsersJson(users)
+                    }
                     prefs[KEY_CURRENT_USER_EMAIL] = cleanEmail
-                    result = Pair(true, "Logged in successfully!")
+                    applyUserProfileToSessionPrefs(prefs, updatedUser)
+                    result = Pair(true, "Welcome back, ${updatedUser.name.ifBlank { cleanEmail.substringBefore("@") }}!")
                 } else {
-                    result = Pair(false, "Incorrect password.")
+                    result = Pair(false, "Incorrect password. Please try again.")
                 }
             } else {
-                // Auto create account on first login
-                val newUser = UserProfile(
-                    userId = "usr_${Math.abs(cleanEmail.hashCode()) % 100000}",
-                    email = cleanEmail,
-                    name = cleanEmail.substringBefore("@"),
-                    passwordHash = password,
-                    coinsBalance = prefs[KEY_WALLET_BALANCE] ?: 0,
-                    joinedAtMillis = System.currentTimeMillis()
-                )
-                users.add(newUser)
-                prefs[KEY_USERS] = serializeUsersJson(users)
-                prefs[KEY_CURRENT_USER_EMAIL] = cleanEmail
-                result = Pair(true, "Account created and logged in!")
+                result = Pair(false, "No account found with this email. Please Sign Up first.")
             }
         }
         return result
@@ -629,7 +657,15 @@ class DataStoreManager(private val context: Context) {
 
     suspend fun logoutUser() {
         context.dataStore.edit { prefs ->
+            syncActiveUserIntoUsersList(prefs)
             prefs.remove(KEY_CURRENT_USER_EMAIL)
+            prefs[KEY_WALLET_BALANCE] = 0
+            prefs[KEY_TRANSACTIONS] = "[]"
+            prefs[KEY_LIKED_TASKS] = "[]"
+            prefs[KEY_COMMENT_COUNTS] = "{}"
+            val currentList = parseVideoTasksJson(prefs[KEY_VIDEO_TASKS] ?: serializeVideoTasksJson(getDefaultTasks()))
+            val unlocked = currentList.map { it.copy(isCompleted = false, watchedMillis = 0L, lockedUntilMillis = 0L) }
+            prefs[KEY_VIDEO_TASKS] = serializeVideoTasksJson(unlocked)
         }
     }
 
@@ -666,7 +702,10 @@ class DataStoreManager(private val context: Context) {
             val users = parseUsersJson(prefs[KEY_USERS] ?: "[]").toMutableList()
             val index = users.indexOfFirst { it.email.equals(userEmail, ignoreCase = true) }
             if (index != -1) {
-                users[index] = users[index].copy(coinsBalance = newCoins.coerceAtLeast(0))
+                users[index] = users[index].copy(
+                    coinsBalance = newCoins.coerceAtLeast(0),
+                    lastUpdatedMillis = System.currentTimeMillis() + 5000L
+                )
                 prefs[KEY_USERS] = serializeUsersJson(users)
             }
         }
@@ -760,7 +799,9 @@ class DataStoreManager(private val context: Context) {
                     rewardCoins = rewardCoins,
                     lockedUntilMillis = lockUntil
                 )
-                prefs[KEY_VIDEO_TASKS] = serializeVideoTasksJson(currentList)
+                val serializedTasks = serializeVideoTasksJson(currentList)
+                prefs[KEY_VIDEO_TASKS] = serializedTasks
+                syncActiveUserIntoUsersList(prefs, updatedTasks = currentList, incrementCompletedTasks = true)
             }
         }
     }
@@ -1048,7 +1089,12 @@ class DataStoreManager(private val context: Context) {
                         passwordHash = obj.optString("passwordHash", ""),
                         coinsBalance = obj.optInt("coinsBalance", 0),
                         completedTasksCount = obj.optInt("completedTasksCount", 0),
-                        joinedAtMillis = obj.optLong("joinedAtMillis", System.currentTimeMillis())
+                        joinedAtMillis = obj.optLong("joinedAtMillis", System.currentTimeMillis()),
+                        transactionsJson = obj.optString("transactionsJson", "[]"),
+                        likedTasksJson = obj.optString("likedTasksJson", "[]"),
+                        commentCountsJson = obj.optString("commentCountsJson", "{}"),
+                        taskLocksJson = obj.optString("taskLocksJson", "{}"),
+                        lastUpdatedMillis = obj.optLong("lastUpdatedMillis", 0L)
                     )
                 )
             }
@@ -1069,10 +1115,226 @@ class DataStoreManager(private val context: Context) {
                 put("coinsBalance", u.coinsBalance)
                 put("completedTasksCount", u.completedTasksCount)
                 put("joinedAtMillis", u.joinedAtMillis)
+                put("transactionsJson", u.transactionsJson)
+                put("likedTasksJson", u.likedTasksJson)
+                put("commentCountsJson", u.commentCountsJson)
+                put("taskLocksJson", u.taskLocksJson)
+                put("lastUpdatedMillis", u.lastUpdatedMillis)
             }
             array.put(obj)
         }
         return array.toString()
+    }
+
+    private fun extractTaskLocksJson(tasks: List<VideoTaskItem>): String {
+        val obj = JSONObject()
+        val now = System.currentTimeMillis()
+        for (t in tasks) {
+            if (t.lockedUntilMillis > now) {
+                obj.put(t.id, t.lockedUntilMillis)
+            }
+        }
+        return obj.toString()
+    }
+
+    private fun applyUserProfileToSessionPrefs(
+        prefs: androidx.datastore.preferences.core.MutablePreferences,
+        user: UserProfile
+    ) {
+        prefs[KEY_WALLET_BALANCE] = user.coinsBalance
+        prefs[KEY_TRANSACTIONS] = user.transactionsJson.ifBlank { "[]" }
+        prefs[KEY_LIKED_TASKS] = user.likedTasksJson.ifBlank { "[]" }
+        prefs[KEY_COMMENT_COUNTS] = user.commentCountsJson.ifBlank { "{}" }
+
+        val locksObj = try { JSONObject(user.taskLocksJson.ifBlank { "{}" }) } catch (_: Exception) { JSONObject() }
+        val now = System.currentTimeMillis()
+        val currentTasks = parseVideoTasksJson(prefs[KEY_VIDEO_TASKS] ?: serializeVideoTasksJson(getDefaultTasks()))
+        val updatedTasks = currentTasks.map { task ->
+            val lockUntil = locksObj.optLong(task.id, 0L)
+            val isLockedNow = lockUntil > now
+            task.copy(
+                isCompleted = isLockedNow,
+                watchedMillis = 0L,
+                lockedUntilMillis = if (isLockedNow) lockUntil else 0L
+            )
+        }
+        prefs[KEY_VIDEO_TASKS] = serializeVideoTasksJson(updatedTasks)
+    }
+
+    private fun syncActiveUserIntoUsersList(
+        prefs: androidx.datastore.preferences.core.MutablePreferences,
+        newBalanceOverride: Int? = null,
+        newTxJsonOverride: String? = null,
+        newLikedJsonOverride: String? = null,
+        newCommentsJsonOverride: String? = null,
+        updatedTasks: List<VideoTaskItem>? = null,
+        incrementCompletedTasks: Boolean = false
+    ) {
+        val currentEmail = prefs[KEY_CURRENT_USER_EMAIL] ?: return
+        if (currentEmail.isBlank()) return
+        val users = parseUsersJson(prefs[KEY_USERS] ?: "[]").toMutableList()
+        val idx = users.indexOfFirst { it.email.equals(currentEmail, ignoreCase = true) }
+        val balance = newBalanceOverride ?: (prefs[KEY_WALLET_BALANCE] ?: 0)
+        val txJson = newTxJsonOverride ?: (prefs[KEY_TRANSACTIONS] ?: "[]")
+        val likedJson = newLikedJsonOverride ?: (prefs[KEY_LIKED_TASKS] ?: "[]")
+        val commentsJson = newCommentsJsonOverride ?: (prefs[KEY_COMMENT_COUNTS] ?: "{}")
+        val tasksList = updatedTasks ?: parseVideoTasksJson(prefs[KEY_VIDEO_TASKS] ?: serializeVideoTasksJson(getDefaultTasks()))
+        val locksJson = extractTaskLocksJson(tasksList)
+        val now = System.currentTimeMillis()
+
+        if (idx != -1) {
+            val existing = users[idx]
+            val newCompletedCount = if (incrementCompletedTasks) {
+                existing.completedTasksCount + 1
+            } else {
+                maxOf(existing.completedTasksCount, tasksList.count { it.isCompleted })
+            }
+            users[idx] = existing.copy(
+                coinsBalance = balance,
+                completedTasksCount = newCompletedCount,
+                transactionsJson = txJson,
+                likedTasksJson = likedJson,
+                commentCountsJson = commentsJson,
+                taskLocksJson = locksJson,
+                lastUpdatedMillis = now
+            )
+        } else {
+            users.add(
+                UserProfile(
+                    userId = "usr_${Math.abs(currentEmail.hashCode()) % 100000}",
+                    email = currentEmail,
+                    name = currentEmail.substringBefore("@"),
+                    coinsBalance = balance,
+                    completedTasksCount = if (incrementCompletedTasks) 1 else tasksList.count { it.isCompleted },
+                    joinedAtMillis = now,
+                    transactionsJson = txJson,
+                    likedTasksJson = likedJson,
+                    commentCountsJson = commentsJson,
+                    taskLocksJson = locksJson,
+                    lastUpdatedMillis = now
+                )
+            )
+        }
+        prefs[KEY_USERS] = serializeUsersJson(users)
+    }
+
+    suspend fun syncRemoteTasksFromServer(remoteTasks: List<VideoTaskItem>) {
+        context.dataStore.edit { prefs ->
+            val currentJson = prefs[KEY_VIDEO_TASKS]
+            val localList = if (currentJson.isNullOrBlank()) getDefaultTasks() else parseVideoTasksJson(currentJson)
+            val localMap = localList.associateBy { it.id }
+
+            // Merge remote authoritative task metadata with local user's personal lock/completion state
+            val merged = remoteTasks.map { remote ->
+                val local = localMap[remote.id]
+                if (local != null) {
+                    remote.copy(
+                        isCompleted = local.isCompleted,
+                        watchedMillis = local.watchedMillis,
+                        lockedUntilMillis = local.lockedUntilMillis,
+                        selectedDurationSeconds = local.selectedDurationSeconds
+                    )
+                } else {
+                    remote
+                }
+            }.sortedWith(
+                compareByDescending<VideoTaskItem> { it.isPinned }
+                    .thenByDescending { if (it.isPinned) it.pinnedAt else 0L }
+            )
+            prefs[KEY_VIDEO_TASKS] = serializeVideoTasksJson(merged)
+        }
+    }
+
+    suspend fun syncRemoteUsersFromServer(remoteUsers: List<UserProfile>, isAdmin: Boolean) {
+        context.dataStore.edit { prefs ->
+            val localUsers = parseUsersJson(prefs[KEY_USERS] ?: "[]").toMutableList()
+            val currentEmail = prefs[KEY_CURRENT_USER_EMAIL]
+
+            for (remote in remoteUsers) {
+                if (remote.email.isBlank()) continue
+                val idx = localUsers.indexOfFirst { it.email.equals(remote.email, ignoreCase = true) }
+                if (idx == -1) {
+                    localUsers.add(remote)
+                    if (!isAdmin && currentEmail != null && currentEmail.equals(remote.email, ignoreCase = true)) {
+                        applyUserProfileToSessionPrefs(prefs, remote)
+                    }
+                } else {
+                    val local = localUsers[idx]
+                    // If remote is newer or if we are pulling another user's stats into Admin
+                    val isCurrentLoggedUser = !isAdmin && currentEmail != null && currentEmail.equals(remote.email, ignoreCase = true)
+                    if (!isCurrentLoggedUser || remote.lastUpdatedMillis > local.lastUpdatedMillis) {
+                        val mergedUser = remote.copy(
+                            passwordHash = remote.passwordHash.ifBlank { local.passwordHash },
+                            transactionsJson = if (remote.transactionsJson != "[]" || local.transactionsJson == "[]") remote.transactionsJson else local.transactionsJson,
+                            likedTasksJson = if (remote.likedTasksJson != "[]" || local.likedTasksJson == "[]") remote.likedTasksJson else local.likedTasksJson,
+                            commentCountsJson = if (remote.commentCountsJson != "{}" || local.commentCountsJson == "{}") remote.commentCountsJson else local.commentCountsJson,
+                            taskLocksJson = if (remote.taskLocksJson != "{}" || local.taskLocksJson == "{}") remote.taskLocksJson else local.taskLocksJson
+                        )
+                        localUsers[idx] = mergedUser
+                        if (isCurrentLoggedUser) {
+                            applyUserProfileToSessionPrefs(prefs, mergedUser)
+                        }
+                    }
+                }
+            }
+            prefs[KEY_USERS] = serializeUsersJson(localUsers)
+        }
+    }
+
+    suspend fun syncRemotePayoutsFromServer(remotePayouts: List<PayoutRequest>) {
+        context.dataStore.edit { prefs ->
+            val localPayouts = parsePayoutRequestsJson(prefs[KEY_PAYOUT_REQUESTS] ?: "[]").toMutableList()
+            val currentEmail = prefs[KEY_CURRENT_USER_EMAIL]
+            var balanceChanged = false
+
+            for (remote in remotePayouts) {
+                val idx = localPayouts.indexOfFirst { it.id == remote.id }
+                if (idx == -1) {
+                    localPayouts.add(remote)
+                } else {
+                    val local = localPayouts[idx]
+                    if (local.status == PayoutStatus.PENDING && remote.status != PayoutStatus.PENDING) {
+                        localPayouts[idx] = remote
+                        // If this payout belongs to the active user, record approval or refund!
+                        if (currentEmail != null && currentEmail.equals(remote.userEmail, ignoreCase = true)) {
+                            val txList = parseTransactionsJson(prefs[KEY_TRANSACTIONS] ?: "[]").toMutableList()
+                            if (remote.status == PayoutStatus.APPROVED) {
+                                txList.add(
+                                    0,
+                                    WalletTransaction(
+                                        id = UUID.randomUUID().toString(),
+                                        title = "✅ Payout APPROVED: ₹${String.format(java.util.Locale.US, "%.2f", remote.amountInr)} sent via ${remote.method} (${remote.adminNote ?: "Dispatched"})",
+                                        coins = 0,
+                                        timestampMillis = System.currentTimeMillis()
+                                    )
+                                )
+                                prefs[KEY_TRANSACTIONS] = serializeTransactionsJson(txList)
+                                balanceChanged = true
+                            } else if (remote.status == PayoutStatus.REJECTED) {
+                                val curBal = prefs[KEY_WALLET_BALANCE] ?: 0
+                                prefs[KEY_WALLET_BALANCE] = curBal + remote.amountCoins
+                                txList.add(
+                                    0,
+                                    WalletTransaction(
+                                        id = UUID.randomUUID().toString(),
+                                        title = "❌ Payout REJECTED (Refunded +${remote.amountCoins} coins): ${remote.adminNote ?: "Declined"}",
+                                        coins = remote.amountCoins,
+                                        timestampMillis = System.currentTimeMillis()
+                                    )
+                                )
+                                prefs[KEY_TRANSACTIONS] = serializeTransactionsJson(txList)
+                                balanceChanged = true
+                            }
+                        }
+                    }
+                }
+            }
+            localPayouts.sortByDescending { it.requestedAtMillis }
+            prefs[KEY_PAYOUT_REQUESTS] = serializePayoutRequestsJson(localPayouts)
+            if (balanceChanged) {
+                syncActiveUserIntoUsersList(prefs)
+            }
+        }
     }
 
     private fun parsePayoutRequestsJson(json: String): List<PayoutRequest> {

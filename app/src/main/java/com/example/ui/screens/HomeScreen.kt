@@ -112,26 +112,17 @@ fun HomeScreen(
             TopAppBar(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(34.dp)
-                                .background(AmberPrimary, CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.PlayArrow,
-                                contentDescription = null,
-                                tint = Color.Black,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
+                        com.example.ui.components.KingoLogoBadge(
+                            isAdmin = false,
+                            size = 38.dp
+                        )
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
                             Text(
-                                text = "Kingo King",
+                                text = "KINGO KING",
                                 fontWeight = FontWeight.Black,
                                 fontSize = 18.sp,
-                                letterSpacing = 0.5.sp
+                                letterSpacing = 0.8.sp
                             )
                             Text(
                                 text = "Sit Back - Watch & Earn",

@@ -1,5 +1,10 @@
 package com.example
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -12,17 +17,26 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.admin.AdminWebServer
 import com.example.data.DataStoreManager
 import com.example.service.NotificationChannels
 import com.example.ui.components.AppBottomNavBar
+import com.example.ui.components.NoInternetDialog
 import com.example.ui.components.SuccessDialog
 import com.example.ui.components.TaskIncompleteDialog
+import com.example.ui.components.isInternetAvailable
 import com.example.ui.screens.AdminDashboardScreen
+import com.example.ui.screens.AuthGateScreen
 import com.example.ui.screens.DiagnosticsScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.MeScreen
@@ -33,6 +47,7 @@ import com.example.ui.screens.WalletScreen
 import com.example.ui.theme.WatchEarnTheme
 import com.example.viewmodel.AppScreen
 import com.example.viewmodel.MainViewModel
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
 
@@ -56,10 +71,83 @@ class MainActivity : ComponentActivity() {
             WatchEarnTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     val viewModel: MainViewModel = viewModel()
+                    val context = LocalContext.current
+                    var isOnline by remember { mutableStateOf(isInternetAvailable(context)) }
+                    var forceNoInternetPopup by remember { mutableStateOf(!isOnline) }
+
+                    // Real-time Network Callback + periodic check
+                    DisposableEffect(context) {
+                        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                        val callback = object : ConnectivityManager.NetworkCallback() {
+                            override fun onAvailable(network: Network) {
+                                isOnline = true
+                                forceNoInternetPopup = false
+                                viewModel.syncWithGoogleDriveServer { _, _ -> }
+                            }
+
+                            override fun onLost(network: Network) {
+                                val stillConnected = isInternetAvailable(context)
+                                isOnline = stillConnected
+                                if (!stillConnected) {
+                                    forceNoInternetPopup = true
+                                }
+                            }
+                        }
+                        try {
+                            val req = NetworkRequest.Builder()
+                                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                                .build()
+                            cm?.registerNetworkCallback(req, callback)
+                        } catch (_: Exception) {}
+
+                        onDispose {
+                            try {
+                                cm?.unregisterNetworkCallback(callback)
+                            } catch (_: Exception) {}
+                        }
+                    }
+
+                    LaunchedEffect(Unit) {
+                        while (true) {
+                            val connected = isInternetAvailable(context)
+                            if (connected && !isOnline) {
+                                isOnline = true
+                                forceNoInternetPopup = false
+                                viewModel.syncWithGoogleDriveServer { _, _ -> }
+                            } else if (!connected) {
+                                isOnline = false
+                                forceNoInternetPopup = true
+                            }
+                            delay(2500L)
+                        }
+                    }
+
                     if (isAdmin) {
                         AdminDashboardScreen(viewModel = viewModel)
                     } else {
-                        WatchEarnApp(viewModel = viewModel)
+                        WatchEarnApp(
+                            viewModel = viewModel,
+                            onRequireInternetPopup = { forceNoInternetPopup = true }
+                        )
+                    }
+
+                    if (!isOnline || forceNoInternetPopup) {
+                        NoInternetDialog(
+                            onRetry = {
+                                val connected = isInternetAvailable(context)
+                                isOnline = connected
+                                if (connected) {
+                                    forceNoInternetPopup = false
+                                    viewModel.syncWithGoogleDriveServer { _, _ -> }
+                                } else {
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "Mobile Data / Wi-Fi is still off. Please turn on your internet connection.",
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            }
+                        )
                     }
                 }
             }
@@ -78,12 +166,25 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun WatchEarnApp(viewModel: MainViewModel = viewModel()) {
+fun WatchEarnApp(
+    viewModel: MainViewModel = viewModel(),
+    onRequireInternetPopup: () -> Unit = {}
+) {
+    val currentUser by viewModel.currentUser.collectAsState()
     val currentScreen by viewModel.currentScreen.collectAsState()
     val showSuccessDialog by viewModel.showSuccessDialog.collectAsState()
     val activeRewardCoins by viewModel.activeRewardCoins.collectAsState()
     val videoTasks by viewModel.videoTasks.collectAsState()
     val taskIncompleteMessage by viewModel.taskIncompleteMessage.collectAsState()
+
+    // Mandatory Login Gate: User must sign in or sign up before using Kingo King
+    if (currentUser == null) {
+        AuthGateScreen(
+            viewModel = viewModel,
+            onRequireInternetPopup = onRequireInternetPopup
+        )
+        return
+    }
 
     val isPrimaryTab = currentScreen == AppScreen.TASKS ||
             currentScreen == AppScreen.HOME ||

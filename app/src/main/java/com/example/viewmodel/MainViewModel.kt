@@ -244,10 +244,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val url = cloudServerUrl.value
                 if (url.isNotBlank()) {
                     try {
-                        com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager)
+                        com.example.admin.CloudDriveServerManager.syncData(
+                            serverUrl = url,
+                            dataStoreManager = dataStoreManager,
+                            pushAdminContent = false
+                        )
                     } catch (_: Exception) {}
                 }
-                delay(15_000L)
+                delay(3_000L)
             }
         }
 
@@ -486,26 +490,54 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun signUp(email: String, password: String, name: String, onResult: (Boolean, String) -> Unit) {
         viewModelScope.launch {
+            val url = cloudServerUrl.value
+            if (url.isNotBlank()) {
+                try {
+                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager, pushAdminContent = false)
+                } catch (_: Exception) {}
+            }
             val res = dataStoreManager.signUpUser(email, password, name)
+            if (res.first && url.isNotBlank()) {
+                try {
+                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager, pushAdminContent = false)
+                } catch (_: Exception) {}
+            }
             onResult(res.first, res.second)
             if (res.first) {
-                WatchSessionRepository.addLog("User signed up: $email", LogType.SUCCESS)
+                WatchSessionRepository.addLog("User signed up & synced to Drive: $email", LogType.SUCCESS)
             }
         }
     }
 
     fun login(email: String, password: String, onResult: (Boolean, String) -> Unit) {
         viewModelScope.launch {
+            val url = cloudServerUrl.value
+            if (url.isNotBlank()) {
+                try {
+                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager, pushAdminContent = false)
+                } catch (_: Exception) {}
+            }
             val res = dataStoreManager.loginUser(email, password)
+            if (res.first && url.isNotBlank()) {
+                try {
+                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager, pushAdminContent = false)
+                } catch (_: Exception) {}
+            }
             onResult(res.first, res.second)
             if (res.first) {
-                WatchSessionRepository.addLog("User logged in: $email", LogType.SUCCESS)
+                WatchSessionRepository.addLog("User logged in & loaded Drive profile: $email", LogType.SUCCESS)
             }
         }
     }
 
     fun logout() {
         viewModelScope.launch {
+            val url = cloudServerUrl.value
+            if (url.isNotBlank()) {
+                try {
+                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager, pushAdminContent = false)
+                } catch (_: Exception) {}
+            }
             dataStoreManager.logoutUser()
             WatchSessionRepository.addLog("User logged out", LogType.INFO)
         }
@@ -515,6 +547,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val success = dataStoreManager.withdrawCoins(coins, method, destination)
             if (success) {
+                val url = cloudServerUrl.value
+                if (url.isNotBlank()) {
+                    try {
+                        com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager, pushAdminContent = false)
+                    } catch (_: Exception) {}
+                }
                 onResult(true, "Payout request submitted! Admin will verify and process.")
                 WatchSessionRepository.addLog("Payout request created: $coins coins to $method ($destination)", LogType.INFO)
             } else {
@@ -526,6 +564,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun approvePayout(requestId: String, note: String = "Approved & Dispatched") {
         viewModelScope.launch {
             dataStoreManager.approvePayout(requestId, note)
+            val url = cloudServerUrl.value
+            if (url.isNotBlank()) {
+                try {
+                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager, pushAdminContent = true)
+                } catch (_: Exception) {}
+            }
             WatchSessionRepository.addLog("Admin: Payout approved for request #$requestId", LogType.SUCCESS)
         }
     }
@@ -533,6 +577,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun rejectPayout(requestId: String, reason: String = "Declined by Admin") {
         viewModelScope.launch {
             dataStoreManager.rejectPayout(requestId, reason)
+            val url = cloudServerUrl.value
+            if (url.isNotBlank()) {
+                try {
+                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager, pushAdminContent = true)
+                } catch (_: Exception) {}
+            }
             WatchSessionRepository.addLog("Admin: Payout rejected ($reason). Coins refunded.", LogType.WARNING)
         }
     }
@@ -651,6 +701,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun adminUpdateUserCoins(userEmail: String, newCoins: Int) {
         viewModelScope.launch {
             dataStoreManager.adminUpdateUserCoins(userEmail, newCoins)
+            val url = cloudServerUrl.value
+            if (url.isNotBlank()) {
+                try {
+                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager, pushAdminContent = true)
+                } catch (_: Exception) {}
+            }
             WatchSessionRepository.addLog("Admin: Updated coins to $newCoins for $userEmail", LogType.SUCCESS)
         }
     }
@@ -660,6 +716,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val res = dataStoreManager.recordTaskLike(taskId, taskTitle)
             onResult?.invoke(res.first, res.second)
             if (res.first) {
+                val url = cloudServerUrl.value
+                if (url.isNotBlank()) {
+                    try {
+                        com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager, pushAdminContent = false)
+                    } catch (_: Exception) {}
+                }
                 WatchSessionRepository.addLog("Liked video \"$taskTitle\": +5 coins rewarded!", LogType.SUCCESS)
             }
         }
@@ -670,6 +732,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val res = dataStoreManager.recordTaskComment(taskId, taskTitle)
             onResult?.invoke(res.first, res.second)
             if (res.first) {
+                val url = cloudServerUrl.value
+                if (url.isNotBlank()) {
+                    try {
+                        com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager, pushAdminContent = false)
+                    } catch (_: Exception) {}
+                }
                 WatchSessionRepository.addLog("Comment on \"$taskTitle\": +5 coins rewarded!", LogType.SUCCESS)
             }
         }
@@ -916,6 +984,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _showSuccessDialog.value = true
             WatchSessionRepository.setCompletedState()
             WatchTimerService.stop(context)
+            val url = cloudServerUrl.value
+            if (url.isNotBlank()) {
+                try {
+                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager, pushAdminContent = false)
+                } catch (_: Exception) {}
+            }
             WatchSessionRepository.addLog(
                 "🎉 Milestone reward claimed: ${milestone.minutes}m watch time = +${milestone.coins} coins!",
                 LogType.SUCCESS
@@ -978,6 +1052,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (success) {
                 val inr = coins.toDouble() / com.example.data.COINS_PER_INR.toDouble()
                 val formatted = String.format(java.util.Locale.US, "%.2f", inr)
+                val url = cloudServerUrl.value
+                if (url.isNotBlank()) {
+                    try {
+                        com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager, pushAdminContent = false)
+                    } catch (_: Exception) {}
+                }
                 WatchSessionRepository.addLog(
                     "Withdrawal request submitted: $coins coins (₹$formatted INR) to $method: $destination",
                     LogType.SUCCESS

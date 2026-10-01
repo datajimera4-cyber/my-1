@@ -146,28 +146,20 @@ fun AdminDashboardScreen(
             TopAppBar(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .background(AmberPrimary, CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Security,
-                                contentDescription = null,
-                                tint = Color.Black,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
+                        com.example.ui.components.KingoLogoBadge(
+                            isAdmin = true,
+                            size = 36.dp
+                        )
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
                             Text(
-                                text = "Admin Control Panel",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 17.sp
+                                text = "KINGO ADMIN",
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 17.sp,
+                                letterSpacing = 0.6.sp
                             )
                             Text(
-                                text = "Realtime Management & Web Access",
+                                text = "Realtime Cloud & Task Control",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = AmberPrimary,
                                 fontSize = 10.sp

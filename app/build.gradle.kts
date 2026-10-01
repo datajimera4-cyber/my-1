@@ -28,12 +28,16 @@ android {
       applicationId = "com.example.kingo.admin"
       resValue("string", "app_name", "Kingo Admin")
       buildConfigField("String", "APP_ROLE", "\"ADMIN\"")
+      manifestPlaceholders["appIcon"] = "@mipmap/ic_admin_launcher"
+      manifestPlaceholders["appRoundIcon"] = "@mipmap/ic_admin_launcher_round"
     }
     create("user") {
       dimension = "role"
       applicationId = "com.example.kingo.user"
       resValue("string", "app_name", "Kingo King")
       buildConfigField("String", "APP_ROLE", "\"USER\"")
+      manifestPlaceholders["appIcon"] = "@mipmap/ic_launcher"
+      manifestPlaceholders["appRoundIcon"] = "@mipmap/ic_launcher_round"
     }
   }
 

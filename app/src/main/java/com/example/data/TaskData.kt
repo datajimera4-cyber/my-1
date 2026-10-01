@@ -179,7 +179,12 @@ data class UserProfile(
     val passwordHash: String = "",
     val coinsBalance: Int = 0,
     val completedTasksCount: Int = 0,
-    val joinedAtMillis: Long = System.currentTimeMillis()
+    val joinedAtMillis: Long = System.currentTimeMillis(),
+    val transactionsJson: String = "[]",
+    val likedTasksJson: String = "[]",
+    val commentCountsJson: String = "{}",
+    val taskLocksJson: String = "{}",
+    val lastUpdatedMillis: Long = System.currentTimeMillis()
 )
 
 /**
