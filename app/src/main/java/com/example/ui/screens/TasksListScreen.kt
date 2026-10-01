@@ -77,6 +77,7 @@ import com.example.data.WATCH_DURATION_TIERS
 import com.example.repository.WatchSessionRepository
 import com.example.ui.components.ActiveWatchTimerBanner
 import com.example.ui.components.AddVideoTaskDialog
+import com.example.ui.components.AdminPostsBannerSection
 import com.example.ui.components.DurationSelectionDialog
 import com.example.ui.components.SearchLoadingOverlay
 import com.example.ui.theme.AlertRed
@@ -102,6 +103,8 @@ fun TasksListScreen(
 
     val videoTasks by viewModel.videoTasks.collectAsState()
     val walletBalance by viewModel.walletBalance.collectAsState()
+    val adminPosts by viewModel.adminPosts.collectAsState()
+    val dismissedPostIds by viewModel.dismissedPostIds.collectAsState()
     val searchProgress by viewModel.searchProgress.collectAsState()
     val liveSearchMode by viewModel.liveSearchMode.collectAsState()
     val sessionState by viewModel.sessionState.collectAsState()
@@ -231,6 +234,16 @@ fun TasksListScreen(
             // Live Real-time Watch Session Floating Bar
             item {
                 ActiveWatchTimerBanner(viewModel = viewModel)
+            }
+
+            // Admin Banners / Posts / Alerts for TASKS tab
+            item {
+                AdminPostsBannerSection(
+                    posts = adminPosts,
+                    currentTab = "TASKS",
+                    dismissedIds = dismissedPostIds,
+                    onDismissPost = { viewModel.dismissAdminPost(it) }
+                )
             }
 
             // Live Search Mode Switch Card

@@ -50,12 +50,16 @@ object TitleMatcher {
         val titleMatches = !isJustAuthorName && (
                 normPlayingTitle == normTaskTitle ||
                 compactPlaying == compactTask ||
-                (normTaskTitle.length >= 5 && normPlayingTitle.contains(normTaskTitle)) ||
-                (normPlayingTitle.length >= 8 && normTaskTitle.contains(normPlayingTitle)) ||
-                (normPlayingTitle.length >= 10 && normTaskTitle.length >= 10 &&
-                        normPlayingTitle.take(10) == normTaskTitle.take(10)) ||
-                (compactPlaying.length >= 10 && compactTask.length >= 10 &&
-                        compactPlaying.take(10) == compactTask.take(10))
+                (normTaskTitle.length >= 4 && normPlayingTitle.contains(normTaskTitle)) ||
+                (normPlayingTitle.length >= 6 && normTaskTitle.contains(normPlayingTitle)) ||
+                (normPlayingTitle.length >= 8 && normTaskTitle.length >= 8 && (
+                        normPlayingTitle.contains(normTaskTitle.take(8)) ||
+                        normTaskTitle.contains(normPlayingTitle.take(8))
+                )) ||
+                (compactPlaying.length >= 8 && compactTask.length >= 8 && (
+                        compactPlaying.contains(compactTask.take(8)) ||
+                        compactTask.contains(compactPlaying.take(8))
+                ))
         )
 
         val stopWords = setOf(

@@ -70,6 +70,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.PayoutStatus
+import com.example.ui.components.AdminPostsBannerSection
 import com.example.ui.components.ChangeVideoLinkDialog
 import com.example.ui.theme.AlertRed
 import com.example.ui.theme.AmberDark
@@ -89,6 +90,8 @@ fun MeScreen(
 
     val walletBalance by viewModel.walletBalance.collectAsState()
     val videoTasks by viewModel.videoTasks.collectAsState()
+    val adminPosts by viewModel.adminPosts.collectAsState()
+    val dismissedPostIds by viewModel.dismissedPostIds.collectAsState()
     val activeUrl by viewModel.currentVideoUrl.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
     val payoutRequests by viewModel.payoutRequests.collectAsState()
@@ -133,6 +136,15 @@ fun MeScreen(
             contentPadding = PaddingValues(top = 10.dp, bottom = 20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            item {
+                AdminPostsBannerSection(
+                    posts = adminPosts,
+                    currentTab = "ME",
+                    dismissedIds = dismissedPostIds,
+                    onDismissPost = { viewModel.dismissAdminPost(it) }
+                )
+            }
+
             // Profile / Authentication Section
             if (isUserLoggedIn) {
                 // Logged In User Profile Card

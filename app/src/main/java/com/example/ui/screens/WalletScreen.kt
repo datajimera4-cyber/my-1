@@ -56,6 +56,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.COINS_PER_INR
+import com.example.ui.components.AdminPostsBannerSection
 import com.example.ui.components.WithdrawDialog
 import com.example.ui.theme.AmberDark
 import com.example.ui.theme.AmberPrimary
@@ -77,11 +79,13 @@ fun WalletScreen(
 
     val walletBalance by viewModel.walletBalance.collectAsState()
     val transactions by viewModel.transactions.collectAsState()
+    val adminPosts by viewModel.adminPosts.collectAsState()
+    val dismissedPostIds by viewModel.dismissedPostIds.collectAsState()
 
     var showWithdrawDialog by remember { mutableStateOf(false) }
     var withdrawalSuccessMessage by remember { mutableStateOf<String?>(null) }
 
-    val inrEquivalent = walletBalance / 10.0
+    val inrEquivalent = walletBalance.toDouble() / COINS_PER_INR.toDouble()
     val formattedInr = String.format(Locale.US, "%.2f", inrEquivalent)
 
     Scaffold(
@@ -112,8 +116,15 @@ fun WalletScreen(
                 .fillMaxSize()
                 .padding(top = innerPadding.calculateTopPadding())
                 .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            AdminPostsBannerSection(
+                posts = adminPosts,
+                currentTab = "WALLET",
+                dismissedIds = dismissedPostIds,
+                onDismissPost = { viewModel.dismissAdminPost(it) }
+            )
+
             // Balance Hero Card with INR Conversion & Payout Button
             Card(
                 modifier = Modifier
@@ -178,17 +189,26 @@ fun WalletScreen(
                         Spacer(modifier = Modifier.width(8.dp))
                         Box(
                             modifier = Modifier
-                                .background(AmberPrimary, RoundedCornerShape(4.dp))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                .background(AmberPrimary, RoundedCornerShape(6.dp))
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
                         ) {
                             Text(
-                                text = "10 Coins = ₹1",
+                                text = "200 Coins = 10 INR",
                                 color = Color.Black,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 10.sp
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 11.sp
                             )
                         }
                     }
+
+                    // Watch Duration Coin Rate Summary Strip
+                    Text(
+                        text = "Watch Rates: 3m = 5c • 5m = 10c • 10m = 20c • 20m = 45c • 30m = 80c",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White.copy(alpha = 0.75f),
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 10.5.sp
+                    )
 
                     // Withdraw / Payout Button
                     Button(

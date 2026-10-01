@@ -61,7 +61,10 @@ class FloatingTimerOverlayManager(private val context: Context) {
 
     private var overlayRootView: FrameLayout? = null
     private var timerTextView: TextView? = null
+    private var statusTagTextView: TextView? = null
     private var liveDotView: View? = null
+    private var progressFillView: View? = null
+    private var progressTrackWidthPx: Int = 0
     private var milestoneBadgeTextView: TextView? = null
     private var likeBadgeView: TextView? = null
     private var commentBadgeView: TextView? = null
@@ -118,6 +121,8 @@ class FloatingTimerOverlayManager(private val context: Context) {
             }
 
             density = context.resources.displayMetrics.density
+            val hudWidthPx = (242 * density).toInt()
+            progressTrackWidthPx = hudWidthPx - (22 * density).toInt()
 
             val params = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT,
@@ -134,8 +139,8 @@ class FloatingTimerOverlayManager(private val context: Context) {
                 PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.TOP or Gravity.START
-                x = (8 * density).toInt()
-                y = (120 * density).toInt()
+                x = (12 * density).toInt()
+                y = (76 * density).toInt()
             }
 
             val root = FrameLayout(context).apply {
@@ -147,27 +152,45 @@ class FloatingTimerOverlayManager(private val context: Context) {
                 )
             }
 
-            // Sleek side pill container
+            // Professional Compact 2-Row HUD Card Container
             val pillLayout = LinearLayout(context).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding((10 * density).toInt(), (6 * density).toInt(), (10 * density).toInt(), (6 * density).toInt())
+                orientation = LinearLayout.VERTICAL
+                layoutParams = FrameLayout.LayoutParams(
+                    hudWidthPx,
+                    FrameLayout.LayoutParams.WRAP_CONTENT
+                )
+                setPadding(
+                    (11 * density).toInt(),
+                    (8 * density).toInt(),
+                    (11 * density).toInt(),
+                    (8 * density).toInt()
+                )
 
                 val bg = GradientDrawable().apply {
                     shape = GradientDrawable.RECTANGLE
-                    cornerRadius = 20 * density
-                    setColor(Color.parseColor("#0B1120")) // Deep Obsidian Slate
-                    setStroke((1.5f * density).toInt(), Color.parseColor("#F59E0B")) // Glowing Gold Amber
+                    cornerRadius = 16 * density
+                    setColor(Color.parseColor("#EB0B1120")) // Translucent Deep Obsidian
+                    setStroke((1.3f * density).toInt(), Color.parseColor("#F59E0B")) // Sleek Gold Border
                 }
                 background = bg
-                elevation = 16 * density
+                elevation = 18 * density
+            }
+
+            // ================= ROW 1: Live Dot + Status + Timer + Milestone + Close =================
+            val topRow = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
             }
 
             // Live pulsing status dot
             val liveDot = View(context).apply {
-                val dotSize = (8 * density).toInt()
+                val dotSize = (7 * density).toInt()
                 layoutParams = LinearLayout.LayoutParams(dotSize, dotSize).apply {
-                    rightMargin = (6 * density).toInt()
+                    rightMargin = (5 * density).toInt()
                 }
                 val dotBg = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
@@ -175,14 +198,17 @@ class FloatingTimerOverlayManager(private val context: Context) {
                 }
                 background = dotBg
             }
-            pillLayout.addView(liveDot)
+            topRow.addView(liveDot)
             this.liveDotView = liveDot
 
-            // Timer display
-            val timerTv = TextView(context).apply {
-                text = "▶ 00:00 / 00:00"
-                setTextColor(Color.WHITE)
-                textSize = 12f
+            // Status Tag ("LIVE" / "PAUSED")
+            val statusTv = TextView(context).apply {
+                text = "LIVE"
+                setTextColor(Color.parseColor("#10B981"))
+                textSize = 9.5f
+                isSingleLine = true
+                maxLines = 1
+                includeFontPadding = false
                 typeface = android.graphics.Typeface.DEFAULT_BOLD
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -191,132 +217,204 @@ class FloatingTimerOverlayManager(private val context: Context) {
                     rightMargin = (6 * density).toInt()
                 }
             }
-            pillLayout.addView(timerTv)
+            topRow.addView(statusTv)
+            this.statusTagTextView = statusTv
+
+            // Crisp Monospace Timer Display
+            val timerTv = TextView(context).apply {
+                text = "00:00 / 03:00"
+                setTextColor(Color.WHITE)
+                textSize = 12f
+                isSingleLine = true
+                maxLines = 1
+                includeFontPadding = false
+                typeface = android.graphics.Typeface.MONOSPACE
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+                layoutParams = LinearLayout.LayoutParams(
+                    0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    1f
+                )
+            }
+            topRow.addView(timerTv)
             this.timerTextView = timerTv
 
-            // Reward / Milestone badge
+            // Milestone / Reward Pill Badge
             val milestoneTv = TextView(context).apply {
-                text = "Min 3m"
+                text = "🎯 3m • +5c"
                 setTextColor(Color.parseColor("#F59E0B"))
-                textSize = 10f
+                textSize = 9.5f
+                isSingleLine = true
+                maxLines = 1
+                includeFontPadding = false
                 typeface = android.graphics.Typeface.DEFAULT_BOLD
                 val badgeBg = GradientDrawable().apply {
                     shape = GradientDrawable.RECTANGLE
                     cornerRadius = 6 * density
                     setColor(Color.parseColor("#1E293B"))
+                    setStroke((0.8f * density).toInt(), Color.parseColor("#475569"))
                 }
                 background = badgeBg
-                setPadding((6 * density).toInt(), (3 * density).toInt(), (6 * density).toInt(), (3 * density).toInt())
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    rightMargin = (5 * density).toInt()
-                }
-            }
-            pillLayout.addView(milestoneTv)
-            this.milestoneBadgeTextView = milestoneTv
-
-            // Auto Like Monitor Badge (Read-only status indicator - coins only awarded when liking inside YouTube!)
-            val likeBadge = TextView(context).apply {
-                text = "👍 Like (+5c)"
-                setTextColor(Color.parseColor("#F59E0B"))
-                textSize = 10f
-                typeface = android.graphics.Typeface.DEFAULT_BOLD
-                val bg = GradientDrawable().apply {
-                    shape = GradientDrawable.RECTANGLE
-                    cornerRadius = 8 * density
-                    setColor(Color.parseColor("#1E293B"))
-                    setStroke((1 * density).toInt(), Color.parseColor("#F59E0B"))
-                }
-                background = bg
-                setPadding((6 * density).toInt(), (3 * density).toInt(), (6 * density).toInt(), (3 * density).toInt())
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    rightMargin = (5 * density).toInt()
-                }
-                setOnClickListener {
-                    if (isTaskLiked) {
-                        triggerCelebration("✓ Like bonus (+5c) already received once!")
-                    } else {
-                        triggerCelebration("👇 Tap YouTube's real Like button below video for +5c!")
-                    }
-                }
-            }
-            pillLayout.addView(likeBadge)
-            this.likeBadgeView = likeBadge
-
-            // Auto Comment Monitor Badge (Read-only status indicator - coins only awarded when posting comment inside YouTube!)
-            val commentBadge = TextView(context).apply {
-                text = "💬 +5c (0/2)"
-                setTextColor(Color.parseColor("#38BDF8")) // Sky blue
-                textSize = 10f
-                typeface = android.graphics.Typeface.DEFAULT_BOLD
-                val bg = GradientDrawable().apply {
-                    shape = GradientDrawable.RECTANGLE
-                    cornerRadius = 8 * density
-                    setColor(Color.parseColor("#1E293B"))
-                    setStroke((1 * density).toInt(), Color.parseColor("#38BDF8"))
-                }
-                background = bg
-                setPadding((6 * density).toInt(), (3 * density).toInt(), (6 * density).toInt(), (3 * density).toInt())
+                setPadding((6 * density).toInt(), (2.5f * density).toInt(), (6 * density).toInt(), (2.5f * density).toInt())
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
                 ).apply {
                     rightMargin = (6 * density).toInt()
                 }
-                setOnClickListener {
-                    if (currentCommentCount >= 2) {
-                        triggerCelebration("✓ Max 2 Comment bonuses (+10c) already received!")
-                    } else {
-                        triggerCelebration("👇 Post a real comment inside YouTube for +5c!")
-                    }
-                }
             }
-            pillLayout.addView(commentBadge)
-            this.commentBadgeView = commentBadge
+            topRow.addView(milestoneTv)
+            this.milestoneBadgeTextView = milestoneTv
 
-            // Dismiss / Close button
-            val closeBtn = ImageView(context).apply {
-                setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
-                setColorFilter(Color.parseColor("#94A3B8"))
-                val iconSize = (14 * density).toInt()
-                layoutParams = LinearLayout.LayoutParams(iconSize, iconSize)
+            // Neat Circular Close Button
+            val closeBtn = TextView(context).apply {
+                text = "✕"
+                setTextColor(Color.parseColor("#CBD5E1"))
+                textSize = 10f
+                gravity = Gravity.CENTER
+                includeFontPadding = false
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                val btnSize = (18 * density).toInt()
+                layoutParams = LinearLayout.LayoutParams(btnSize, btnSize)
+                val closeBg = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(Color.parseColor("#334155"))
+                }
+                background = closeBg
                 setOnClickListener {
                     hideOverlay()
                 }
             }
-            pillLayout.addView(closeBtn)
+            topRow.addView(closeBtn)
+            pillLayout.addView(topRow)
 
-            // Celebration banner (Animated badge popping above the pill)
+            // ================= PROGRESS BAR: Sleek Live Progress Track =================
+            val progressTrack = FrameLayout(context).apply {
+                val trackHeight = (3.5f * density).toInt().coerceAtLeast(3)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    trackHeight
+                ).apply {
+                    topMargin = (6 * density).toInt()
+                    bottomMargin = (6 * density).toInt()
+                }
+                val trackBg = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = 4 * density
+                    setColor(Color.parseColor("#1E293B"))
+                }
+                background = trackBg
+            }
+
+            val progressFill = View(context).apply {
+                layoutParams = FrameLayout.LayoutParams(
+                    0,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
+                val fillBg = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = 4 * density
+                    setColor(Color.parseColor("#10B981"))
+                }
+                background = fillBg
+            }
+            progressTrack.addView(progressFill)
+            pillLayout.addView(progressTrack)
+            this.progressFillView = progressFill
+
+            // ================= ROW 2: Auto Like (+5c) & Auto Comment (+5c) Chips =================
+            val bottomRow = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+            }
+
+            val likeBadge = TextView(context).apply {
+                text = "👍 Like +5c"
+                setTextColor(Color.parseColor("#FBBF24"))
+                textSize = 9.5f
+                isSingleLine = true
+                maxLines = 1
+                includeFontPadding = false
+                gravity = Gravity.CENTER
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                val bg = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = 7 * density
+                    setColor(Color.parseColor("#1E293B"))
+                    setStroke((0.9f * density).toInt(), Color.parseColor("#F59E0B"))
+                }
+                background = bg
+                setPadding((6 * density).toInt(), (3 * density).toInt(), (6 * density).toInt(), (3 * density).toInt())
+                layoutParams = LinearLayout.LayoutParams(
+                    0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    1f
+                ).apply {
+                    rightMargin = (6 * density).toInt()
+                }
+            }
+            bottomRow.addView(likeBadge)
+            this.likeBadgeView = likeBadge
+
+            val commentBadge = TextView(context).apply {
+                text = "💬 Comment +5c (0/2)"
+                setTextColor(Color.parseColor("#38BDF8")) // Sky blue
+                textSize = 9.5f
+                isSingleLine = true
+                maxLines = 1
+                includeFontPadding = false
+                gravity = Gravity.CENTER
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                val bg = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = 7 * density
+                    setColor(Color.parseColor("#1E293B"))
+                    setStroke((0.9f * density).toInt(), Color.parseColor("#38BDF8"))
+                }
+                background = bg
+                setPadding((6 * density).toInt(), (3 * density).toInt(), (6 * density).toInt(), (3 * density).toInt())
+                layoutParams = LinearLayout.LayoutParams(
+                    0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    1.25f
+                )
+            }
+            bottomRow.addView(commentBadge)
+            this.commentBadgeView = commentBadge
+            pillLayout.addView(bottomRow)
+
+            // Celebration banner (Animated badge popping below/above the HUD card)
             val celebrationBox = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER
                 visibility = View.GONE
                 val cBg = GradientDrawable().apply {
                     shape = GradientDrawable.RECTANGLE
-                    cornerRadius = 14 * density
+                    cornerRadius = 12 * density
                     setColor(Color.parseColor("#065F46")) // Rich emerald
-                    setStroke((1.5f * density).toInt(), Color.parseColor("#F59E0B"))
+                    setStroke((1.2f * density).toInt(), Color.parseColor("#F59E0B"))
                 }
                 background = cBg
-                setPadding((12 * density).toInt(), (5 * density).toInt(), (12 * density).toInt(), (5 * density).toInt())
+                setPadding((10 * density).toInt(), (4 * density).toInt(), (10 * density).toInt(), (4 * density).toInt())
                 layoutParams = FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.WRAP_CONTENT,
                     FrameLayout.LayoutParams.WRAP_CONTENT
                 ).apply {
-                    gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                    topMargin = -(34 * density).toInt()
+                    gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                    bottomMargin = -(28 * density).toInt()
                 }
             }
 
             val celebTv = TextView(context).apply {
-                text = "🎉 +10 COINS UNLOCKED!"
+                text = "🎉 +5 COINS UNLOCKED!"
                 setTextColor(Color.WHITE)
-                textSize = 11f
+                textSize = 10.5f
+                isSingleLine = true
+                maxLines = 1
                 typeface = android.graphics.Typeface.DEFAULT_BOLD
             }
             celebrationBox.addView(celebTv)
@@ -326,11 +424,12 @@ class FloatingTimerOverlayManager(private val context: Context) {
             root.addView(pillLayout)
             root.addView(celebrationBox)
 
-            // Dragging Listener (Does NOT switch app on tap so YouTube playback is never interrupted)
+            // Smooth Dragging Listener from ANYWHERE on the HUD card
             var initialX = 0
             var initialY = 0
             var initialTouchX = 0f
             var initialTouchY = 0f
+            var hasMoved = false
 
             pillLayout.setOnTouchListener { _, event ->
                 when (event.action) {
@@ -339,19 +438,29 @@ class FloatingTimerOverlayManager(private val context: Context) {
                         initialY = params.y
                         initialTouchX = event.rawX
                         initialTouchY = event.rawY
+                        hasMoved = false
                         true
                     }
                     MotionEvent.ACTION_MOVE -> {
                         val deltaX = (event.rawX - initialTouchX).toInt()
                         val deltaY = (event.rawY - initialTouchY).toInt()
+                        if ( kotlin.math.abs(deltaX) > (5 * density) || kotlin.math.abs(deltaY) > (5 * density)) {
+                            hasMoved = true
+                        }
                         params.x = (initialX + deltaX).coerceAtLeast(0)
-                        params.y = (initialY + deltaY).coerceAtLeast(30)
+                        params.y = (initialY + deltaY).coerceAtLeast(24)
                         try {
                             windowManager.updateViewLayout(root, params)
                         } catch (_: Exception) {}
                         true
                     }
                     MotionEvent.ACTION_UP -> {
+                        if (!hasMoved) {
+                            // Subtle hint on tap
+                            if (!isTaskLiked) {
+                                triggerCelebration("👍 Like & 💬 Comment on video for +5c bonus!")
+                            }
+                        }
                         true
                     }
                     else -> false
@@ -502,15 +611,33 @@ class FloatingTimerOverlayManager(private val context: Context) {
             val watchedStr = TimeFormatter.formatMillisToMmSs(watchedMillis)
             val reqStr = TimeFormatter.formatMillisToMmSs(requiredMillis)
             val watchedSecs = (watchedMillis / 1000).toInt()
+            val progressFraction = if (requiredMillis > 0) {
+                (watchedMillis.toFloat() / requiredMillis.toFloat()).coerceIn(0.03f, 1f)
+            } else 0.05f
+
+            progressFillView?.let { fill ->
+                val parentWidth = (fill.parent as? View)?.width ?: 0
+                if (parentWidth > 0) {
+                    val lp = fill.layoutParams
+                    lp.width = (parentWidth * progressFraction).toInt().coerceAtLeast((8 * density).toInt())
+                    fill.layoutParams = lp
+                }
+            }
 
             if (isPaused) {
-                timerTextView?.text = "⏸ $watchedStr / $reqStr"
-                timerTextView?.setTextColor(Color.parseColor("#F59E0B"))
+                timerTextView?.text = "$watchedStr / $reqStr"
+                timerTextView?.setTextColor(Color.parseColor("#FDE68A"))
+                statusTagTextView?.text = "PAUSED"
+                statusTagTextView?.setTextColor(Color.parseColor("#F59E0B"))
                 (liveDotView?.background as? GradientDrawable)?.setColor(Color.parseColor("#F59E0B"))
+                (progressFillView?.background as? GradientDrawable)?.setColor(Color.parseColor("#F59E0B"))
             } else {
-                timerTextView?.text = "▶ $watchedStr / $reqStr"
+                timerTextView?.text = "$watchedStr / $reqStr"
                 timerTextView?.setTextColor(Color.WHITE)
+                statusTagTextView?.text = "LIVE"
+                statusTagTextView?.setTextColor(Color.parseColor("#10B981"))
                 (liveDotView?.background as? GradientDrawable)?.setColor(Color.parseColor("#10B981"))
+                (progressFillView?.background as? GradientDrawable)?.setColor(Color.parseColor("#10B981"))
             }
 
             if (milestone != null) {
@@ -524,10 +651,10 @@ class FloatingTimerOverlayManager(private val context: Context) {
             } else {
                 val remainSec = (180 - watchedSecs).coerceAtLeast(0)
                 if (remainSec > 0) {
-                    milestoneBadgeTextView?.text = if (isPaused) "Paused (${remainSec}s)" else "Goal: 3m (${remainSec}s)"
+                    milestoneBadgeTextView?.text = if (isPaused) "⏸ ${remainSec}s left" else "🎯 ${remainSec}s → +5c"
                     milestoneBadgeTextView?.setTextColor(Color.parseColor("#F59E0B"))
                 } else {
-                    milestoneBadgeTextView?.text = "3m Passed!"
+                    milestoneBadgeTextView?.text = "🏆 +5c Ready"
                     milestoneBadgeTextView?.setTextColor(Color.parseColor("#10B981"))
                 }
             }

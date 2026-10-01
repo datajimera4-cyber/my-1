@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -92,6 +93,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val cloudServerStatus: StateFlow<String> = dataStoreManager.cloudServerStatusFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, "Not Connected (Local Mode)")
 
+    val adminPosts: StateFlow<List< com.example.data.AdminPostItem >> = dataStoreManager.adminPostsFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, dataStoreManager.getDefaultAdminPosts())
+
+    val dismissedPostIds: StateFlow<Set<String>> = dataStoreManager.dismissedPostIdsFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+
     val taskIncompleteMessage: StateFlow<String?> = WatchSessionRepository.taskIncompleteMessage
 
     fun dismissTaskIncompleteMessage() {
@@ -104,7 +111,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _adminServerUrl = MutableStateFlow("")
     val adminServerUrl: StateFlow<String> = _adminServerUrl.asStateFlow()
 
-    private val _activeRewardCoins = MutableStateFlow(10)
+    private val _activeRewardCoins = MutableStateFlow(5)
     val activeRewardCoins: StateFlow<Int> = _activeRewardCoins.asStateFlow()
 
     val targetTaskTitle: StateFlow<String?> = WatchSessionRepository.targetTaskTitle
@@ -227,7 +234,60 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             while (true) {
                 dataStoreManager.unlockExpiredTasks()
-                delay(30_000L)
+                val url = cloudServerUrl.value
+                if (url.isNotBlank()) {
+                    try {
+                        com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager)
+                    } catch (_: Exception) {}
+                }
+                delay(15_000L)
+            }
+        }
+
+        // Real-time watcher for newly added Admin Tasks -> trigger instant User App notification
+        viewModelScope.launch {
+            val defaultTaskIds = setOf("default_rick", "default_android15", "default_kotlin_course", "default_lofi_live")
+            dataStoreManager.videoTasksFlow.collectLatest { tasks ->
+                val notified = dataStoreManager.notifiedItemIdsFlow.first()
+                val newlyAdded = tasks.filter { t ->
+                    !defaultTaskIds.contains(t.id) && !notified.contains(t.id) &&
+                            (System.currentTimeMillis() - t.createdAt) < 10 * 60 * 1000L
+                }
+                if (newlyAdded.isNotEmpty()) {
+                    dataStoreManager.markItemsNotified(newlyAdded.map { it.id }.toSet())
+                    val newest = newlyAdded.first()
+                    com.example.service.NotificationChannels.sendAdminUpdateNotification(
+                        context = getApplication(),
+                        title = "🎬 New Watch Task Added! (+${newest.rewardCoins} Coins)",
+                        body = "\"${newest.title}\" by ${newest.channelName} is now live. Watch & earn coins now!"
+                    )
+                }
+            }
+        }
+
+        // Real-time watcher for newly added Admin Posts / Banners / Alerts -> trigger instant User App notification
+        viewModelScope.launch {
+            val defaultPostIds = setOf("default_welcome_banner")
+            dataStoreManager.adminPostsFlow.collectLatest { posts ->
+                val notified = dataStoreManager.notifiedItemIdsFlow.first()
+                val newlyAdded = posts.filter { p ->
+                    !defaultPostIds.contains(p.id) && !notified.contains(p.id) &&
+                            (System.currentTimeMillis() - p.createdAt) < 10 * 60 * 1000L
+                }
+                if (newlyAdded.isNotEmpty()) {
+                    dataStoreManager.markItemsNotified(newlyAdded.map { it.id }.toSet())
+                    val newest = newlyAdded.first()
+                    val prefix = when (newest.postType.uppercase()) {
+                        "ALERT" -> "🚨 Urgent Admin Alert"
+                        "BANNER" -> "📢 New Offer Banner"
+                        else -> "📌 New Admin Post"
+                    }
+                    com.example.service.NotificationChannels.sendAdminUpdateNotification(
+                        context = getApplication(),
+                        title = "$prefix: ${newest.title}",
+                        body = newest.message.ifBlank { "Tap to view the latest update in ${newest.targetTab} tab!" }
+                    )
+                }
             }
         }
     }
@@ -261,17 +321,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _selectedTierCoins.value = cleanedTask.rewardCoins
 
         viewModelScope.launch {
+            dataStoreManager.markItemsNotified(setOf(cleanedTask.id))
             dataStoreManager.addVideoTask(cleanedTask)
             dataStoreManager.setSelectedTaskId(cleanedTask.id)
             dataStoreManager.setActiveVideoUrl(cleanUrl)
+
+            var finalTitle = cleanedTask.title
+            var finalChannel = cleanedTask.channelName
 
             if (cleanedTask.title.isBlank() || cleanedTask.title == "YouTube Video" || cleanedTask.title.startsWith("YouTube Video (")) {
                 val result = OEmbedFetcher.fetchOEmbed(cleanUrl)
                 if (result is OEmbedResult.Success) {
                     _oEmbedState.value = result
+                    finalTitle = result.title
+                    finalChannel = result.authorName.ifBlank { cleanedTask.channelName }
                     val updated = cleanedTask.copy(
-                        title = result.title,
-                        channelName = result.authorName.ifBlank { cleanedTask.channelName },
+                        title = finalTitle,
+                        channelName = finalChannel,
                         thumbnailUrl = result.thumbnailUrl.ifBlank { cleanedTask.thumbnailUrl }
                     )
                     dataStoreManager.updateVideoTask(updated)
@@ -284,7 +350,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     thumbnailUrl = cleanedTask.thumbnailUrl
                 )
             }
-            WatchSessionRepository.addLog("Created new video task: \"${cleanedTask.title}\"", LogType.SUCCESS)
+            com.example.service.NotificationChannels.sendAdminUpdateNotification(
+                context = getApplication(),
+                title = "🎬 New Video Task Live! (+${cleanedTask.rewardCoins} Coins)",
+                body = "Watch \"$finalTitle\" ($finalChannel) & earn up to 80 coins + Like/Comment bonus!"
+            )
+            val url = cloudServerUrl.value
+            if (url.isNotBlank()) {
+                try {
+                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager)
+                } catch (_: Exception) {}
+            }
+            WatchSessionRepository.addLog("Created new video task: \"$finalTitle\"", LogType.SUCCESS)
         }
     }
 
@@ -471,6 +548,68 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             dataStoreManager.adminDeleteVideoTask(taskId)
             WatchSessionRepository.addLog("Admin: Deleted task #$taskId", LogType.INFO)
+        }
+    }
+
+    fun addAdminPost(
+        title: String,
+        message: String,
+        targetTab: String,
+        postType: String,
+        actionUrl: String = "",
+        imageUrl: String = ""
+    ) {
+        viewModelScope.launch {
+            val post = com.example.data.AdminPostItem(
+                id = "post_${System.currentTimeMillis()}",
+                title = title.trim(),
+                message = message.trim(),
+                targetTab = targetTab.uppercase(),
+                postType = postType.uppercase(),
+                actionUrl = actionUrl.trim(),
+                imageUrl = imageUrl.trim(),
+                createdAt = System.currentTimeMillis()
+            )
+            dataStoreManager.markItemsNotified(setOf(post.id))
+            dataStoreManager.addAdminPost(post)
+
+            val prefix = when (post.postType) {
+                "ALERT" -> "🚨 Urgent Admin Alert"
+                "BANNER" -> "📢 New Offer Banner"
+                else -> "📌 New Admin Post"
+            }
+            com.example.service.NotificationChannels.sendAdminUpdateNotification(
+                context = getApplication(),
+                title = "$prefix: ${post.title}",
+                body = post.message.ifBlank { "New update posted in ${post.targetTab} tab!" }
+            )
+
+            val url = cloudServerUrl.value
+            if (url.isNotBlank()) {
+                try {
+                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager)
+                } catch (_: Exception) {}
+            }
+            WatchSessionRepository.addLog("Admin published ${post.postType} to ${post.targetTab}: \"${post.title}\"", LogType.SUCCESS)
+        }
+    }
+
+    fun deleteAdminPost(postId: String) {
+        viewModelScope.launch {
+            dataStoreManager.deleteAdminPost(postId)
+            val url = cloudServerUrl.value
+            if (url.isNotBlank()) {
+                try {
+                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager)
+                } catch (_: Exception) {}
+            }
+            WatchSessionRepository.addLog("Admin deleted post #$postId", LogType.INFO)
+        }
+    }
+
+    fun dismissAdminPost(postId: String) {
+        viewModelScope.launch {
+            dataStoreManager.dismissAdminPost(postId)
         }
     }
 
@@ -782,8 +921,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         destination: String,
         onComplete: (success: Boolean, message: String) -> Unit
     ) {
-        if (coins < 50) {
-            onComplete(false, "Minimum payout is 50 Coins (₹5.00 INR).")
+        if (coins < 200) {
+            onComplete(false, "Minimum payout is 200 Coins (₹10.00 INR).")
             return
         }
         if (coins > walletBalance.value) {
@@ -798,7 +937,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val success = dataStoreManager.withdrawCoins(coins, method, destination.trim())
             if (success) {
-                val inr = coins / 10.0
+                val inr = coins.toDouble() / com.example.data.COINS_PER_INR.toDouble()
                 val formatted = String.format(java.util.Locale.US, "%.2f", inr)
                 WatchSessionRepository.addLog(
                     "Withdrawal request submitted: $coins coins (₹$formatted INR) to $method: $destination",

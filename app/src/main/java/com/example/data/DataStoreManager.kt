@@ -36,6 +36,46 @@ class DataStoreManager(private val context: Context) {
         private val KEY_CLOUD_SERVER_URL = stringPreferencesKey("cloud_server_url")
         private val KEY_CLOUD_SERVER_STATUS = stringPreferencesKey("cloud_server_status")
         private val KEY_DELETED_TASK_IDS = stringPreferencesKey("deleted_task_ids_json")
+        private val KEY_ADMIN_POSTS = stringPreferencesKey("admin_posts_json")
+        private val KEY_NOTIFIED_ITEM_IDS = stringPreferencesKey("notified_item_ids_json")
+        private val KEY_DISMISSED_POST_IDS = stringPreferencesKey("dismissed_post_ids_json")
+    }
+
+    val adminPostsFlow: Flow<List<AdminPostItem>> = context.dataStore.data.map { prefs ->
+        val json = prefs[KEY_ADMIN_POSTS]
+        if (json == null) {
+            getDefaultAdminPosts()
+        } else {
+            parseAdminPostsJson(json)
+        }
+    }
+
+    val notifiedItemIdsFlow: Flow<Set<String>> = context.dataStore.data.map { prefs ->
+        val json = prefs[KEY_NOTIFIED_ITEM_IDS] ?: "[]"
+        try {
+            val arr = JSONArray(json)
+            val set = mutableSetOf<String>()
+            for (i in 0 until arr.length()) {
+                set.add(arr.getString(i))
+            }
+            set
+        } catch (_: Exception) {
+            emptySet()
+        }
+    }
+
+    val dismissedPostIdsFlow: Flow<Set<String>> = context.dataStore.data.map { prefs ->
+        val json = prefs[KEY_DISMISSED_POST_IDS] ?: "[]"
+        try {
+            val arr = JSONArray(json)
+            val set = mutableSetOf<String>()
+            for (i in 0 until arr.length()) {
+                set.add(arr.getString(i))
+            }
+            set
+        } catch (_: Exception) {
+            emptySet()
+        }
     }
 
     val deletedTaskIdsFlow: Flow<Set<String>> = context.dataStore.data.map { prefs ->
@@ -405,7 +445,7 @@ class DataStoreManager(private val context: Context) {
                 val newBalance = currentBalance - coins
                 prefs[KEY_WALLET_BALANCE] = newBalance
 
-                val inrAmount = coins / 10.0
+                val inrAmount = coins.toDouble() / COINS_PER_INR.toDouble()
                 val formattedInr = String.format(java.util.Locale.US, "%.2f", inrAmount)
 
                 val currentJson = prefs[KEY_TRANSACTIONS] ?: "[]"
@@ -689,6 +729,82 @@ class DataStoreManager(private val context: Context) {
         }
     }
 
+    fun getDefaultAdminPosts(): List<AdminPostItem> {
+        return listOf(
+            AdminPostItem(
+                id = "default_welcome_banner",
+                title = "🔥 Bonus Update: 200 Coins = ₹10 INR!",
+                message = "Watch tasks & earn: 3m=5c, 5m=10c, 10m=20c, 20m=45c, 30m=80c + Like (+5c) & Comment (+5c)!",
+                targetTab = "ALL",
+                postType = "BANNER",
+                actionUrl = "",
+                imageUrl = "",
+                createdAt = 1700000000000L
+            )
+        )
+    }
+
+    suspend fun addAdminPost(post: AdminPostItem) {
+        context.dataStore.edit { prefs ->
+            val json = prefs[KEY_ADMIN_POSTS]
+            val currentList = if (json == null) getDefaultAdminPosts().toMutableList() else parseAdminPostsJson(json).toMutableList()
+            currentList.removeAll { it.id == post.id }
+            currentList.add(0, post)
+            prefs[KEY_ADMIN_POSTS] = serializeAdminPostsJson(currentList)
+        }
+    }
+
+    suspend fun deleteAdminPost(postId: String) {
+        context.dataStore.edit { prefs ->
+            val json = prefs[KEY_ADMIN_POSTS]
+            val currentList = if (json == null) getDefaultAdminPosts().toMutableList() else parseAdminPostsJson(json).toMutableList()
+            currentList.removeAll { it.id == postId }
+            prefs[KEY_ADMIN_POSTS] = serializeAdminPostsJson(currentList)
+        }
+    }
+
+    suspend fun syncAdminPosts(posts: List<AdminPostItem>) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_ADMIN_POSTS] = serializeAdminPostsJson(posts)
+        }
+    }
+
+    suspend fun markItemsNotified(ids: Set<String>) {
+        if (ids.isEmpty()) return
+        context.dataStore.edit { prefs ->
+            val json = prefs[KEY_NOTIFIED_ITEM_IDS] ?: "[]"
+            val arr = try { JSONArray(json) } catch (_: Exception) { JSONArray() }
+            val existing = mutableSetOf<String>()
+            for (i in 0 until arr.length()) {
+                existing.add(arr.getString(i))
+            }
+            for (id in ids) {
+                if (existing.add(id)) {
+                    arr.put(id)
+                }
+            }
+            prefs[KEY_NOTIFIED_ITEM_IDS] = arr.toString()
+        }
+    }
+
+    suspend fun dismissAdminPost(postId: String) {
+        context.dataStore.edit { prefs ->
+            val json = prefs[KEY_DISMISSED_POST_IDS] ?: "[]"
+            val arr = try { JSONArray(json) } catch (_: Exception) { JSONArray() }
+            var found = false
+            for (i in 0 until arr.length()) {
+                if (arr.getString(i) == postId) {
+                    found = true
+                    break
+                }
+            }
+            if (!found) {
+                arr.put(postId)
+                prefs[KEY_DISMISSED_POST_IDS] = arr.toString()
+            }
+        }
+    }
+
     fun getDefaultTasks(): List<VideoTaskItem> {
         return listOf(
             VideoTaskItem(
@@ -700,7 +816,7 @@ class DataStoreManager(private val context: Context) {
                 durationSeconds = 213, // 3 min 33 sec
                 isLive = false,
                 isCompleted = false,
-                rewardCoins = 10,
+                rewardCoins = 5,
                 selectedDurationSeconds = 180
             ),
             VideoTaskItem(
@@ -712,7 +828,7 @@ class DataStoreManager(private val context: Context) {
                 durationSeconds = 600, // 10 min 00 sec
                 isLive = false,
                 isCompleted = false,
-                rewardCoins = 40,
+                rewardCoins = 20,
                 selectedDurationSeconds = 600
             ),
             VideoTaskItem(
@@ -724,7 +840,7 @@ class DataStoreManager(private val context: Context) {
                 durationSeconds = 1980, // 33 min
                 isLive = false,
                 isCompleted = false,
-                rewardCoins = 160,
+                rewardCoins = 80,
                 selectedDurationSeconds = 1800
             ),
             VideoTaskItem(
@@ -736,7 +852,7 @@ class DataStoreManager(private val context: Context) {
                 durationSeconds = 0, // 0 = LIVE STREAM!
                 isLive = true,
                 isCompleted = false,
-                rewardCoins = 160,
+                rewardCoins = 80,
                 selectedDurationSeconds = 1800
             )
         )
@@ -755,6 +871,16 @@ class DataStoreManager(private val context: Context) {
                 val rawCompleted = obj.optBoolean("isCompleted", false)
                 val effectiveCompleted = if (lockExpired || effectiveLockedUntil == 0L) false else rawCompleted
                 val effectiveWatched = if (lockExpired) 0L else obj.optLong("watchedMillis", 0L)
+                val selSec = obj.optInt("selectedDurationSeconds", 180)
+                val rawCoins = obj.optInt("rewardCoins", 5)
+                val tierCoins = WATCH_DURATION_TIERS.find { it.seconds == selSec }?.coins ?: when (rawCoins) {
+                    10 -> if (selSec == 180) 5 else 10
+                    15 -> 10
+                    40 -> 20
+                    100 -> 45
+                    160 -> 80
+                    else -> rawCoins
+                }
 
                 list.add(
                     VideoTaskItem(
@@ -767,8 +893,8 @@ class DataStoreManager(private val context: Context) {
                         isLive = obj.optBoolean("isLive", false),
                         isCompleted = effectiveCompleted,
                         watchedMillis = effectiveWatched,
-                        selectedDurationSeconds = obj.optInt("selectedDurationSeconds", 180),
-                        rewardCoins = obj.optInt("rewardCoins", 10),
+                        selectedDurationSeconds = selSec,
+                        rewardCoins = tierCoins,
                         createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
                         lockedUntilMillis = effectiveLockedUntil
                     )
@@ -928,6 +1054,49 @@ class DataStoreManager(private val context: Context) {
                 put("requestedAtMillis", r.requestedAtMillis)
                 r.processedAtMillis?.let { put("processedAtMillis", it) }
                 r.adminNote?.let { put("adminNote", it) }
+            }
+            array.put(obj)
+        }
+        return array.toString()
+    }
+
+    private fun parseAdminPostsJson(json: String): List<AdminPostItem> {
+        val list = mutableListOf<AdminPostItem>()
+        try {
+            val array = JSONArray(json)
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                list.add(
+                    AdminPostItem(
+                        id = obj.optString("id", UUID.randomUUID().toString()),
+                        title = obj.optString("title", "Announcement"),
+                        message = obj.optString("message", ""),
+                        targetTab = obj.optString("targetTab", "ALL"),
+                        postType = obj.optString("postType", "BANNER"),
+                        actionUrl = obj.optString("actionUrl", ""),
+                        imageUrl = obj.optString("imageUrl", ""),
+                        createdAt = obj.optLong("createdAt", System.currentTimeMillis())
+                    )
+                )
+            }
+        } catch (_: Exception) {
+            // fallback
+        }
+        return list
+    }
+
+    private fun serializeAdminPostsJson(posts: List<AdminPostItem>): String {
+        val array = JSONArray()
+        for (p in posts) {
+            val obj = JSONObject().apply {
+                put("id", p.id)
+                put("title", p.title)
+                put("message", p.message)
+                put("targetTab", p.targetTab)
+                put("postType", p.postType)
+                put("actionUrl", p.actionUrl)
+                put("imageUrl", p.imageUrl)
+                put("createdAt", p.createdAt)
             }
             array.put(obj)
         }

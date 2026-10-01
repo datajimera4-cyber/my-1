@@ -69,6 +69,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.data.OEmbedResult
 import com.example.data.SampleTask
+import com.example.ui.components.AdminPostsBannerSection
 import com.example.ui.theme.AmberDark
 import com.example.ui.theme.AmberLight
 import com.example.ui.theme.AmberPrimary
@@ -89,6 +90,8 @@ fun HomeScreen(
     val context = LocalContext.current
     val walletBalance by viewModel.walletBalance.collectAsState()
     val videoTasks by viewModel.videoTasks.collectAsState()
+    val adminPosts by viewModel.adminPosts.collectAsState()
+    val dismissedPostIds by viewModel.dismissedPostIds.collectAsState()
     val featuredTask = remember(videoTasks) { videoTasks.firstOrNull() }
     val isCompleted = featuredTask?.isCompleted == true
     val oEmbedState by viewModel.oEmbedState.collectAsState()
@@ -175,6 +178,14 @@ fun HomeScreen(
             // Live / Active Watch Session Floating Bar
             ActiveWatchTimerBanner(viewModel = viewModel)
 
+            // Admin Banners / Posts / Alerts for HOME tab
+            AdminPostsBannerSection(
+                posts = adminPosts,
+                currentTab = "HOME",
+                dismissedIds = dismissedPostIds,
+                onDismissPost = { viewModel.dismissAdminPost(it) }
+            )
+
             // 1. Shiny Wallet Balance Card
             Card(
                 modifier = Modifier
@@ -202,11 +213,11 @@ fun HomeScreen(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
-                                text = "WALLET BALANCE",
+                                text = "WALLET BALANCE • 200 Coins = 10 INR",
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.SemiBold,
                                 color = AmberLight,
-                                letterSpacing = 1.sp
+                                letterSpacing = 0.5.sp
                             )
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowForward,
@@ -234,7 +245,7 @@ fun HomeScreen(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Coins",
+                                text = "Coins (≈ ₹${String.format(java.util.Locale.US, "%.2f", walletBalance / 20.0)} INR)",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = AmberPrimary

@@ -66,13 +66,13 @@ fun WithdrawDialog(
     onSubmitWithdrawal: (coins: Int, method: String, destination: String) -> Unit
 ) {
     var selectedMethod by remember { mutableStateOf("UPI") }
-    var coinsInputText by remember { mutableStateOf("50") }
+    var coinsInputText by remember { mutableStateOf("200") }
     var destinationInput by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isSubmitting by remember { mutableStateOf(false) }
 
     val coins = coinsInputText.toIntOrNull() ?: 0
-    val inrValue = coins / 10.0
+    val inrValue = coins / 20.0
     val formattedInr = String.format(Locale.US, "%.2f", inrValue)
 
     Dialog(
@@ -108,7 +108,7 @@ fun WithdrawDialog(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Exchange rate: 10 Coins = ₹1.00 INR",
+                            text = "Exchange rate: 200 Coins = ₹10.00 INR",
                             style = MaterialTheme.typography.bodySmall,
                             color = AmberDark,
                             fontWeight = FontWeight.Bold
@@ -161,7 +161,7 @@ fun WithdrawDialog(
                                 .padding(horizontal = 12.dp, vertical = 6.dp)
                         ) {
                             Text(
-                                text = "≈ ₹${String.format(Locale.US, "%.2f", currentBalance / 10.0)} INR",
+                                text = "≈ ₹${String.format(Locale.US, "%.2f", currentBalance / 20.0)} INR",
                                 color = SuccessGreen,
                                 fontWeight = FontWeight.Bold,
                                 style = MaterialTheme.typography.titleSmall
@@ -227,7 +227,7 @@ fun WithdrawDialog(
                 // Amount Section
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        text = "Withdraw Coins (Min: 50 Coins)",
+                        text = "Withdraw Coins (Min: 200 Coins = ₹10 INR)",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold
                     )
@@ -237,11 +237,11 @@ fun WithdrawDialog(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        listOf(50, 100, 200).forEach { preset ->
+                        listOf(200, 500, 1000).forEach { preset ->
                             FilterChip(
                                 selected = coinsInputText == preset.toString(),
                                 onClick = { coinsInputText = preset.toString() },
-                                label = { Text("${preset}c (₹${preset / 10})", fontSize = 11.sp) },
+                                label = { Text("${preset}c (₹${preset / 20})", fontSize = 11.sp) },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = AmberPrimary,
                                     selectedLabelColor = Color.Black
@@ -340,8 +340,8 @@ fun WithdrawDialog(
                 // Submit Button
                 Button(
                     onClick = {
-                        if (coins < 50) {
-                            errorMessage = "Minimum payout is 50 Coins (₹5.00 INR)."
+                        if (coins < 200) {
+                            errorMessage = "Minimum payout is 200 Coins (₹10.00 INR)."
                             return@Button
                         }
                         if (coins > currentBalance) {

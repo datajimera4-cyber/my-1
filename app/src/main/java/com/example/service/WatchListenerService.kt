@@ -145,6 +145,9 @@ class WatchListenerService : NotificationListenerService() {
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         if (sbn?.packageName == YOUTUBE_PACKAGE) {
             val extras = sbn.notification?.extras ?: return
+            val hasMediaSession = extras.containsKey(android.app.Notification.EXTRA_MEDIA_SESSION) ||
+                    sbn.notification?.category == android.app.Notification.CATEGORY_TRANSPORT
+            if (!hasMediaSession) return
             val title = extras.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString()
             val text = extras.getCharSequence(android.app.Notification.EXTRA_TEXT)?.toString()
             if (!title.isNullOrBlank()) {

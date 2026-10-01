@@ -1,6 +1,7 @@
 package com.example.admin
 
 import android.util.Log
+import com.example.data.AdminPostItem
 import com.example.data.DataStoreManager
 import com.example.data.PayoutRequest
 import com.example.data.PayoutStatus
@@ -76,6 +77,7 @@ object CloudDriveServerManager {
             val localTasks = dataStoreManager.videoTasksFlow.first()
             val localPayouts = dataStoreManager.payoutRequestsFlow.first()
             val localUsers = dataStoreManager.usersFlow.first()
+            val localPosts = dataStoreManager.adminPostsFlow.first()
 
             val syncPayload = JSONObject().apply {
                 put("action", "sync_all")
@@ -93,9 +95,25 @@ object CloudDriveServerManager {
                         put("selectedDurationSeconds", t.selectedDurationSeconds)
                         put("isCompleted", t.isCompleted)
                         put("lockedUntilMillis", t.lockedUntilMillis)
+                        put("createdAt", t.createdAt)
                     })
                 }
                 put("tasks", tasksArr)
+
+                val postsArr = JSONArray()
+                for (post in localPosts) {
+                    postsArr.put(JSONObject().apply {
+                        put("id", post.id)
+                        put("title", post.title)
+                        put("message", post.message)
+                        put("targetTab", post.targetTab)
+                        put("postType", post.postType)
+                        put("actionUrl", post.actionUrl)
+                        put("imageUrl", post.imageUrl)
+                        put("createdAt", post.createdAt)
+                    })
+                }
+                put("posts", postsArr)
 
                 val payoutsArr = JSONArray()
                 for (p in localPayouts) {
@@ -142,8 +160,9 @@ object CloudDriveServerManager {
                                     videoUrl = obj.optString("videoUrl", "https://www.youtube.com"),
                                     thumbnailUrl = obj.optString("thumbnailUrl", ""),
                                     durationSeconds = obj.optInt("durationSeconds", 600),
-                                    rewardCoins = obj.optInt("rewardCoins", 10),
+                                    rewardCoins = obj.optInt("rewardCoins", 5),
                                     selectedDurationSeconds = obj.optInt("selectedDurationSeconds", 180),
+                                    createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
                                     lockedUntilMillis = obj.optLong("lockedUntilMillis", 0L)
                                 )
                                 dataStoreManager.addVideoTask(newTask)
@@ -151,7 +170,28 @@ object CloudDriveServerManager {
                         }
                     }
 
-                    dataStoreManager.setCloudServerStatus("Synced with Google Drive (${localTasks.size} tasks, ${localPayouts.size} payouts)")
+                    val remotePostsArr = json.optJSONArray("posts")
+                    if (remotePostsArr != null && remotePostsArr.length() > 0) {
+                        for (i in 0 until remotePostsArr.length()) {
+                            val obj = remotePostsArr.getJSONObject(i)
+                            val postId = obj.optString("id")
+                            if (postId.isNotBlank() && localPosts.none { it.id == postId }) {
+                                val newPost = AdminPostItem(
+                                    id = postId,
+                                    title = obj.optString("title", "Announcement"),
+                                    message = obj.optString("message", ""),
+                                    targetTab = obj.optString("targetTab", "ALL"),
+                                    postType = obj.optString("postType", "BANNER"),
+                                    actionUrl = obj.optString("actionUrl", ""),
+                                    imageUrl = obj.optString("imageUrl", ""),
+                                    createdAt = obj.optLong("createdAt", System.currentTimeMillis())
+                                )
+                                dataStoreManager.addAdminPost(newPost)
+                            }
+                        }
+                    }
+
+                    dataStoreManager.setCloudServerStatus("Synced with Google Drive (${localTasks.size} tasks, ${localPosts.size} posts)")
                     Pair(true, "Synced successfully with Google Drive! Everything is up to date.")
                 } else {
                     val errMsg = json?.optString("error", "Unknown error from Drive server")
@@ -221,6 +261,7 @@ function saveFileContent(fileName, content) {
 function doGet(e) {
   try {
     var tasks = JSON.parse(getFileContent("tasks.json", "[]"));
+    var posts = JSON.parse(getFileContent("posts.json", "[]"));
     var users = JSON.parse(getFileContent("users.json", "[]"));
     var payouts = JSON.parse(getFileContent("payouts.json", "[]"));
     
@@ -229,6 +270,7 @@ function doGet(e) {
       "server": "Google Drive Cloud Server",
       "folderName": FOLDER_NAME,
       "tasks": tasks,
+      "posts": posts,
       "users": users,
       "payouts": payouts,
       "timestamp": new Date().toISOString()
@@ -249,14 +291,17 @@ function doPost(e) {
     
     if (action === "sync_all") {
       if (postData.tasks) saveFileContent("tasks.json", JSON.stringify(postData.tasks));
+      if (postData.posts) saveFileContent("posts.json", JSON.stringify(postData.posts));
       if (postData.payouts) saveFileContent("payouts.json", JSON.stringify(postData.payouts));
       if (postData.users) saveFileContent("users.json", JSON.stringify(postData.users));
       
       var currentTasks = JSON.parse(getFileContent("tasks.json", "[]"));
+      var currentPosts = JSON.parse(getFileContent("posts.json", "[]"));
       return ContentService.createTextOutput(JSON.stringify({
         "success": true,
         "message": "Data saved to Google Drive",
-        "tasks": currentTasks
+        "tasks": currentTasks,
+        "posts": currentPosts
       })).setMimeType(ContentService.MimeType.JSON);
     }
     

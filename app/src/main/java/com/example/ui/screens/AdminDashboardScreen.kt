@@ -11,6 +11,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -37,6 +38,7 @@ import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Laptop
 import androidx.compose.material.icons.filled.MonetizationOn
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PlayArrow
@@ -86,6 +88,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.example.data.AdminPostItem
 import com.example.data.PayoutRequest
 import com.example.data.PayoutStatus
 import com.example.data.UserProfile
@@ -112,6 +115,7 @@ fun AdminDashboardScreen(
     }
 
     val videoTasks by viewModel.videoTasks.collectAsState()
+    val adminPosts by viewModel.adminPosts.collectAsState()
     val payoutRequests by viewModel.payoutRequests.collectAsState()
     val allUsers by viewModel.allUsers.collectAsState()
     val serverRunning by viewModel.adminServerRunning.collectAsState()
@@ -244,6 +248,12 @@ fun AdminDashboardScreen(
                 Tab(
                     selected = selectedTabIndex == 1,
                     onClick = { selectedTabIndex = 1 },
+                    text = { Text("Posts & Alerts (${adminPosts.size})", fontWeight = FontWeight.Bold) },
+                    icon = { Icon(Icons.Default.Notifications, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                )
+                Tab(
+                    selected = selectedTabIndex == 2,
+                    onClick = { selectedTabIndex = 2 },
                     text = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("Payouts", fontWeight = FontWeight.Bold)
@@ -267,20 +277,20 @@ fun AdminDashboardScreen(
                     icon = { Icon(Icons.Default.Payments, contentDescription = null, modifier = Modifier.size(18.dp)) }
                 )
                 Tab(
-                    selected = selectedTabIndex == 2,
-                    onClick = { selectedTabIndex = 2 },
+                    selected = selectedTabIndex == 3,
+                    onClick = { selectedTabIndex = 3 },
                     text = { Text("Users", fontWeight = FontWeight.Bold) },
                     icon = { Icon(Icons.Default.People, contentDescription = null, modifier = Modifier.size(18.dp)) }
                 )
                 Tab(
-                    selected = selectedTabIndex == 3,
-                    onClick = { selectedTabIndex = 3 },
+                    selected = selectedTabIndex == 4,
+                    onClick = { selectedTabIndex = 4 },
                     text = { Text("PC / Laptop", fontWeight = FontWeight.Bold) },
                     icon = { Icon(Icons.Default.Laptop, contentDescription = null, modifier = Modifier.size(18.dp)) }
                 )
                 Tab(
-                    selected = selectedTabIndex == 4,
-                    onClick = { selectedTabIndex = 4 },
+                    selected = selectedTabIndex == 5,
+                    onClick = { selectedTabIndex = 5 },
                     text = { Text("Google Drive Server", fontWeight = FontWeight.Bold) },
                     icon = { Icon(Icons.Default.Cloud, contentDescription = null, modifier = Modifier.size(18.dp)) }
                 )
@@ -293,12 +303,20 @@ fun AdminDashboardScreen(
                     onAddTask = { showAddTaskDialog = true },
                     onDeleteTask = { viewModel.adminDeleteTask(it) }
                 )
-                1 -> PayoutsTabContent(
+                1 -> AdminPostsTabContent(
+                    posts = adminPosts,
+                    onPublishPost = { title, msg, tab, type, actionUrl, imgUrl ->
+                        viewModel.addAdminPost(title, msg, tab, type, actionUrl, imgUrl)
+                        Toast.makeText(context, "Published to $tab tab & sent instant notification!", Toast.LENGTH_SHORT).show()
+                    },
+                    onDeletePost = { viewModel.deleteAdminPost(it) }
+                )
+                2 -> PayoutsTabContent(
                     requests = payoutRequests,
                     onApprove = { id, note -> viewModel.approvePayout(id, note) },
                     onReject = { id, reason -> viewModel.rejectPayout(id, reason) }
                 )
-                2 -> UsersTabContent(
+                3 -> UsersTabContent(
                     users = allUsers,
                     currentBalance = walletBalance,
                     onAdjustCoins = { user ->
@@ -306,13 +324,13 @@ fun AdminDashboardScreen(
                         adjustCoinsInput = user.coinsBalance.toString()
                     }
                 )
-                3 -> LaptopAccessTabContent(
+                4 -> LaptopAccessTabContent(
                     context = context,
                     serverRunning = serverRunning,
                     serverUrl = serverUrl,
                     onToggleServer = { enabled -> viewModel.toggleAdminServer(context, enabled) }
                 )
-                4 -> GoogleDriveServerTabContent(
+                5 -> GoogleDriveServerTabContent(
                     context = context,
                     cloudServerUrl = cloudServerUrl,
                     cloudServerStatus = cloudServerStatus,
@@ -1100,6 +1118,268 @@ private fun GoogleDriveServerTabContent(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     lineHeight = 18.sp
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdminPostsTabContent(
+    posts: List<AdminPostItem>,
+    onPublishPost: (title: String, message: String, targetTab: String, postType: String, actionUrl: String, imageUrl: String) -> Unit,
+    onDeletePost: (String) -> Unit
+) {
+    var titleInput by remember { mutableStateOf("") }
+    var messageInput by remember { mutableStateOf("") }
+    var selectedTargetTab by remember { mutableStateOf("ALL") }
+    var selectedPostType by remember { mutableStateOf("BANNER") }
+    var actionUrlInput by remember { mutableStateOf("") }
+    var imageUrlInput by remember { mutableStateOf("") }
+
+    val targetTabs = listOf(
+        "ALL" to "All Tabs",
+        "HOME" to "Home Tab",
+        "TASKS" to "Tasks Tab",
+        "WALLET" to "Wallet Tab",
+        "ME" to "Profile Tab"
+    )
+    val postTypes = listOf(
+        "BANNER" to "📢 Banner",
+        "ALERT" to "🚨 Popup Alert",
+        "POST" to "📌 Post Card"
+    )
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item {
+            Card(
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = Slate800),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "Publish Banner, Post or Alert to User App",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color.White
+                    )
+                    Text(
+                        text = "Select any tab in the User App to display a custom banner, post, or popup alert. Users receive an instant push notification as soon as you publish!",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White.copy(alpha = 0.72f)
+                    )
+
+                    Text(
+                        text = "1. Select User App Tab:",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = AmberPrimary
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        targetTabs.forEach { (key, label) ->
+                            val isSelected = selectedTargetTab == key
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSelected) AmberPrimary else Color.White.copy(alpha = 0.08f))
+                                    .clickable { selectedTargetTab = key }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = label.substringBefore(" "),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isSelected) Color.Black else Color.White
+                                )
+                            }
+                        }
+                    }
+
+                    Text(
+                        text = "2. Select Display Type:",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = AmberPrimary
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        postTypes.forEach { (key, label) ->
+                            val isSelected = selectedPostType == key
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(
+                                        when {
+                                            isSelected && key == "ALERT" -> AlertRed
+                                            isSelected -> AmberPrimary
+                                            else -> Color.White.copy(alpha = 0.08f)
+                                        }
+                                    )
+                                    .clickable { selectedPostType = key }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = label,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isSelected && key != "ALERT") Color.Black else Color.White
+                                )
+                            }
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = titleInput,
+                        onValueChange = { titleInput = it },
+                        label = { Text("Banner / Alert Heading *") },
+                        placeholder = { Text("e.g. 🔥 Special Weekend Bonus Live!") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = messageInput,
+                        onValueChange = { messageInput = it },
+                        label = { Text("Message / Announcement Text *") },
+                        placeholder = { Text("Enter message to show on the selected User App tab...") },
+                        minLines = 2,
+                        maxLines = 4,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = imageUrlInput,
+                        onValueChange = { imageUrlInput = it },
+                        label = { Text("Banner Image URL (Optional)") },
+                        placeholder = { Text("https://example.com/banner.jpg") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = actionUrlInput,
+                        onValueChange = { actionUrlInput = it },
+                        label = { Text("Click Action Link URL (Optional)") },
+                        placeholder = { Text("https://t.me/yourchannel or YouTube link") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Button(
+                        onClick = {
+                            if (titleInput.isNotBlank()) {
+                                onPublishPost(
+                                    titleInput,
+                                    messageInput,
+                                    selectedTargetTab,
+                                    selectedPostType,
+                                    actionUrlInput,
+                                    imageUrlInput
+                                )
+                                titleInput = ""
+                                messageInput = ""
+                                actionUrlInput = ""
+                                imageUrlInput = ""
+                            }
+                        },
+                        enabled = titleInput.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                    ) {
+                        Icon(Icons.Default.Notifications, contentDescription = null, tint = Color.Black)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Publish to $selectedTargetTab & Notify Users",
+                            color = Color.Black,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                }
+            }
+        }
+
+        item {
+            Text(
+                text = "Active Banners, Posts & Alerts (${posts.size})",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        items(posts, key = { it.id }) { post ->
+            Card(
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .background(
+                                        if (post.postType == "ALERT") AlertRed.copy(alpha = 0.2f) else AmberPrimary.copy(alpha = 0.2f),
+                                        RoundedCornerShape(6.dp)
+                                    )
+                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "${post.postType} • Tab: ${post.targetTab}",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (post.postType == "ALERT") AlertRed else AmberPrimary
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = post.title,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        if (post.message.isNotBlank()) {
+                            Text(
+                                text = post.message,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    IconButton(onClick = { onDeletePost(post.id) }) {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = "Delete Post",
+                            tint = AlertRed
+                        )
+                    }
+                }
             }
         }
     }
