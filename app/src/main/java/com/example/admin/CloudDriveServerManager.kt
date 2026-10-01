@@ -29,15 +29,15 @@ object CloudDriveServerManager {
     private val syncMutex = Mutex()
 
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(12, TimeUnit.SECONDS)
         .followRedirects(true)
         .followSslRedirects(true)
         .build()
 
     private val noRedirectClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(12, TimeUnit.SECONDS)
         .followRedirects(false)
         .followSslRedirects(false)
         .build()
@@ -98,32 +98,45 @@ object CloudDriveServerManager {
     suspend fun syncData(
         serverUrl: String,
         dataStoreManager: DataStoreManager,
-        pushAdminContent: Boolean = (BuildConfig.APP_ROLE == "ADMIN")
+        pushAdminContent: Boolean = (BuildConfig.APP_ROLE == "ADMIN"),
+        pushLocalChanges: Boolean = true,
+        pullRemoteFirst: Boolean = true
     ): Pair<Boolean, String> = withContext(Dispatchers.IO) {
         val cleanUrl = serverUrl.trim()
         if (cleanUrl.isBlank()) {
             return@withContext Pair(false, "Server URL not configured.")
         }
 
+        // Background read-only polls should never queue up or block user-initiated sync/login
+        if (!pushLocalChanges && syncMutex.isLocked) {
+            return@withContext Pair(true, "Sync already in progress")
+        }
+
         syncMutex.withLock {
             try {
                 val isAdminRole = BuildConfig.APP_ROLE == "ADMIN"
+                var getCode = 200
+                var getSucceeded = false
+                var remoteJson: JSONObject? = null
 
-                // STEP 1: Fetch current authoritative server state via GET
-                val getReq = Request.Builder()
-                    .url(cleanUrl)
-                    .header("User-Agent", USER_AGENT)
-                    .header("Accept", "application/json, text/plain, */*")
-                    .get()
-                    .build()
-                val getRes = httpClient.newCall(getReq).execute()
-                val getCode = getRes.code
-                val getBody = getRes.body?.string() ?: ""
-                val getFinalUrl = getRes.request.url.toString()
-                val getSucceeded = getRes.isSuccessful && !getFinalUrl.contains("accounts.google.com")
-                val remoteJson = if (getSucceeded) {
-                    try { JSONObject(getBody) } catch (_: Exception) { null }
-                } else null
+                if (pullRemoteFirst || !pushLocalChanges) {
+                    // STEP 1: Fast GET to fetch latest server state
+                    val getReq = Request.Builder()
+                        .url(cleanUrl)
+                        .header("User-Agent", USER_AGENT)
+                        .header("Accept", "application/json, text/plain, */*")
+                        .get()
+                        .build()
+                    val getRes = httpClient.newCall(getReq).execute()
+                    getCode = getRes.code
+                    val getBody = getRes.body?.string() ?: ""
+                    val getFinalUrl = getRes.request.url.toString()
+                    getRes.close()
+                    getSucceeded = getRes.isSuccessful && !getFinalUrl.contains("accounts.google.com")
+                    remoteJson = if (getSucceeded) {
+                        try { JSONObject(getBody) } catch (_: Exception) { null }
+                    } else null
+                }
 
                 val deletedTaskIds = dataStoreManager.deletedTaskIdsFlow.first()
 
@@ -259,12 +272,30 @@ object CloudDriveServerManager {
                     }
                 }
 
-                // STEP 2: Push merged state back to Google Drive
                 val updatedTasks = dataStoreManager.videoTasksFlow.first()
                 val updatedPosts = dataStoreManager.adminPostsFlow.first()
                 val updatedUsers = dataStoreManager.usersFlow.first()
                 val updatedPayouts = dataStoreManager.payoutRequestsFlow.first()
 
+                // Fast path: if only pulling updates (e.g., background poll or initial login fetch), return immediately after GET!
+                if (!pushLocalChanges) {
+                    return@withLock if (getSucceeded) {
+                        dataStoreManager.setCloudServerStatus(
+                            "Live Connected (${updatedTasks.size} tasks, ${updatedUsers.size} users)"
+                        )
+                        Pair(true, "Connected & Synced with Google Drive!")
+                    } else if (getCode == 403 || getCode == 401) {
+                        dataStoreManager.setCloudServerStatus("Permission Needed (Set 'Anyone' in Script)")
+                        Pair(
+                            false,
+                            "HTTP 403: Google Script mein 'Deploy -> Manage deployments -> Edit (✏️)' par jaakar 'Who has access' ko 'Anyone' karein!"
+                        )
+                    } else {
+                        Pair(false, "Server HTTP error $getCode")
+                    }
+                }
+
+                // STEP 2: Push merged state back to Google Drive
                 val syncPayload = JSONObject().apply {
                     put("action", "sync_all")
                     put("role", BuildConfig.APP_ROLE)
@@ -369,20 +400,9 @@ object CloudDriveServerManager {
                 if (initialCode in 301..308 && !redirectLocation.isNullOrBlank()) {
                     initialPostRes.close()
                     if (redirectLocation.contains("script.googleusercontent.com")) {
-                        // Google Apps Script executes doPost(e) BEFORE returning 302 to script.googleusercontent.com!
+                        // Google Apps Script executes doPost(e) synchronously BEFORE returning 302 to script.googleusercontent.com!
+                        // Skipping the second GET to the echo URL cuts POST latency in half.
                         postSucceeded = true
-                        try {
-                            val echoReq = Request.Builder()
-                                .url(redirectLocation)
-                                .header("User-Agent", USER_AGENT)
-                                .get()
-                                .build()
-                            val echoRes = httpClient.newCall(echoReq).execute()
-                            if (echoRes.isSuccessful) {
-                                postBody = echoRes.body?.string() ?: ""
-                            }
-                            echoRes.close()
-                        } catch (_: Exception) {}
                     } else if (redirectLocation.contains("accounts.google.com")) {
                         finalPostCode = 403
                     } else {
@@ -395,10 +415,12 @@ object CloudDriveServerManager {
                         finalPostCode = followRes.code
                         postBody = followRes.body?.string() ?: ""
                         postSucceeded = followRes.isSuccessful && !followRes.request.url.toString().contains("accounts.google.com")
+                        followRes.close()
                     }
                 } else {
                     postBody = initialPostRes.body?.string() ?: ""
                     postSucceeded = initialPostRes.isSuccessful
+                    initialPostRes.close()
                 }
 
                 if (postSucceeded || getSucceeded) {

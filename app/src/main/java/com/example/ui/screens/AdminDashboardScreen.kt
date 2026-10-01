@@ -880,7 +880,9 @@ private fun GoogleDriveServerTabContent(
     onTestConnection: ((Boolean, String) -> Unit) -> Unit,
     onSyncNow: ((Boolean, String) -> Unit) -> Unit
 ) {
-    var urlInput by remember(cloudServerUrl) { mutableStateOf(cloudServerUrl) }
+    var urlInput by remember(cloudServerUrl) {
+        mutableStateOf(cloudServerUrl.ifBlank { com.example.data.DataStoreManager.DEFAULT_ADMIN_CLOUD_SERVER_URL })
+    }
     var isTesting by remember { mutableStateOf(false) }
     var isSyncing by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }

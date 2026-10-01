@@ -21,12 +21,25 @@ class DataStoreManager(private val context: Context) {
 
     companion object {
         // =========================================================================
-        // DEFAULT GOOGLE DRIVE SERVER URL
-        // Future mein agar aapko Google Apps Script ka link change karna ho,
-        // to bas neeche wali line mein naya "/exec" URL daal dein:
+        // 1. ADMIN APP DEFAULT GOOGLE DRIVE SERVER URL ("Kingo Admin")
+        // Future mein Admin App ka link code se change karne ke liye yahan badlein:
         // =========================================================================
-        const val DEFAULT_CLOUD_SERVER_URL =
+        const val DEFAULT_ADMIN_CLOUD_SERVER_URL =
             "https://script.google.com/macros/s/AKfycbzeuvE2McdDn-PAw9CNUHs_QkoIbk7R4oAFtrk8c-RKmJX9r0a8p_xEqaS6bLV6FuW3/exec"
+
+        // =========================================================================
+        // 2. USER APP DEFAULT GOOGLE DRIVE SERVER URL ("Kingo King")
+        // Future mein User App ka link code se change karne ke liye yahan badlein:
+        // =========================================================================
+        const val DEFAULT_USER_CLOUD_SERVER_URL =
+            "https://script.google.com/macros/s/AKfycbzeuvE2McdDn-PAw9CNUHs_QkoIbk7R4oAFtrk8c-RKmJX9r0a8p_xEqaS6bLV6FuW3/exec"
+
+        val DEFAULT_CLOUD_SERVER_URL: String
+            get() = if (com.example.BuildConfig.APP_ROLE == "ADMIN") {
+                DEFAULT_ADMIN_CLOUD_SERVER_URL
+            } else {
+                DEFAULT_USER_CLOUD_SERVER_URL
+            }
 
         private val KEY_WALLET_BALANCE = intPreferencesKey("wallet_balance")
         private val KEY_TASK_COMPLETED = booleanPreferencesKey("task_completed")

@@ -247,7 +247,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         com.example.admin.CloudDriveServerManager.syncData(
                             serverUrl = url,
                             dataStoreManager = dataStoreManager,
-                            pushAdminContent = false
+                            pushAdminContent = false,
+                            pushLocalChanges = false
                         )
                     } catch (_: Exception) {}
                 }
@@ -490,42 +491,81 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun signUp(email: String, password: String, name: String, onResult: (Boolean, String) -> Unit) {
         viewModelScope.launch {
-            val url = cloudServerUrl.value
-            if (url.isNotBlank()) {
-                try {
-                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager, pushAdminContent = false)
-                } catch (_: Exception) {}
-            }
             val res = dataStoreManager.signUpUser(email, password, name)
-            if (res.first && url.isNotBlank()) {
-                try {
-                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager, pushAdminContent = false)
-                } catch (_: Exception) {}
-            }
+            // Immediately return result so UI transitions instantly without waiting for slow Drive file locks
             onResult(res.first, res.second)
             if (res.first) {
-                WatchSessionRepository.addLog("User signed up & synced to Drive: $email", LogType.SUCCESS)
+                WatchSessionRepository.addLog("User signed up: $email (syncing to Drive in background)", LogType.SUCCESS)
+                val url = cloudServerUrl.value
+                if (url.isNotBlank()) {
+                    launch {
+                        try {
+                            com.example.admin.CloudDriveServerManager.syncData(
+                                serverUrl = url,
+                                dataStoreManager = dataStoreManager,
+                                pushAdminContent = false,
+                                pushLocalChanges = true
+                            )
+                        } catch (_: Exception) {}
+                    }
+                }
             }
         }
     }
 
     fun login(email: String, password: String, onResult: (Boolean, String) -> Unit) {
         viewModelScope.launch {
+            // 1. Try instant local login first (< 10ms)
+            val localRes = dataStoreManager.loginUser(email, password)
             val url = cloudServerUrl.value
+
+            if (localRes.first) {
+                onResult(true, localRes.second)
+                WatchSessionRepository.addLog("User logged in instantly: $email", LogType.SUCCESS)
+                if (url.isNotBlank()) {
+                    launch {
+                        try {
+                            com.example.admin.CloudDriveServerManager.syncData(
+                                serverUrl = url,
+                                dataStoreManager = dataStoreManager,
+                                pushAdminContent = false,
+                                pushLocalChanges = true
+                            )
+                        } catch (_: Exception) {}
+                    }
+                }
+                return@launch
+            }
+
+            // 2. If account not yet cached on this phone, do a single fast GET-only pull from Drive
             if (url.isNotBlank()) {
                 try {
-                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager, pushAdminContent = false)
+                    com.example.admin.CloudDriveServerManager.syncData(
+                        serverUrl = url,
+                        dataStoreManager = dataStoreManager,
+                        pushAdminContent = false,
+                        pushLocalChanges = false
+                    )
                 } catch (_: Exception) {}
             }
-            val res = dataStoreManager.loginUser(email, password)
-            if (res.first && url.isNotBlank()) {
-                try {
-                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager, pushAdminContent = false)
-                } catch (_: Exception) {}
-            }
-            onResult(res.first, res.second)
-            if (res.first) {
+
+            val remoteRes = dataStoreManager.loginUser(email, password)
+            onResult(remoteRes.first, remoteRes.second)
+            if (remoteRes.first) {
                 WatchSessionRepository.addLog("User logged in & loaded Drive profile: $email", LogType.SUCCESS)
+                if (url.isNotBlank()) {
+                    launch {
+                        try {
+                            com.example.admin.CloudDriveServerManager.syncData(
+                                serverUrl = url,
+                                dataStoreManager = dataStoreManager,
+                                pushAdminContent = false,
+                                pushLocalChanges = true,
+                                pullRemoteFirst = false
+                            )
+                        } catch (_: Exception) {}
+                    }
+                }
             }
         }
     }
@@ -765,13 +805,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun syncWithGoogleDriveServer(onResult: (Boolean, String) -> Unit) {
-        val url = cloudServerUrl.value
+        val url = cloudServerUrl.value.ifBlank { DataStoreManager.DEFAULT_CLOUD_SERVER_URL }
         if (url.isBlank()) {
             onResult(false, "Please enter your Google Drive Web App URL first.")
             return
         }
         viewModelScope.launch {
-            val res = com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager)
+            val isAdmin = com.example.BuildConfig.APP_ROLE == "ADMIN"
+            val shouldPush = isAdmin || currentUser.value != null
+            val res = com.example.admin.CloudDriveServerManager.syncData(
+                serverUrl = url,
+                dataStoreManager = dataStoreManager,
+                pushAdminContent = isAdmin,
+                pushLocalChanges = shouldPush
+            )
             onResult(res.first, res.second)
             if (res.first) {
                 WatchSessionRepository.addLog("Sync with Google Drive successful!", LogType.SUCCESS)
