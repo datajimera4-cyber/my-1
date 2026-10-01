@@ -31,6 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ContentCopy
@@ -84,6 +85,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -102,6 +104,8 @@ import com.example.ui.theme.SuccessGreen
 import com.example.util.TimeFormatter
 import com.example.viewmodel.MainViewModel
 import java.util.Locale
+
+private val PrimaryBlue = Color(0xFF3B82F6)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -315,11 +319,22 @@ fun AdminDashboardScreen(
                 )
                 2 -> PayoutsTabContent(
                     requests = payoutRequests,
-                    onApprove = { id, note -> viewModel.approvePayout(id, note) },
-                    onReject = { id, reason -> viewModel.rejectPayout(id, reason) }
+                    onApprove = { id, note ->
+                        viewModel.approvePayout(id, note)
+                        Toast.makeText(context, "Payout Approved! Tap 'Done' after sending payment.", Toast.LENGTH_SHORT).show()
+                    },
+                    onComplete = { id, note ->
+                        viewModel.completePayout(id, note)
+                        Toast.makeText(context, "Payment marked as DONE! User notified.", Toast.LENGTH_SHORT).show()
+                    },
+                    onReject = { id, reason ->
+                        viewModel.rejectPayout(id, reason)
+                        Toast.makeText(context, "Payout Rejected & Coins Refunded.", Toast.LENGTH_SHORT).show()
+                    }
                 )
                 3 -> UsersTabContent(
                     users = allUsers,
+                    tasks = videoTasks,
                     currentBalance = walletBalance,
                     onAdjustCoins = { user ->
                         adjustCoinsUser = user
@@ -576,6 +591,7 @@ private fun TasksTabContent(
 private fun PayoutsTabContent(
     requests: List<PayoutRequest>,
     onApprove: (String, String) -> Unit,
+    onComplete: (String, String) -> Unit,
     onReject: (String, String) -> Unit
 ) {
     LazyColumn(
@@ -603,6 +619,10 @@ private fun PayoutsTabContent(
             }
         } else {
             items(requests, key = { it.id }) { req ->
+                val safeCoins = if (req.amountCoins > 0) req.amountCoins else (req.amountInr * com.example.data.COINS_PER_INR).toInt().coerceAtLeast(1000)
+                val safeInr = if (req.amountInr > 0.0) req.amountInr else (safeCoins.toDouble() / com.example.data.COINS_PER_INR)
+                val formattedInr = String.format(Locale.US, "%.2f", safeInr)
+
                 Card(
                     shape = RoundedCornerShape(14.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -624,7 +644,8 @@ private fun PayoutsTabContent(
                                     .background(
                                         when (req.status) {
                                             PayoutStatus.PENDING -> AmberPrimary.copy(alpha = 0.2f)
-                                            PayoutStatus.APPROVED -> SuccessGreen.copy(alpha = 0.2f)
+                                            PayoutStatus.APPROVED -> PrimaryBlue.copy(alpha = 0.2f)
+                                            PayoutStatus.COMPLETED -> SuccessGreen.copy(alpha = 0.2f)
                                             PayoutStatus.REJECTED -> AlertRed.copy(alpha = 0.2f)
                                         },
                                         RoundedCornerShape(6.dp)
@@ -632,12 +653,18 @@ private fun PayoutsTabContent(
                                     .padding(horizontal = 8.dp, vertical = 3.dp)
                             ) {
                                 Text(
-                                    text = req.status.name,
+                                    text = when (req.status) {
+                                        PayoutStatus.PENDING -> "PENDING"
+                                        PayoutStatus.APPROVED -> "APPROVED • PAYING"
+                                        PayoutStatus.COMPLETED -> "DONE (PAID ✓)"
+                                        PayoutStatus.REJECTED -> "REJECTED"
+                                    },
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.ExtraBold,
                                     color = when (req.status) {
                                         PayoutStatus.PENDING -> AmberDark
-                                        PayoutStatus.APPROVED -> SuccessGreen
+                                        PayoutStatus.APPROVED -> PrimaryBlue
+                                        PayoutStatus.COMPLETED -> SuccessGreen
                                         PayoutStatus.REJECTED -> AlertRed
                                     }
                                 )
@@ -648,16 +675,19 @@ private fun PayoutsTabContent(
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "${req.amountCoins} Coins → ₹${String.format(Locale.US, "%.2f", req.amountInr)} INR",
-                                fontWeight = FontWeight.Bold,
-                                color = SuccessGreen
+                                text = "$safeCoins Coins → ₹$formattedInr INR",
+                                fontWeight = FontWeight.ExtraBold,
+                                color = SuccessGreen,
+                                fontSize = 14.sp
                             )
                             Text(
                                 text = "${req.method}: ${req.destination}",
                                 fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -665,39 +695,96 @@ private fun PayoutsTabContent(
                         if (!req.adminNote.isNullOrBlank()) {
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "Note: ${req.adminNote}",
+                                text = "Status Note: ${req.adminNote}",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
 
-                        if (req.status == PayoutStatus.PENDING) {
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
+                        when (req.status) {
+                            PayoutStatus.PENDING -> {
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Button(
+                                        onClick = {
+                                            onApprove(
+                                                req.id,
+                                                "Approved $safeCoins Coins (₹$formattedInr) via ${req.method}"
+                                            )
+                                        },
+                                        modifier = Modifier.weight(1f).height(42.dp),
+                                        shape = RoundedCornerShape(8.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary)
+                                    ) {
+                                        Icon(Icons.Default.Check, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Approve ($safeCoins c)", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    }
+
+                                    OutlinedButton(
+                                        onClick = { onReject(req.id, "Declined by Admin") },
+                                        modifier = Modifier.weight(1f).height(42.dp),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Icon(Icons.Default.Close, contentDescription = null, tint = AlertRed, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Reject & Refund", color = AlertRed, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    }
+                                }
+                            }
+                            PayoutStatus.APPROVED -> {
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(PrimaryBlue.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+                                        .padding(10.dp)
+                                ) {
+                                    Text(
+                                        text = "Step 2: Send ₹$formattedInr ($safeCoins Coins) to ${req.method} (${req.destination}), then tap 'Done (Payment Sent)' below so the user knows payment is completed!",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
                                 Button(
-                                    onClick = { onApprove(req.id, "Approved & Dispatched via ${req.method}") },
-                                    modifier = Modifier.weight(1f).height(40.dp),
+                                    onClick = {
+                                        onComplete(
+                                            req.id,
+                                            "Payment of ₹$formattedInr ($safeCoins Coins) sent to ${req.method}: ${req.destination}"
+                                        )
+                                    },
+                                    modifier = Modifier.fillMaxWidth().height(44.dp),
                                     shape = RoundedCornerShape(8.dp),
                                     colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen)
                                 ) {
-                                    Icon(Icons.Default.Check, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Approve & Pay", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                }
-
-                                OutlinedButton(
-                                    onClick = { onReject(req.id, "Incorrect payment destination") },
-                                    modifier = Modifier.weight(1f).height(40.dp),
-                                    shape = RoundedCornerShape(8.dp)
-                                ) {
-                                    Icon(Icons.Default.Close, contentDescription = null, tint = AlertRed, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Reject & Refund", color = AlertRed, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Done • Payment Sent ($safeCoins Coins = ₹$formattedInr)",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 13.sp
+                                    )
                                 }
                             }
+                            PayoutStatus.COMPLETED -> {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(15.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Payment of $safeCoins Coins (₹$formattedInr) completed & user notified.",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = SuccessGreen
+                                    )
+                                }
+                            }
+                            PayoutStatus.REJECTED -> {}
                         }
                     }
                 }
@@ -709,6 +796,7 @@ private fun PayoutsTabContent(
 @Composable
 private fun UsersTabContent(
     users: List<UserProfile>,
+    tasks: List<VideoTaskItem>,
     currentBalance: Int,
     onAdjustCoins: (UserProfile) -> Unit
 ) {
@@ -720,48 +808,294 @@ private fun UsersTabContent(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        items(effectiveUsers) { user ->
+        items(effectiveUsers, key = { it.email }) { user ->
+            // Parse detailed user task completion, likes, comments & transaction history
+            val completedIdsSet = remember(user.completedTaskIdsJson, user.taskLocksJson, user.transactionsJson, tasks) {
+                val set = mutableSetOf<String>()
+                try {
+                    val arr = org.json.JSONArray(user.completedTaskIdsJson)
+                    for (i in 0 until arr.length()) {
+                        val id = arr.optString(i)
+                        if (id.isNotBlank()) set.add(id)
+                    }
+                } catch (_: Exception) {}
+                try {
+                    val locks = org.json.JSONObject(user.taskLocksJson)
+                    val keys = locks.keys()
+                    while (keys.hasNext()) {
+                        val k = keys.next()
+                        if (locks.optLong(k, 0L) > 0L) set.add(k)
+                    }
+                } catch (_: Exception) {}
+                try {
+                    val txArr = org.json.JSONArray(user.transactionsJson)
+                    for (i in 0 until txArr.length()) {
+                        val txObj = txArr.optJSONObject(i) ?: continue
+                        val txTitle = txObj.optString("title", "")
+                        if (txTitle.contains("Continuous Watch", ignoreCase = true) || txTitle.contains("continuous watch", ignoreCase = true)) {
+                            tasks.forEach { t ->
+                                if (txTitle.contains(t.title, ignoreCase = true)) {
+                                    set.add(t.id)
+                                }
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+                set
+            }
+
+            val likedTaskIdsSet = remember(user.likedTasksJson) {
+                val set = mutableSetOf<String>()
+                try {
+                    val arr = org.json.JSONArray(user.likedTasksJson)
+                    for (i in 0 until arr.length()) {
+                        val id = arr.optString(i)
+                        if (id.isNotBlank()) set.add(id)
+                    }
+                } catch (_: Exception) {}
+                set
+            }
+
+            val commentCountsMap = remember(user.commentCountsJson) {
+                val map = mutableMapOf<String, Int>()
+                try {
+                    val obj = org.json.JSONObject(user.commentCountsJson)
+                    val keys = obj.keys()
+                    while (keys.hasNext()) {
+                        val k = keys.next()
+                        val count = obj.optInt(k, 0)
+                        if (count > 0) map[k] = count
+                    }
+                } catch (_: Exception) {}
+                map
+            }
+
+            val recentTransactions = remember(user.transactionsJson) {
+                val list = mutableListOf<Triple<String, Int, Long>>()
+                try {
+                    val arr = org.json.JSONArray(user.transactionsJson)
+                    for (i in 0 until minOf(arr.length(), 8)) {
+                        val obj = arr.optJSONObject(i) ?: continue
+                        list.add(
+                            Triple(
+                                obj.optString("title", "Activity"),
+                                obj.optInt("coins", 0),
+                                obj.optLong("timestampMillis", 0L)
+                            )
+                        )
+                    }
+                } catch (_: Exception) {}
+                list
+            }
+
+            val completedTasksList = tasks.filter { completedIdsSet.contains(it.id) }
+            val pendingTasksList = tasks.filter { !completedIdsSet.contains(it.id) }
+            val totalCommentsCount = commentCountsMap.values.sum()
+            val totalCompletedStat = maxOf(user.completedTasksCount, completedTasksList.size)
+
             Card(
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 modifier = Modifier.fillMaxWidth().testTag("admin_user_${user.email}")
             ) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Box(
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(42.dp)
+                                .background(AmberPrimary.copy(alpha = 0.2f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.People, contentDescription = null, tint = AmberDark, modifier = Modifier.size(22.dp))
+                        }
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (user.name.isNotBlank()) "${user.name} (${user.email})" else user.email,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                            Text(text = "ID: ${user.userId}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                text = "${user.coinsBalance} Coins (≈ ₹${String.format(Locale.US, "%.2f", user.coinsBalance / com.example.data.COINS_PER_INR.toDouble())})",
+                                fontWeight = FontWeight.ExtraBold,
+                                color = AmberPrimary,
+                                fontSize = 13.sp
+                            )
+                        }
+
+                        OutlinedButton(
+                            onClick = { onAdjustCoins(user) },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(36.dp)
+                        ) {
+                            Text("Edit Coins", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    // Summary Statistics Strip (Completed, Not Completed, Liked, Commented)
+                    Row(
                         modifier = Modifier
-                            .size(42.dp)
-                            .background(AmberPrimary.copy(alpha = 0.2f), CircleShape),
-                        contentAlignment = Alignment.Center
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Icon(Icons.Default.People, contentDescription = null, tint = AmberDark, modifier = Modifier.size(22.dp))
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("✅ Done", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("$totalCompletedStat", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp, color = SuccessGreen)
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("⏳ Pending", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("${pendingTasksList.size}", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp, color = AmberPrimary)
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("👍 Liked", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("${likedTaskIdsSet.size}", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp, color = PrimaryBlue)
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("💬 Comments", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("$totalCommentsCount", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp, color = AmberDark)
+                        }
                     }
 
-                    Spacer(modifier = Modifier.width(12.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(text = user.email, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Text(text = "ID: ${user.userId}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(
-                            text = "${user.coinsBalance} Coins (≈ ₹${String.format(Locale.US, "%.2f", user.coinsBalance / com.example.data.COINS_PER_INR.toDouble())})",
-                            fontWeight = FontWeight.Bold,
-                            color = AmberPrimary,
-                            fontSize = 12.sp
-                        )
+                    // Per-Task Breakdown Table (Which task user completed, didn't complete, liked, commented)
+                    if (tasks.isNotEmpty()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
+                                .padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "📊 User Task-by-Task Statistics:",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = AmberPrimary
+                            )
+                            tasks.forEach { task ->
+                                val isDone = completedIdsSet.contains(task.id)
+                                val isLiked = likedTaskIdsSet.contains(task.id)
+                                val commentCnt = commentCountsMap[task.id] ?: 0
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "• ${task.title}",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .background(
+                                                    if (isDone) SuccessGreen.copy(alpha = 0.18f) else AlertRed.copy(alpha = 0.14f),
+                                                    RoundedCornerShape(4.dp)
+                                                )
+                                                .padding(horizontal = 5.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(
+                                                text = if (isDone) "✓ Completed" else "✗ Not Done",
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isDone) SuccessGreen else AlertRed
+                                            )
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .background(
+                                                    if (isLiked) PrimaryBlue.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surfaceVariant,
+                                                    RoundedCornerShape(4.dp)
+                                                )
+                                                .padding(horizontal = 5.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(
+                                                text = if (isLiked) "👍 Liked" else "👍 No",
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isLiked) PrimaryBlue else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .background(
+                                                    if (commentCnt > 0) AmberPrimary.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant,
+                                                    RoundedCornerShape(4.dp)
+                                                )
+                                                .padding(horizontal = 5.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(
+                                                text = "💬 $commentCnt/2",
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (commentCnt > 0) AmberDark else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
 
-                    OutlinedButton(
-                        onClick = { onAdjustCoins(user) },
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.height(36.dp)
-                    ) {
-                        Text("Edit Coins", fontSize = 11.sp)
+                    // Recent Activity Log for this user
+                    if (recentTransactions.isNotEmpty()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f), RoundedCornerShape(10.dp))
+                                .padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "🕒 Recent User Actions & Coin Log:",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            recentTransactions.forEach { (txTitle, txCoins, _) ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = txTitle,
+                                        fontSize = 11.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = if (txCoins >= 0) "+${txCoins}c" else "${txCoins}c",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (txCoins >= 0) SuccessGreen else AlertRed
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }

@@ -263,8 +263,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val notified = dataStoreManager.notifiedItemIdsFlow.first()
                     val newAdminTx = txList.filter { tx ->
                         (tx.id.startsWith("admin_coin_") || tx.title.contains("Admin Balance Update")) &&
-                                !notified.contains(tx.id) &&
-                                (System.currentTimeMillis() - tx.timestampMillis) < 10 * 60 * 1000L
+                                !notified.contains(tx.id)
                     }
                     if (newAdminTx.isNotEmpty()) {
                         dataStoreManager.markItemsNotified(newAdminTx.map { it.id }.toSet())
@@ -280,49 +279,96 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Real-time watcher for newly added Admin Tasks -> trigger instant User App notification
+        // Real-time watcher for Payout Status transitions (APPROVED / COMPLETED / REJECTED) -> notify User App
         viewModelScope.launch {
-            val defaultTaskIds = setOf("default_rick", "default_android15", "default_kotlin_course", "default_lofi_live")
-            dataStoreManager.videoTasksFlow.collectLatest { tasks ->
-                val notified = dataStoreManager.notifiedItemIdsFlow.first()
-                val newlyAdded = tasks.filter { t ->
-                    !defaultTaskIds.contains(t.id) && !notified.contains(t.id) &&
-                            (System.currentTimeMillis() - t.createdAt) < 10 * 60 * 1000L
-                }
-                if (newlyAdded.isNotEmpty()) {
-                    dataStoreManager.markItemsNotified(newlyAdded.map { it.id }.toSet())
-                    val newest = newlyAdded.first()
-                    com.example.service.NotificationChannels.sendAdminUpdateNotification(
-                        context = getApplication(),
-                        title = "🎬 New Watch Task Added! (+${newest.rewardCoins} Coins)",
-                        body = "\"${newest.title}\" by ${newest.channelName} is now live. Watch & earn coins now!"
-                    )
+            dataStoreManager.payoutRequestsFlow.collectLatest { payouts ->
+                if (com.example.BuildConfig.APP_ROLE != "ADMIN") {
+                    val currentEmail = currentUser.value?.email ?: return@collectLatest
+                    val notified = dataStoreManager.notifiedItemIdsFlow.first()
+                    for (req in payouts) {
+                        if (!req.userEmail.equals(currentEmail, ignoreCase = true)) continue
+                        if (req.status != com.example.data.PayoutStatus.PENDING) {
+                            val statusNotifyKey = "payout_${req.id}_${req.status.name}"
+                            if (!notified.contains(statusNotifyKey)) {
+                                dataStoreManager.markItemsNotified(setOf(statusNotifyKey))
+                                val safeCoins = if (req.amountCoins > 0) req.amountCoins else (req.amountInr * 100).toInt()
+                                val inrStr = String.format(java.util.Locale.US, "%.2f", req.amountInr)
+                                when (req.status) {
+                                    com.example.data.PayoutStatus.APPROVED -> {
+                                        com.example.service.NotificationChannels.sendAdminUpdateNotification(
+                                            context = getApplication(),
+                                            title = "✅ Withdrawal Approved ($safeCoins Coins = ₹$inrStr)",
+                                            body = "Admin approved your ₹$inrStr withdrawal via ${req.method}. Payment will be marked Done once transferred!"
+                                        )
+                                    }
+                                    com.example.data.PayoutStatus.COMPLETED -> {
+                                        com.example.service.NotificationChannels.sendAdminUpdateNotification(
+                                            context = getApplication(),
+                                            title = "🎉 Payment Done! ₹$inrStr Sent",
+                                            body = "Your withdrawal of $safeCoins Coins (₹$inrStr) has been paid to ${req.method} (${req.destination})."
+                                        )
+                                    }
+                                    com.example.data.PayoutStatus.REJECTED -> {
+                                        com.example.service.NotificationChannels.sendAdminUpdateNotification(
+                                            context = getApplication(),
+                                            title = "❌ Withdrawal Declined (+$safeCoins Coins Refunded)",
+                                            body = "${req.adminNote ?: "Declined by Admin"} • Coins returned to your wallet."
+                                        )
+                                    }
+                                    else -> {}
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        // Real-time watcher for newly added Admin Posts / Banners / Alerts -> trigger instant User App notification
+        // Real-time watcher for newly added Admin Tasks -> trigger instant User App notification ONLY on User App
+        viewModelScope.launch {
+            val defaultTaskIds = setOf("default_rick", "default_android15", "default_kotlin_course", "default_lofi_live")
+            dataStoreManager.videoTasksFlow.collectLatest { tasks ->
+                if (com.example.BuildConfig.APP_ROLE != "ADMIN") {
+                    val notified = dataStoreManager.notifiedItemIdsFlow.first()
+                    val newlyAdded = tasks.filter { t ->
+                        !defaultTaskIds.contains(t.id) && !notified.contains(t.id)
+                    }
+                    if (newlyAdded.isNotEmpty()) {
+                        dataStoreManager.markItemsNotified(newlyAdded.map { it.id }.toSet())
+                        val newest = newlyAdded.first()
+                        com.example.service.NotificationChannels.sendAdminUpdateNotification(
+                            context = getApplication(),
+                            title = "🎬 New Watch Task Added! (+${newest.rewardCoins} Coins)",
+                            body = "\"${newest.title}\" by ${newest.channelName} is now live. Watch & earn coins now!"
+                        )
+                    }
+                }
+            }
+        }
+
+        // Real-time watcher for newly added Admin Posts / Banners / Alerts -> trigger instant User App notification ONLY on User App
         viewModelScope.launch {
             val defaultPostIds = setOf("default_welcome_banner")
             dataStoreManager.adminPostsFlow.collectLatest { posts ->
-                val notified = dataStoreManager.notifiedItemIdsFlow.first()
-                val newlyAdded = posts.filter { p ->
-                    !defaultPostIds.contains(p.id) && !notified.contains(p.id) &&
-                            (System.currentTimeMillis() - p.createdAt) < 10 * 60 * 1000L
-                }
-                if (newlyAdded.isNotEmpty()) {
-                    dataStoreManager.markItemsNotified(newlyAdded.map { it.id }.toSet())
-                    val newest = newlyAdded.first()
-                    val prefix = when (newest.postType.uppercase()) {
-                        "ALERT" -> "🚨 Urgent Admin Alert"
-                        "BANNER" -> "📢 New Offer Banner"
-                        else -> "📌 New Admin Post"
+                if (com.example.BuildConfig.APP_ROLE != "ADMIN") {
+                    val notified = dataStoreManager.notifiedItemIdsFlow.first()
+                    val newlyAdded = posts.filter { p ->
+                        !defaultPostIds.contains(p.id) && !notified.contains(p.id)
                     }
-                    com.example.service.NotificationChannels.sendAdminUpdateNotification(
-                        context = getApplication(),
-                        title = "$prefix: ${newest.title}",
-                        body = newest.message.ifBlank { "Tap to view the latest update in ${newest.targetTab} tab!" }
-                    )
+                    if (newlyAdded.isNotEmpty()) {
+                        dataStoreManager.markItemsNotified(newlyAdded.map { it.id }.toSet())
+                        val newest = newlyAdded.first()
+                        val prefix = when (newest.postType.uppercase()) {
+                            "ALERT" -> "🚨 Urgent Admin Alert"
+                            "BANNER" -> "📢 New Offer Banner"
+                            else -> "📌 New Admin Post"
+                        }
+                        com.example.service.NotificationChannels.sendAdminUpdateNotification(
+                            context = getApplication(),
+                            title = "$prefix: ${newest.title}",
+                            body = newest.message.ifBlank { "Tap to view the latest update in ${newest.targetTab} tab!" }
+                        )
+                    }
                 }
             }
         }
@@ -386,11 +432,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     thumbnailUrl = cleanedTask.thumbnailUrl
                 )
             }
-            com.example.service.NotificationChannels.sendAdminUpdateNotification(
-                context = getApplication(),
-                title = "🎬 New Video Task Live! (+${cleanedTask.rewardCoins} Coins)",
-                body = "Watch \"$finalTitle\" ($finalChannel) & earn up to 110 coins + Like/Comment bonus!"
-            )
             val url = cloudServerUrl.value
             if (url.isNotBlank()) {
                 try {
@@ -569,31 +610,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             lastGeneratedOtpCode = otp
             lastOtpGeneratedAtMillis = System.currentTimeMillis()
 
-            // 1. Trigger email dispatch via connected Google Drive Script (if authorized in script)
+            // Dispatch verification OTP email via connected Google Drive Script (MailApp.sendEmail)
             if (url.isNotBlank()) {
-                launch {
-                    try {
-                        com.example.admin.CloudDriveServerManager.sendOtpEmail(
-                            serverUrl = url,
-                            email = cleanEmail,
-                            otpCode = otp,
-                            purpose = if (isPasswordReset) "Password Reset" else "Account Verification"
-                        )
-                    } catch (_: Exception) {}
-                }
+                try {
+                    com.example.admin.CloudDriveServerManager.sendOtpEmail(
+                        serverUrl = url,
+                        email = cleanEmail,
+                        otpCode = otp,
+                        purpose = if (isPasswordReset) "Password Reset" else "Account Verification"
+                    )
+                } catch (_: Exception) {}
             }
-
-            // 2. Dispatch instant system notification with the 6-digit OTP code
-            com.example.service.NotificationChannels.sendAdminUpdateNotification(
-                context = getApplication(),
-                title = "🔐 Kingo King Verification OTP: $otp",
-                body = "Use 6-digit code $otp to verify $cleanEmail (${if (isPasswordReset) "Password Reset" else "New Account"})."
-            )
 
             onResult(
                 true,
-                "6-digit verification code sent for $cleanEmail! Enter the OTP below to continue.",
-                otp
+                "6-digit verification OTP has been sent to $cleanEmail. Please check your Email Inbox (and Spam folder).",
+                null
             )
         }
     }
@@ -718,14 +750,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun logout() {
         viewModelScope.launch {
+            // 1. Immediately clear active session & save user snapshot locally so UI logs out in <10ms
+            dataStoreManager.logoutUser()
+            screenBackStack.clear()
+            _currentScreen.value = AppScreen.HOME
+            WatchSessionRepository.addLog("User logged out", LogType.INFO)
+
+            // 2. Push final user snapshot to Google Drive in the background without blocking logout
             val url = cloudServerUrl.value
             if (url.isNotBlank()) {
-                try {
-                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager, pushAdminContent = false)
-                } catch (_: Exception) {}
+                launch {
+                    try {
+                        com.example.admin.CloudDriveServerManager.syncData(
+                            serverUrl = url,
+                            dataStoreManager = dataStoreManager,
+                            pushAdminContent = false,
+                            pushLocalChanges = true,
+                            pullRemoteFirst = false
+                        )
+                    } catch (_: Exception) {}
+                }
             }
-            dataStoreManager.logoutUser()
-            WatchSessionRepository.addLog("User logged out", LogType.INFO)
         }
     }
 
@@ -733,21 +778,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val success = dataStoreManager.withdrawCoins(coins, method, destination)
             if (success) {
-                val url = cloudServerUrl.value
-                if (url.isNotBlank()) {
-                    try {
-                        com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager, pushAdminContent = false)
-                    } catch (_: Exception) {}
-                }
                 onResult(true, "Payout request submitted! Admin will verify and process.")
                 WatchSessionRepository.addLog("Payout request created: $coins coins to $method ($destination)", LogType.INFO)
+                val url = cloudServerUrl.value
+                if (url.isNotBlank()) {
+                    launch {
+                        try {
+                            com.example.admin.CloudDriveServerManager.syncData(
+                                serverUrl = url,
+                                dataStoreManager = dataStoreManager,
+                                pushAdminContent = false,
+                                pushLocalChanges = true,
+                                pullRemoteFirst = false
+                            )
+                        } catch (_: Exception) {}
+                    }
+                }
             } else {
                 onResult(false, "Insufficient balance or invalid coins amount.")
             }
         }
     }
 
-    fun approvePayout(requestId: String, note: String = "Approved & Dispatched") {
+    fun approvePayout(requestId: String, note: String = "Approved • Payment Processing") {
         viewModelScope.launch {
             dataStoreManager.approvePayout(requestId, note)
             val url = cloudServerUrl.value
@@ -762,7 +815,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 } catch (_: Exception) {}
             }
-            WatchSessionRepository.addLog("Admin: Payout approved for request #$requestId", LogType.SUCCESS)
+            WatchSessionRepository.addLog("Admin: Payout approved for request #$requestId (awaiting payment Done)", LogType.SUCCESS)
+        }
+    }
+
+    fun completePayout(requestId: String, note: String = "Payment Completed & Sent") {
+        viewModelScope.launch {
+            dataStoreManager.completePayout(requestId, note)
+            val url = cloudServerUrl.value
+            if (url.isNotBlank()) {
+                try {
+                    com.example.admin.CloudDriveServerManager.syncData(
+                        serverUrl = url,
+                        dataStoreManager = dataStoreManager,
+                        pushAdminContent = true,
+                        pushLocalChanges = true,
+                        pullRemoteFirst = false
+                    )
+                } catch (_: Exception) {}
+            }
+            WatchSessionRepository.addLog("Admin: Payout marked DONE (paid) for request #$requestId", LogType.SUCCESS)
         }
     }
 
@@ -852,17 +924,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             dataStoreManager.markItemsNotified(setOf(post.id))
             dataStoreManager.addAdminPost(post)
 
-            val prefix = when (post.postType) {
-                "ALERT" -> "🚨 Urgent Admin Alert"
-                "BANNER" -> "📢 New Offer Banner"
-                else -> "📌 New Admin Post"
-            }
-            com.example.service.NotificationChannels.sendAdminUpdateNotification(
-                context = getApplication(),
-                title = "$prefix: ${post.title}",
-                body = post.message.ifBlank { "New update posted in ${post.targetTab} tab!" }
-            )
-
             val url = cloudServerUrl.value
             if (url.isNotBlank()) {
                 try {
@@ -950,13 +1011,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val res = dataStoreManager.recordTaskLike(taskId, taskTitle)
             onResult?.invoke(res.first, res.second)
             if (res.first) {
+                WatchSessionRepository.addLog("Liked video \"$taskTitle\": +5 coins rewarded!", LogType.SUCCESS)
                 val url = cloudServerUrl.value
                 if (url.isNotBlank()) {
-                    try {
-                        com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager, pushAdminContent = false)
-                    } catch (_: Exception) {}
+                    launch {
+                        try {
+                            com.example.admin.CloudDriveServerManager.syncData(
+                                serverUrl = url,
+                                dataStoreManager = dataStoreManager,
+                                pushAdminContent = false,
+                                pushLocalChanges = true,
+                                pullRemoteFirst = false
+                            )
+                        } catch (_: Exception) {}
+                    }
                 }
-                WatchSessionRepository.addLog("Liked video \"$taskTitle\": +5 coins rewarded!", LogType.SUCCESS)
             }
         }
     }
@@ -966,13 +1035,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val res = dataStoreManager.recordTaskComment(taskId, taskTitle)
             onResult?.invoke(res.first, res.second)
             if (res.first) {
+                WatchSessionRepository.addLog("Comment on \"$taskTitle\": +5 coins rewarded!", LogType.SUCCESS)
                 val url = cloudServerUrl.value
                 if (url.isNotBlank()) {
-                    try {
-                        com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager, pushAdminContent = false)
-                    } catch (_: Exception) {}
+                    launch {
+                        try {
+                            com.example.admin.CloudDriveServerManager.syncData(
+                                serverUrl = url,
+                                dataStoreManager = dataStoreManager,
+                                pushAdminContent = false,
+                                pushLocalChanges = true,
+                                pullRemoteFirst = false
+                            )
+                        } catch (_: Exception) {}
+                    }
                 }
-                WatchSessionRepository.addLog("Comment on \"$taskTitle\": +5 coins rewarded!", LogType.SUCCESS)
             }
         }
     }
@@ -1225,16 +1302,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _showSuccessDialog.value = true
             WatchSessionRepository.setCompletedState()
             WatchTimerService.stop(context)
-            val url = cloudServerUrl.value
-            if (url.isNotBlank()) {
-                try {
-                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager, pushAdminContent = false)
-                } catch (_: Exception) {}
-            }
             WatchSessionRepository.addLog(
                 "🎉 Milestone reward claimed: ${milestone.minutes}m watch time = +${milestone.coins} coins!",
                 LogType.SUCCESS
             )
+            val url = cloudServerUrl.value
+            if (url.isNotBlank()) {
+                launch {
+                    try {
+                        com.example.admin.CloudDriveServerManager.syncData(
+                            serverUrl = url,
+                            dataStoreManager = dataStoreManager,
+                            pushAdminContent = false,
+                            pushLocalChanges = true,
+                            pullRemoteFirst = false
+                        )
+                    } catch (_: Exception) {}
+                }
+            }
         }
     }
 
@@ -1293,17 +1378,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (success) {
                 val inr = coins.toDouble() / com.example.data.COINS_PER_INR.toDouble()
                 val formatted = String.format(java.util.Locale.US, "%.2f", inr)
-                val url = cloudServerUrl.value
-                if (url.isNotBlank()) {
-                    try {
-                        com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager, pushAdminContent = false)
-                    } catch (_: Exception) {}
-                }
                 WatchSessionRepository.addLog(
                     "Withdrawal request submitted: $coins coins (₹$formatted INR) to $method: $destination",
                     LogType.SUCCESS
                 )
-                onComplete(true, "Payout request for ₹$formatted INR via $method submitted! It has been sent to the Admin Panel for approval.")
+                onComplete(true, "Payout request for $coins Coins (₹$formatted INR) via $method submitted! Your balance has been deducted and sent to the Admin Panel for approval.")
+                val url = cloudServerUrl.value
+                if (url.isNotBlank()) {
+                    launch {
+                        try {
+                            com.example.admin.CloudDriveServerManager.syncData(
+                                serverUrl = url,
+                                dataStoreManager = dataStoreManager,
+                                pushAdminContent = false,
+                                pushLocalChanges = true,
+                                pullRemoteFirst = false
+                            )
+                        } catch (_: Exception) {}
+                    }
+                }
             } else {
                 onComplete(false, "Payout processing failed. Check wallet balance.")
             }

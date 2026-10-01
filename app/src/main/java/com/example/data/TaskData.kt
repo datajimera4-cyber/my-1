@@ -184,6 +184,7 @@ data class UserProfile(
     val likedTasksJson: String = "[]",
     val commentCountsJson: String = "{}",
     val taskLocksJson: String = "{}",
+    val completedTaskIdsJson: String = "[]",
     val lastUpdatedMillis: Long = System.currentTimeMillis()
 )
 
@@ -193,6 +194,7 @@ data class UserProfile(
 enum class PayoutStatus {
     PENDING,
     APPROVED,
+    COMPLETED,
     REJECTED
 }
 

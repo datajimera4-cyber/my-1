@@ -178,9 +178,9 @@ object CloudDriveServerManager {
                                 )
                             }
                         }
-                        if (!isAdminRole && parsedTasks.isNotEmpty()) {
+                        if (!isAdminRole) {
                             dataStoreManager.syncRemoteTasksFromServer(parsedTasks)
-                        } else if (isAdminRole && !pushAdminContent && parsedTasks.isNotEmpty()) {
+                        } else if (isAdminRole && !pushAdminContent) {
                             dataStoreManager.syncRemoteTasksFromServer(parsedTasks)
                         }
                     }
@@ -211,9 +211,10 @@ object CloudDriveServerManager {
                                 )
                             }
                         }
-                        if (!isAdminRole && parsedPosts.isNotEmpty()) {
+                        // Always sync remote posts even if parsedPosts is empty (when Admin deletes all banners/posts!)
+                        if (!isAdminRole) {
                             dataStoreManager.syncAdminPosts(parsedPosts)
-                        } else if (isAdminRole && !pushAdminContent && parsedPosts.isNotEmpty()) {
+                        } else if (isAdminRole && !pushAdminContent) {
                             dataStoreManager.syncAdminPosts(parsedPosts)
                         }
                     }
@@ -239,6 +240,7 @@ object CloudDriveServerManager {
                                         likedTasksJson = obj.optString("likedTasksJson", "[]"),
                                         commentCountsJson = obj.optString("commentCountsJson", "{}"),
                                         taskLocksJson = obj.optString("taskLocksJson", "{}"),
+                                        completedTaskIdsJson = obj.optString("completedTaskIdsJson", "[]"),
                                         lastUpdatedMillis = obj.optLong("lastUpdatedMillis", 0L)
                                     )
                                 )
@@ -259,13 +261,17 @@ object CloudDriveServerManager {
                             if (id.isNotBlank()) {
                                 val statusStr = obj.optString("status", PayoutStatus.PENDING.name)
                                 val status = try { PayoutStatus.valueOf(statusStr) } catch (_: Exception) { PayoutStatus.PENDING }
+                                val rawCoins = obj.optInt("amountCoins", obj.optInt("coins", 0))
+                                val rawInr = obj.optDouble("amountInr", obj.optDouble("inr", 0.0))
+                                val safeCoins = if (rawCoins > 0) rawCoins else (rawInr * 100.0).toInt()
+                                val safeInr = if (rawInr > 0.0) rawInr else (safeCoins / 100.0)
                                 parsedPayouts.add(
                                     PayoutRequest(
                                         id = id,
                                         userId = obj.optString("userId", ""),
                                         userEmail = obj.optString("userEmail", ""),
-                                        amountCoins = obj.optInt("amountCoins", 0),
-                                        amountInr = obj.optDouble("amountInr", 0.0),
+                                        amountCoins = safeCoins,
+                                        amountInr = safeInr,
                                         method = obj.optString("method", "UPI"),
                                         destination = obj.optString("destination", ""),
                                         status = status,
@@ -365,6 +371,7 @@ object CloudDriveServerManager {
                             put("likedTasksJson", u.likedTasksJson)
                             put("commentCountsJson", u.commentCountsJson)
                             put("taskLocksJson", u.taskLocksJson)
+                            put("completedTaskIdsJson", u.completedTaskIdsJson)
                             put("lastUpdatedMillis", u.lastUpdatedMillis)
                         })
                     }
@@ -477,15 +484,52 @@ object CloudDriveServerManager {
                 put("otp", otpCode)
                 put("purpose", purpose)
             }
+            val separator = if (cleanUrl.contains("?")) "&" else "?"
+            val encodedEmail = java.net.URLEncoder.encode(email.trim(), "UTF-8")
+            val encodedPurpose = java.net.URLEncoder.encode(purpose, "UTF-8")
+            val urlWithParams = "${cleanUrl}${separator}action=send_otp&email=${encodedEmail}&otp=${otpCode}&purpose=${encodedPurpose}"
+
             val body = payload.toString().toRequestBody("text/plain; charset=utf-8".toMediaType())
             val req = Request.Builder()
-                .url(cleanUrl)
+                .url(urlWithParams)
                 .header("User-Agent", USER_AGENT)
+                .header("Accept", "application/json, text/plain, */*")
                 .post(body)
                 .build()
             val res = noRedirectClient.newCall(req).execute()
-            val ok = res.isSuccessful || res.code in 301..308
-            res.close()
+            val code = res.code
+            val redirectLocation = res.header("Location")
+            var responseText = ""
+            var ok = false
+
+            if (code in 301..308 && !redirectLocation.isNullOrBlank()) {
+                res.close()
+                if (!redirectLocation.contains("accounts.google.com")) {
+                    val followReq = Request.Builder()
+                        .url(redirectLocation)
+                        .header("User-Agent", USER_AGENT)
+                        .get()
+                        .build()
+                    val followRes = httpClient.newCall(followReq).execute()
+                    responseText = followRes.body?.string() ?: ""
+                    ok = followRes.isSuccessful
+                    followRes.close()
+                }
+            } else {
+                responseText = res.body?.string() ?: ""
+                ok = res.isSuccessful
+                res.close()
+            }
+
+            // If the script didn't handle send_otp in doPost, also trigger doGet with action=send_otp
+            if (responseText.isNotBlank() && !responseText.contains("otpSent")) {
+                val getReq = Request.Builder()
+                    .url(urlWithParams)
+                    .header("User-Agent", USER_AGENT)
+                    .get()
+                    .build()
+                httpClient.newCall(getReq).execute().close()
+            }
             ok
         } catch (_: Exception) {
             false
@@ -494,29 +538,53 @@ object CloudDriveServerManager {
 
     /**
      * Complete, copy-paste ready Google Apps Script that turns Google Drive
-     * into a free 24/7 real-time cloud server with per-user data & task sync.
+     * into a free 24/7 real-time cloud server with per-user data, Email OTP & task sync.
      */
     fun getGoogleAppsScriptTemplate(): String {
         return """
 // =========================================================================
-// KINGO KING - GOOGLE DRIVE 24/7 REAL-TIME CLOUD SERVER SCRIPT
+// KINGO KING - GOOGLE DRIVE 24/7 REAL-TIME CLOUD SERVER + EMAIL OTP SCRIPT
 // =========================================================================
-// STEP-BY-STEP SETUP INSTRUCTIONS:
-// 1. Open https://script.google.com/ in Chrome/Browser and sign in.
-// 2. Click "New project" (top-left).
-// 3. Delete existing code in Code.gs and PASTE this entire script.
-// 4. Click "Deploy" (top-right blue button) -> "New deployment".
-// 5. Click the Gear icon ⚙️ next to "Select type" -> choose "Web app".
-// 6. Set Description: "Kingo King Live Server".
-// 7. Set "Execute as": "Me (your email)".
-// 8. Set "Who has access": "Anyone" (IMPORTANT!).
-// 9. Click "Deploy" -> "Authorize access" -> Select your Google Account
-//    -> Click "Advanced" -> "Go to Untitled project (unsafe)" -> "Allow".
-// 10. Copy the generated "Web app URL" (ends with /exec).
-// 11. Paste that URL into Kingo Admin App AND Kingo King User App!
+// HOW TO UPDATE YOUR EXISTING SCRIPT (KEEPING THE SAME URL!):
+// 1. Open https://script.google.com/ and open your existing Kingo King project.
+// 2. Replace all code in Code.gs with this updated script and press Ctrl+S (Save).
+// 3. Select "authorizeEmailPermission" in the top toolbar dropdown and click "Run"
+//    -> Click "Review permissions" -> Select your Google Account -> "Allow"
+//    (This enables sending verification OTP emails from your Gmail!).
+// 4. Click "Deploy" -> "Manage deployments" -> Click Edit (✏️ icon)
+//    -> Under "Version", select "New version" -> Click "Deploy".
+//    (Your Web App /exec URL stays 100% the same!)
 // =========================================================================
 
 var FOLDER_NAME = "KingoKing_Server";
+
+// Run this function once in the Apps Script editor to authorize Gmail/MailApp OTP sending!
+function authorizeEmailPermission() {
+  var remaining = MailApp.getRemainingDailyQuota();
+  Logger.log("Email permission authorized! Daily quota remaining: " + remaining);
+}
+
+function sendOtpVerificationEmail(targetEmail, otpCode, purpose) {
+  var cleanPurpose = purpose || "Account Verification";
+  var subject = "Kingo King - " + otpCode + " is your verification code";
+  var plainBody = "Hello,\n\nYour 6-digit verification OTP for " + cleanPurpose + " on Kingo King is:\n\n" +
+    otpCode + "\n\nThis code is valid for 10 minutes. Please do not share this code with anyone.\n\n- Team Kingo King";
+  var htmlBody = "<div style='font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;border:1px solid #e5e7eb;border-radius:12px;background:#ffffff;'>" +
+    "<h2 style='color:#111827;margin-top:0;'>Kingo King Verification</h2>" +
+    "<p style='color:#374151;font-size:15px;'>Use the 6-digit verification code below for <b>" + cleanPurpose + "</b>:</p>" +
+    "<div style='background:#f3f4f6;border-radius:10px;padding:18px;text-align:center;margin:20px 0;'>" +
+    "<span style='font-size:32px;font-weight:bold;letter-spacing:8px;color:#d97706;'>" + otpCode + "</span>" +
+    "</div>" +
+    "<p style='color:#6b7280;font-size:13px;'>This code expires in 10 minutes. If you did not request this, you can safely ignore this email.</p>" +
+    "</div>";
+  MailApp.sendEmail({
+    to: targetEmail,
+    subject: subject,
+    body: plainBody,
+    htmlBody: htmlBody,
+    name: "Kingo King Security"
+  });
+}
 
 function getOrCreateFolder() {
   var folders = DriveApp.getFoldersByName(FOLDER_NAME);
@@ -549,6 +617,17 @@ function saveFileContent(fileName, content) {
 
 function doGet(e) {
   try {
+    if (e && e.parameter && e.parameter.action === "send_otp" && e.parameter.email && e.parameter.otp) {
+      try {
+        sendOtpVerificationEmail(e.parameter.email, e.parameter.otp, e.parameter.purpose);
+        return ContentService.createTextOutput(JSON.stringify({ "success": true, "otpSent": true }))
+          .setMimeType(ContentService.MimeType.JSON);
+      } catch (mailErr) {
+        return ContentService.createTextOutput(JSON.stringify({ "success": false, "otpSent": false, "error": mailErr.toString() }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+    }
+
     var tasks = JSON.parse(getFileContent("tasks.json", "[]"));
     var posts = JSON.parse(getFileContent("posts.json", "[]"));
     var users = JSON.parse(getFileContent("users.json", "[]"));
@@ -581,13 +660,14 @@ function doPost(e) {
     var action = postData.action || "sync_all";
     
     if (action === "send_otp" && postData.email && postData.otp) {
-      var subject = "Kingo King - Your Verification Code: " + postData.otp;
-      var msg = "Hello,\n\nYour 6-digit verification OTP for " + (postData.purpose || "Kingo King") + " is:\n\n" + postData.otp + "\n\nValid for 10 minutes.\n\n- Team Kingo King";
       try {
-        MailApp.sendEmail(postData.email, subject, msg);
-      } catch (mailErr) {}
-      return ContentService.createTextOutput(JSON.stringify({ "success": true, "otpSent": true }))
-        .setMimeType(ContentService.MimeType.JSON);
+        sendOtpVerificationEmail(postData.email, postData.otp, postData.purpose);
+        return ContentService.createTextOutput(JSON.stringify({ "success": true, "otpSent": true }))
+          .setMimeType(ContentService.MimeType.JSON);
+      } catch (mailErr) {
+        return ContentService.createTextOutput(JSON.stringify({ "success": false, "otpSent": false, "error": mailErr.toString() }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
     }
 
     if (action === "sync_all") {
@@ -609,7 +689,7 @@ function doPost(e) {
           if (!incoming.email) continue;
           var key = incoming.email.toLowerCase();
           var prev = userMap[key];
-          if (!prev || (incoming.lastUpdatedMillis || 0) >= (prev.lastUpdatedMillis || 0)) {
+          if (!prev || (incoming.lastUpdatedMillis || 0) >= (prev.lastUpdatedMillis || 0) || postData.role === "ADMIN") {
             userMap[key] = incoming;
           }
         }
@@ -630,7 +710,7 @@ function doPost(e) {
           var ip = postData.payouts[qIdx];
           if (!ip.id) continue;
           var oldP = payoutMap[ip.id];
-          if (!oldP || oldP.status === "PENDING" || postData.role === "ADMIN") {
+          if (!oldP || oldP.status === "PENDING" || oldP.status === "APPROVED" || postData.role === "ADMIN") {
             payoutMap[ip.id] = ip;
           }
         }

@@ -38,6 +38,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -201,15 +202,6 @@ fun WalletScreen(
                         }
                     }
 
-                    // Watch Duration Coin Rate Summary Strip
-                    Text(
-                        text = "Watch Rates: 3m = 10c • 5m = 17c • 10m = 35c • 20m = 72c • 30m = 110c",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.White.copy(alpha = 0.75f),
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 10.5.sp
-                    )
-
                     // Withdraw / Payout Button
                     Button(
                         onClick = { showWithdrawDialog = true },
@@ -292,7 +284,36 @@ fun WalletScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     items(transactions, key = { it.id }) { item ->
-                        val isWithdrawal = item.coins < 0
+                        val effectiveCoins = remember(item.coins, item.title) {
+                            if (item.coins != 0) {
+                                item.coins
+                            } else if (item.title.contains("Payout", ignoreCase = true) || item.title.contains("Withdrawal", ignoreCase = true)) {
+                                // Recover coin amount from title if an older record stored 0
+                                val coinsMatch = Regex("""(\d+)\s*Coins""", RegexOption.IGNORE_CASE).find(item.title)
+                                val inrMatch = Regex("""₹\s*(\d+(?:\.\d+)?)""").find(item.title)
+                                when {
+                                    coinsMatch != null -> -(coinsMatch.groupValues[1].toIntOrNull() ?: 1000)
+                                    inrMatch != null -> -(((inrMatch.groupValues[1].toDoubleOrNull() ?: 10.0) * COINS_PER_INR).toInt())
+                                    else -> -1000
+                                }
+                            } else {
+                                0
+                            }
+                        }
+                        val isWithdrawal = effectiveCoins < 0
+                        val statusBadge = remember(item.title) {
+                            when {
+                                item.title.contains("DONE", ignoreCase = true) || item.title.contains("Paid to", ignoreCase = true) ->
+                                    Triple("PAYMENT DONE ✓", SuccessGreen.copy(alpha = 0.16f), SuccessGreen)
+                                item.title.contains("APPROVED", ignoreCase = true) ->
+                                    Triple("APPROVED • PROCESSING", AmberPrimary.copy(alpha = 0.18f), AmberPrimary)
+                                item.title.contains("PENDING", ignoreCase = true) ->
+                                    Triple("PENDING REVIEW", AmberPrimary.copy(alpha = 0.15f), AmberPrimary)
+                                item.title.contains("REJECTED", ignoreCase = true) ->
+                                    Triple("REJECTED • REFUNDED", Color(0xFFEF4444).copy(alpha = 0.15f), Color(0xFFEF4444))
+                                else -> null
+                            }
+                        }
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -333,9 +354,26 @@ fun WalletScreen(
                                             text = item.title,
                                             style = MaterialTheme.typography.bodyMedium,
                                             fontWeight = FontWeight.SemiBold,
-                                            maxLines = 1,
+                                            maxLines = 2,
                                             overflow = TextOverflow.Ellipsis
                                         )
+                                        if (statusBadge != null) {
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Surface(
+                                                shape = RoundedCornerShape(6.dp),
+                                                color = statusBadge.second
+                                            ) {
+                                                Text(
+                                                    text = statusBadge.first,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = statusBadge.third,
+                                                    fontSize = 10.sp
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(2.dp))
                                         Text(
                                             text = TimeFormatter.formatTimestamp(item.timestampMillis),
                                             style = MaterialTheme.typography.bodySmall,
@@ -345,8 +383,9 @@ fun WalletScreen(
                                     }
                                 }
 
+                                Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = if (isWithdrawal) "${item.coins} Coins" else "+${item.coins} Coins",
+                                    text = if (isWithdrawal) "$effectiveCoins Coins" else "+$effectiveCoins Coins",
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.ExtraBold,
                                     color = if (isWithdrawal) MaterialTheme.colorScheme.error else SuccessGreen

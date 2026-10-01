@@ -101,6 +101,9 @@ class YouTubeLiveSearchService : AccessibilityService() {
         @Volatile
         private var lastCommentRewardTriggerTime: Long = 0L
 
+        @Volatile
+        private var wasTargetVideoLikedInSession: Boolean = false
+
         private val rewardedLikedTaskIds = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
         private var scrollAttempts = 0
@@ -121,6 +124,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
             lastCommentComposerOpenTime = 0L
             lastCommentCancelClickTime = 0L
             lastCommentRewardTriggerTime = 0L
+            wasTargetVideoLikedInSession = false
         }
 
         fun prepareForDirectWatch(title: String, channel: String?, videoUrl: String? = null, videoId: String? = null) {
@@ -413,33 +417,54 @@ class YouTubeLiveSearchService : AccessibilityService() {
                         viewId.contains("rich_item", ignoreCase = true)
 
                 val isDislike = combined.contains("dislike") || combined.contains("नापसंद")
-                val isUnlike = combined.contains("unlike") ||
+                // Note: In Android Accessibility TYPE_VIEW_CLICKED, node.isSelected / node.isChecked is ALREADY toggled to the NEW state after click!
+                // Therefore, checking node?.isSelected == true here previously inverted Like & Unlike!
+                // Instead, check if the label explicitly says "unlike" / "remove like", or if the button was already liked in this session.
+                val explicitUnlikeLabel = combined.contains("unlike") ||
                         combined.contains("remove like") ||
                         combined.contains("हटाएं") ||
-                        node?.isSelected == true ||
-                        node?.isChecked == true
+                        evDesc.contains("unlike", ignoreCase = true) ||
+                        evDesc.contains("remove like", ignoreCase = true)
+                val postClickUnchecked = node != null && node.isCheckable && !node.isChecked
 
-                val inWatchActionBarBand = clickRect.top in (screenHeight * 0.20f).toInt()..(screenHeight * 0.62f).toInt()
+                val inWatchActionBarBand = clickRect.top in (screenHeight * 0.16f).toInt()..(screenHeight * 0.66f).toInt()
 
                 // Genuine first-time Like click on the target YouTube video's Like button
                 val isCommentLike = combined.contains("comment") ||
                         combined.contains("टिप्पणी") ||
                         combined.contains("reply") ||
                         combined.contains("जवाब")
-                val isGenuineVideoLikeClick = isSessionActive &&
-                        elapsedSinceLaunch > 2500L &&
+                val isVideoLikeButtonTarget = isSessionActive &&
+                        elapsedSinceLaunch > 2000L &&
                         inWatchActionBarBand &&
                         !isDislike &&
-                        !isUnlike &&
                         !isCommentLike &&
                         !looksLikeVideoCard &&
-                        combined.length < 140 && (
+                        combined.length < 160 && (
                                 desc.startsWith("like this video", ignoreCase = true) ||
+                                evDesc.startsWith("like this video", ignoreCase = true) ||
                                 combined.contains("like this video") ||
                                 viewId.contains("like_button", ignoreCase = true) ||
+                                viewId.contains("segmented_like", ignoreCase = true) ||
                                 desc.equals("Like", ignoreCase = true) ||
-                                desc.contains("पसंद करें")
+                                evDesc.equals("Like", ignoreCase = true) ||
+                                desc.contains("पसंद करें") ||
+                                evDesc.contains("पसंद करें")
                         )
+
+                val isGenuineVideoLikeClick = if (isVideoLikeButtonTarget) {
+                    if (explicitUnlikeLabel || postClickUnchecked || wasTargetVideoLikedInSession) {
+                        // User clicked the Like button while it was already liked -> this is an UNLIKE action!
+                        wasTargetVideoLikedInSession = false
+                        false
+                    } else {
+                        // User clicked the Like button to LIKE the video!
+                        wasTargetVideoLikedInSession = true
+                        true
+                    }
+                } else {
+                    false
+                }
 
                 val now = System.currentTimeMillis()
                 val hadRecentCommentActivity = hasTypedCommentText ||

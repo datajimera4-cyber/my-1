@@ -88,6 +88,7 @@ object NotificationChannels {
         body: String,
         notificationId: Int = (System.currentTimeMillis() % 100000).toInt() + 2000
     ) {
+        if (com.example.BuildConfig.APP_ROLE == "ADMIN") return
         try {
             createChannels(context)
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager

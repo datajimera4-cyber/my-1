@@ -273,54 +273,41 @@ fun AuthGateScreen(
                         if (isOtpSent) {
                             Spacer(modifier = Modifier.height(14.dp))
 
-                            generatedOtpPreview?.let { code ->
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(SuccessGreen.copy(alpha = 0.12f))
-                                        .border(1.dp, SuccessGreen.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
-                                        .clickable { otpInput = code }
-                                        .padding(12.dp)
-                                        .testTag("instant_otp_autofill_box")
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(SuccessGreen.copy(alpha = 0.10f))
+                                    .border(1.dp, SuccessGreen.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+                                    .padding(12.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                                            Icon(
-                                                imageVector = Icons.Default.VerifiedUser,
-                                                contentDescription = null,
-                                                tint = SuccessGreen,
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Column {
-                                                Text(
-                                                    text = "Verified OTP Code: $code",
-                                                    fontWeight = FontWeight.ExtraBold,
-                                                    color = SuccessGreen,
-                                                    fontSize = 13.sp
-                                                )
-                                                Text(
-                                                    text = "Sent to email & notification • Tap here to Auto-Fill",
-                                                    fontSize = 11.sp,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                        }
+                                    Icon(
+                                        imageVector = Icons.Default.MarkEmailRead,
+                                        contentDescription = null,
+                                        tint = SuccessGreen,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Column {
                                         Text(
-                                            text = "Auto-Fill",
-                                            color = AmberDark,
+                                            text = "Verification OTP Sent to Your Email",
                                             fontWeight = FontWeight.ExtraBold,
-                                            fontSize = 12.sp
+                                            color = SuccessGreen,
+                                            fontSize = 13.sp
+                                        )
+                                        Text(
+                                            text = "Please check your Email Inbox (or Spam folder) for $emailInput and enter the 6-digit code below.",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
                                 }
-                                Spacer(modifier = Modifier.height(10.dp))
                             }
+                            Spacer(modifier = Modifier.height(10.dp))
 
                             OutlinedTextField(
                                 value = otpInput,
@@ -614,54 +601,41 @@ fun AuthGateScreen(
                             if (isOtpSent) {
                                 Spacer(modifier = Modifier.height(12.dp))
 
-                                generatedOtpPreview?.let { code ->
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(12.dp))
-                                            .background(SuccessGreen.copy(alpha = 0.12f))
-                                            .border(1.dp, SuccessGreen.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
-                                            .clickable { otpInput = code }
-                                            .padding(12.dp)
-                                            .testTag("signup_instant_otp_autofill_box")
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(SuccessGreen.copy(alpha = 0.10f))
+                                        .border(1.dp, SuccessGreen.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+                                        .padding(12.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                                                Icon(
-                                                    imageVector = Icons.Default.VerifiedUser,
-                                                    contentDescription = null,
-                                                    tint = SuccessGreen,
-                                                    modifier = Modifier.size(20.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(8.dp))
-                                                Column {
-                                                    Text(
-                                                        text = "Email Verification OTP: $code",
-                                                        fontWeight = FontWeight.ExtraBold,
-                                                        color = SuccessGreen,
-                                                        fontSize = 13.sp
-                                                    )
-                                                    Text(
-                                                        text = "Dispatched via Cloud Mail & Notification • Tap to Auto-Fill",
-                                                        fontSize = 11.sp,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                    )
-                                                }
-                                            }
+                                        Icon(
+                                            imageVector = Icons.Default.MarkEmailRead,
+                                            contentDescription = null,
+                                            tint = SuccessGreen,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Column {
                                             Text(
-                                                text = "Auto-Fill",
-                                                color = AmberDark,
+                                                text = "Verification OTP Sent to Your Email",
                                                 fontWeight = FontWeight.ExtraBold,
-                                                fontSize = 12.sp
+                                                color = SuccessGreen,
+                                                fontSize = 13.sp
+                                            )
+                                            Text(
+                                                text = "Please check your Email Inbox (or Spam folder) for $emailInput and enter the 6-digit code below.",
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
                                     }
-                                    Spacer(modifier = Modifier.height(10.dp))
                                 }
+                                Spacer(modifier = Modifier.height(10.dp))
 
                                 OutlinedTextField(
                                     value = otpInput,
