@@ -23,6 +23,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CardGiftcard
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
@@ -90,6 +91,7 @@ fun AuthGateScreen(
     var emailInput by remember { mutableStateOf("") }
     var passwordInput by remember { mutableStateOf("") }
     var nameInput by remember { mutableStateOf("") }
+    var referralCodeInput by remember { mutableStateOf("") }
 
     // Email Verification OTP states (Sign Up & Forgot Password)
     var otpInput by remember { mutableStateOf("") }
@@ -464,6 +466,44 @@ fun AuthGateScreen(
                         Spacer(modifier = Modifier.height(16.dp))
 
                         if (authTabIndex == 1) {
+                            // First-Time Sign Up Bonus & Refer Bonus Banner
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(AmberPrimary.copy(alpha = 0.12f))
+                                    .border(1.dp, AmberPrimary.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                                    .padding(12.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.CardGiftcard,
+                                        contentDescription = null,
+                                        tint = AmberDark,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text(
+                                            text = "🎁 +50 Coins First-Time Sign Up Bonus!",
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = AmberDark,
+                                            fontSize = 13.sp
+                                        )
+                                        Text(
+                                            text = "Get +50 Coins instantly on sign up + extra 50 Invite Coins if you enter a 6-digit Refer Key!",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            lineHeight = 15.sp
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+
                             OutlinedTextField(
                                 value = nameInput,
                                 onValueChange = { nameInput = it },
@@ -539,6 +579,25 @@ fun AuthGateScreen(
                                 }
                             }
                         } else {
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            OutlinedTextField(
+                                value = referralCodeInput,
+                                onValueChange = { input ->
+                                    if (input.length <= 6) {
+                                        referralCodeInput = input.filter { ch -> ch.isDigit() }
+                                    }
+                                },
+                                label = { Text("6-Digit Refer Key (Optional • +50 Invite Coins)") },
+                                leadingIcon = { Icon(Icons.Default.CardGiftcard, contentDescription = null) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                singleLine = true,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("auth_gate_referral_input"),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+
                             // Mandatory Email Verification OTP Section on Create Account tab
                             Spacer(modifier = Modifier.height(12.dp))
 
@@ -695,7 +754,12 @@ fun AuthGateScreen(
                                     }
                                     isLoading = true
                                     authFeedback = null
-                                    viewModel.signUp(emailInput, passwordInput, nameInput) { success, msg ->
+                                    viewModel.signUp(
+                                        email = emailInput,
+                                        password = passwordInput,
+                                        name = nameInput,
+                                        referralCodeInput = referralCodeInput
+                                    ) { success, msg ->
                                         isLoading = false
                                         isSuccessFeedback = success
                                         authFeedback = msg

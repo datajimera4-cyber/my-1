@@ -3,11 +3,14 @@ package com.example.admin
 import android.util.Log
 import com.example.BuildConfig
 import com.example.data.AdminPostItem
+import com.example.data.AppUpdateInfo
 import com.example.data.DataStoreManager
 import com.example.data.PayoutRequest
 import com.example.data.PayoutStatus
+import com.example.data.SupportMessage
 import com.example.data.UserProfile
 import com.example.data.VideoTaskItem
+import com.example.data.generateSixDigitReferralCode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
@@ -151,7 +154,57 @@ object CloudDriveServerManager {
                 val deletedTaskIds = dataStoreManager.deletedTaskIdsFlow.first()
 
                 if (remoteJson != null) {
-                    // 1A. Parse Remote Tasks
+                    // 1A. Parse Remote Users FIRST so we can accurately count per-task completions across all users
+                    val remoteUsersArr = remoteJson.optJSONArray("users")
+                    val parsedUsers = mutableListOf<UserProfile>()
+                    if (remoteUsersArr != null) {
+                        for (i in 0 until remoteUsersArr.length()) {
+                            val obj = remoteUsersArr.optJSONObject(i) ?: continue
+                            val email = obj.optString("email", "").trim().lowercase()
+                            if (email.isNotBlank()) {
+                                parsedUsers.add(
+                                    UserProfile(
+                                        userId = obj.optString("userId", "usr_${Math.abs(email.hashCode()) % 100000}"),
+                                        email = email,
+                                        name = obj.optString("name", email.substringBefore("@")),
+                                        passwordHash = obj.optString("passwordHash", ""),
+                                        coinsBalance = obj.optInt("coinsBalance", 0),
+                                        completedTasksCount = obj.optInt("completedTasksCount", 0),
+                                        joinedAtMillis = obj.optLong("joinedAtMillis", System.currentTimeMillis()),
+                                        transactionsJson = obj.optString("transactionsJson", "[]"),
+                                        likedTasksJson = obj.optString("likedTasksJson", "[]"),
+                                        commentCountsJson = obj.optString("commentCountsJson", "{}"),
+                                        taskLocksJson = obj.optString("taskLocksJson", "{}"),
+                                        completedTaskIdsJson = obj.optString("completedTaskIdsJson", "[]"),
+                                        lastUpdatedMillis = obj.optLong("lastUpdatedMillis", 0L),
+                                        referralCode = obj.optString("referralCode", "").ifBlank { generateSixDigitReferralCode(email) },
+                                        referredByCode = obj.optString("referredByCode", "")
+                                    )
+                                )
+                            }
+                        }
+                        if (parsedUsers.isNotEmpty()) {
+                            dataStoreManager.syncRemoteUsersFromServer(parsedUsers, isAdmin = isAdminRole)
+                        }
+                    }
+
+                    // Count how many distinct users have completed each taskId
+                    val allKnownUsers = dataStoreManager.usersFlow.first()
+                    val taskCompletionMap = mutableMapOf<String, MutableSet<String>>()
+                    for (u in allKnownUsers) {
+                        val userKey = u.email.lowercase()
+                        try {
+                            val arr = JSONArray(u.completedTaskIdsJson)
+                            for (idx in 0 until arr.length()) {
+                                val tId = arr.optString(idx)
+                                if (tId.isNotBlank()) {
+                                    taskCompletionMap.getOrPut(tId) { mutableSetOf() }.add(userKey)
+                                }
+                            }
+                        } catch (_: Exception) {}
+                    }
+
+                    // 1B. Parse Remote Tasks (with maxCompletions & live completedCount)
                     val remoteTasksArr = remoteJson.optJSONArray("tasks")
                     if (remoteTasksArr != null) {
                         val parsedTasks = mutableListOf<VideoTaskItem>()
@@ -159,6 +212,10 @@ object CloudDriveServerManager {
                             val obj = remoteTasksArr.optJSONObject(i) ?: continue
                             val taskId = obj.optString("id")
                             if (taskId.isNotBlank() && (!isAdminRole || !deletedTaskIds.contains(taskId))) {
+                                val maxComp = obj.optInt("maxCompletions", 0)
+                                val remoteCompCount = obj.optInt("completedCount", 0)
+                                val usersCompCount = taskCompletionMap[taskId]?.size ?: 0
+                                val effectiveCompletedCount = maxOf(remoteCompCount, usersCompCount)
                                 parsedTasks.add(
                                     VideoTaskItem(
                                         id = taskId,
@@ -173,7 +230,9 @@ object CloudDriveServerManager {
                                         createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
                                         lockedUntilMillis = 0L,
                                         isPinned = obj.optBoolean("isPinned", false),
-                                        pinnedAt = obj.optLong("pinnedAt", 0L)
+                                        pinnedAt = obj.optLong("pinnedAt", 0L),
+                                        maxCompletions = maxComp,
+                                        completedCount = effectiveCompletedCount
                                     )
                                 )
                             }
@@ -183,9 +242,17 @@ object CloudDriveServerManager {
                         } else if (isAdminRole && !pushAdminContent) {
                             dataStoreManager.syncRemoteTasksFromServer(parsedTasks)
                         }
+                    } else if (taskCompletionMap.isNotEmpty()) {
+                        // Even if tasks array wasn't in response, refresh local task completion counts from users
+                        val currentLocalTasks = dataStoreManager.videoTasksFlow.first()
+                        val updatedLocalTasks = currentLocalTasks.map { t ->
+                            val usersCompCount = taskCompletionMap[t.id]?.size ?: 0
+                            t.copy(completedCount = maxOf(t.completedCount, usersCompCount))
+                        }
+                        dataStoreManager.syncRemoteTasksFromServer(updatedLocalTasks)
                     }
 
-                    // 1B. Parse Remote Admin Posts / Banners
+                    // 1C. Parse Remote Admin Posts / Banners
                     val remotePostsArr = remoteJson.optJSONArray("posts")
                     if (remotePostsArr != null) {
                         val parsedPosts = mutableListOf<AdminPostItem>()
@@ -219,46 +286,55 @@ object CloudDriveServerManager {
                         }
                     }
 
-                    // 1C. Parse Remote Users (Per-User Statistics, Coins, Task Locks, Transactions)
-                    val remoteUsersArr = remoteJson.optJSONArray("users")
-                    if (remoteUsersArr != null) {
-                        val parsedUsers = mutableListOf<UserProfile>()
-                        for (i in 0 until remoteUsersArr.length()) {
-                            val obj = remoteUsersArr.optJSONObject(i) ?: continue
-                            val email = obj.optString("email", "").trim().lowercase()
-                            if (email.isNotBlank()) {
-                                parsedUsers.add(
-                                    UserProfile(
-                                        userId = obj.optString("userId", "usr_${Math.abs(email.hashCode()) % 100000}"),
-                                        email = email,
-                                        name = obj.optString("name", email.substringBefore("@")),
-                                        passwordHash = obj.optString("passwordHash", ""),
-                                        coinsBalance = obj.optInt("coinsBalance", 0),
-                                        completedTasksCount = obj.optInt("completedTasksCount", 0),
-                                        joinedAtMillis = obj.optLong("joinedAtMillis", System.currentTimeMillis()),
-                                        transactionsJson = obj.optString("transactionsJson", "[]"),
-                                        likedTasksJson = obj.optString("likedTasksJson", "[]"),
-                                        commentCountsJson = obj.optString("commentCountsJson", "{}"),
-                                        taskLocksJson = obj.optString("taskLocksJson", "{}"),
-                                        completedTaskIdsJson = obj.optString("completedTaskIdsJson", "[]"),
-                                        lastUpdatedMillis = obj.optLong("lastUpdatedMillis", 0L)
+                    // 1D. Parse Remote Payout Requests & Support Chat Messages
+                    val parsedSupportMessages = mutableListOf<SupportMessage>()
+                    val remoteSupportArr = remoteJson.optJSONArray("supportMessages")
+                    if (remoteSupportArr != null) {
+                        for (i in 0 until remoteSupportArr.length()) {
+                            val obj = remoteSupportArr.optJSONObject(i) ?: continue
+                            val id = obj.optString("id")
+                            val msgText = obj.optString("message")
+                            if (id.isNotBlank() && msgText.isNotBlank()) {
+                                parsedSupportMessages.add(
+                                    SupportMessage(
+                                        id = id,
+                                        userId = obj.optString("userId", ""),
+                                        userEmail = obj.optString("userEmail", ""),
+                                        userName = obj.optString("userName", ""),
+                                        senderRole = obj.optString("senderRole", "USER"),
+                                        message = msgText,
+                                        timestampMillis = obj.optLong("timestampMillis", System.currentTimeMillis())
                                     )
                                 )
                             }
                         }
-                        if (parsedUsers.isNotEmpty()) {
-                            dataStoreManager.syncRemoteUsersFromServer(parsedUsers, isAdmin = isAdminRole)
-                        }
                     }
 
-                    // 1D. Parse Remote Payout Requests
                     val remotePayoutsArr = remoteJson.optJSONArray("payouts")
+                    var remoteConfiguredUpdateUrl: String? = null
                     if (remotePayoutsArr != null) {
                         val parsedPayouts = mutableListOf<PayoutRequest>()
                         for (i in 0 until remotePayoutsArr.length()) {
                             val obj = remotePayoutsArr.optJSONObject(i) ?: continue
                             val id = obj.optString("id")
-                            if (id.isNotBlank()) {
+                            if (id == "cfg_update_folder") {
+                                remoteConfiguredUpdateUrl = obj.optString("adminNote", "").trim()
+                            } else if (id.startsWith("chat_")) {
+                                val msgText = obj.optString("adminNote", "")
+                                if (msgText.isNotBlank()) {
+                                    parsedSupportMessages.add(
+                                        SupportMessage(
+                                            id = id,
+                                            userId = obj.optString("userId", ""),
+                                            userEmail = obj.optString("userEmail", ""),
+                                            userName = obj.optString("method", "").removePrefix("CHAT:"),
+                                            senderRole = obj.optString("destination", "USER"),
+                                            message = msgText,
+                                            timestampMillis = obj.optLong("requestedAtMillis", System.currentTimeMillis())
+                                        )
+                                    )
+                                }
+                            } else if (id.isNotBlank()) {
                                 val statusStr = obj.optString("status", PayoutStatus.PENDING.name)
                                 val status = try { PayoutStatus.valueOf(statusStr) } catch (_: Exception) { PayoutStatus.PENDING }
                                 val rawCoins = obj.optInt("amountCoins", obj.optInt("coins", 0))
@@ -286,12 +362,57 @@ object CloudDriveServerManager {
                             dataStoreManager.syncRemotePayoutsFromServer(parsedPayouts)
                         }
                     }
+
+                    if (parsedSupportMessages.isNotEmpty()) {
+                        dataStoreManager.syncRemoteSupportMessagesFromServer(parsedSupportMessages)
+                    }
+
+                    if (remoteConfiguredUpdateUrl != null && !isAdminRole) {
+                        dataStoreManager.setUpdateDriveFolderUrl(remoteConfiguredUpdateUrl)
+                    }
+
+                    // 1E. Parse Remote App Update from Google Drive "update" folder
+                    var resolvedUpdate: AppUpdateInfo? = null
+                    val appUpdateObj = remoteJson.optJSONObject("appUpdate")
+                    if (appUpdateObj != null) {
+                        val hasUpd = appUpdateObj.optBoolean("hasUpdate", false)
+                        val fId = appUpdateObj.optString("fileId", "").trim()
+                        val dlUrl = appUpdateObj.optString("downloadUrl", "").trim()
+                        if (hasUpd && (fId.isNotBlank() || dlUrl.isNotBlank())) {
+                            resolvedUpdate = AppUpdateInfo(
+                                hasUpdate = true,
+                                fileId = fId,
+                                fileName = appUpdateObj.optString("fileName", "KingoKing_Update.apk").ifBlank { "KingoKing_Update.apk" },
+                                updatedAtMillis = appUpdateObj.optLong("updatedAtMillis", 0L),
+                                fileSize = appUpdateObj.optLong("fileSize", 0L),
+                                downloadUrl = dlUrl.ifBlank {
+                                    "https://drive.usercontent.google.com/download?id=$fId&export=download&confirm=t"
+                                }
+                            )
+                        } else if (!hasUpd) {
+                            resolvedUpdate = AppUpdateInfo(hasUpdate = false)
+                        }
+                    }
+
+                    // Fallback: if Apps Script didn't return appUpdate (or returned empty) and an update folder/file URL is configured, inspect it directly
+                    val effectiveFolderUrl = remoteConfiguredUpdateUrl ?: dataStoreManager.updateDriveFolderUrlFlow.first()
+                    if ((resolvedUpdate == null || !resolvedUpdate.hasUpdate) && effectiveFolderUrl.isNotBlank()) {
+                        val folderUpdate = inspectPublicDriveUpdateLink(effectiveFolderUrl)
+                        if (folderUpdate != null) {
+                            resolvedUpdate = folderUpdate
+                        }
+                    }
+
+                    if (resolvedUpdate != null) {
+                        dataStoreManager.saveRemoteAppUpdate(resolvedUpdate)
+                    }
                 }
 
                 val updatedTasks = dataStoreManager.videoTasksFlow.first()
                 val updatedPosts = dataStoreManager.adminPostsFlow.first()
                 val updatedUsers = dataStoreManager.usersFlow.first()
                 val updatedPayouts = dataStoreManager.payoutRequestsFlow.first()
+                val updatedSupportMessages = dataStoreManager.supportMessagesFlow.first()
 
                 // Fast path: if only pulling updates (e.g., background poll or initial login fetch), return immediately after GET!
                 if (!pushLocalChanges) {
@@ -335,6 +456,8 @@ object CloudDriveServerManager {
                                 put("createdAt", t.createdAt)
                                 put("isPinned", t.isPinned)
                                 put("pinnedAt", t.pinnedAt)
+                                put("maxCompletions", t.maxCompletions)
+                                put("completedCount", t.completedCount)
                             })
                         }
                         put("tasks", tasksArr)
@@ -373,10 +496,13 @@ object CloudDriveServerManager {
                             put("taskLocksJson", u.taskLocksJson)
                             put("completedTaskIdsJson", u.completedTaskIdsJson)
                             put("lastUpdatedMillis", u.lastUpdatedMillis)
+                            put("referralCode", u.referralCode.ifBlank { generateSixDigitReferralCode(u.email) })
+                            put("referredByCode", u.referredByCode)
                         })
                     }
                     put("users", usersArr)
 
+                    val configuredUpdateUrl = dataStoreManager.updateDriveFolderUrlFlow.first()
                     val payoutsArr = JSONArray()
                     for (p in updatedPayouts) {
                         payoutsArr.put(JSONObject().apply {
@@ -393,7 +519,50 @@ object CloudDriveServerManager {
                             put("adminNote", p.adminNote ?: "")
                         })
                     }
+                    if (configuredUpdateUrl.isNotBlank() || isAdminRole) {
+                        payoutsArr.put(JSONObject().apply {
+                            put("id", "cfg_update_folder")
+                            put("userId", "system")
+                            put("userEmail", "admin@system")
+                            put("amountCoins", 0)
+                            put("amountInr", 0.0)
+                            put("method", "UPDATE_FOLDER")
+                            put("destination", "DRIVE")
+                            put("status", "PENDING")
+                            put("requestedAtMillis", System.currentTimeMillis())
+                            put("adminNote", configuredUpdateUrl)
+                        })
+                    }
+                    // Also include support messages in payoutsArr with "chat_" prefix so existing deployed Apps Script merges & persists them automatically
+                    for (m in updatedSupportMessages) {
+                        payoutsArr.put(JSONObject().apply {
+                            put("id", m.id)
+                            put("userId", m.userId)
+                            put("userEmail", m.userEmail)
+                            put("amountCoins", 0)
+                            put("amountInr", 0.0)
+                            put("method", "CHAT:${m.userName}")
+                            put("destination", m.senderRole)
+                            put("status", "PENDING")
+                            put("requestedAtMillis", m.timestampMillis)
+                            put("adminNote", m.message)
+                        })
+                    }
                     put("payouts", payoutsArr)
+
+                    val supportArr = JSONArray()
+                    for (m in updatedSupportMessages) {
+                        supportArr.put(JSONObject().apply {
+                            put("id", m.id)
+                            put("userId", m.userId)
+                            put("userEmail", m.userEmail)
+                            put("userName", m.userName)
+                            put("senderRole", m.senderRole)
+                            put("message", m.message)
+                            put("timestampMillis", m.timestampMillis)
+                        })
+                    }
+                    put("supportMessages", supportArr)
                 }
 
                 // Use text/plain; charset=utf-8 as recommended by Google Apps Script Web Apps
@@ -537,13 +706,101 @@ object CloudDriveServerManager {
     }
 
     /**
+     * Inspects a public Google Drive "update" folder URL or direct APK file link to detect the newest APK file.
+     * Works even if the Google Apps Script hasn't been redeployed yet!
+     */
+    private fun inspectPublicDriveUpdateLink(rawUrl: String): AppUpdateInfo? {
+        val clean = rawUrl.trim()
+        if (clean.isBlank()) return AppUpdateInfo(hasUpdate = false)
+
+        // 1. Check if it's a Google Drive Folder URL: /folders/FOLDER_ID
+        val folderRegex = Regex("folders/([a-zA-Z0-9_-]{15,})")
+        val folderMatch = folderRegex.find(clean)
+        if (folderMatch != null) {
+            val folderId = folderMatch.groupValues[1]
+            return try {
+                val embedUrl = "https://drive.google.com/embeddedfolderview?id=$folderId#list"
+                val req = Request.Builder()
+                    .url(embedUrl)
+                    .header("User-Agent", USER_AGENT)
+                    .header("Cache-Control", "no-cache")
+                    .get()
+                    .build()
+                val res = httpClient.newCall(req).execute()
+                val html = res.body?.string() ?: ""
+                res.close()
+
+                // Parse flip-entry items inside the Google Drive folder
+                val entryRegex = Regex(
+                    """id="entry-([a-zA-Z0-9_-]{15,})"[\s\S]*?<div class="flip-entry-title">([^<]+)</div>[\s\S]*?<div class="flip-entry-last-modified">\s*<div>([^<]*)</div>""",
+                    RegexOption.IGNORE_CASE
+                )
+                val matches = entryRegex.findAll(html).toList()
+                val apkEntry = matches.firstOrNull { m ->
+                    m.groupValues[2].trim().endsWith(".apk", ignoreCase = true)
+                } ?: matches.firstOrNull()
+
+                if (apkEntry != null) {
+                    val fileId = apkEntry.groupValues[1].trim()
+                    val fileName = apkEntry.groupValues[2].trim().ifBlank { "KingoKing_Update.apk" }
+                    val modStr = apkEntry.groupValues[3].trim()
+                    val syntheticStamp = Math.abs("${fileId}_${fileName}_${modStr}".hashCode().toLong()).coerceAtLeast(1L)
+                    AppUpdateInfo(
+                        hasUpdate = true,
+                        fileId = fileId,
+                        fileName = fileName,
+                        updatedAtMillis = syntheticStamp,
+                        fileSize = 0L,
+                        downloadUrl = "https://drive.usercontent.google.com/download?id=$fileId&export=download&confirm=t"
+                    )
+                } else {
+                    // Folder exists and is reachable, but no APK is inside -> no active update
+                    AppUpdateInfo(hasUpdate = false)
+                }
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        // 2. Check if it's a direct Google Drive File link: /file/d/FILE_ID or id=FILE_ID
+        val fileRegex = Regex("""(?:/file/d/|id=)([a-zA-Z0-9_-]{15,})""")
+        val fileMatch = fileRegex.find(clean)
+        if (fileMatch != null) {
+            val fileId = fileMatch.groupValues[1]
+            return AppUpdateInfo(
+                hasUpdate = true,
+                fileId = fileId,
+                fileName = "KingoKing_Update.apk",
+                updatedAtMillis = Math.abs(clean.hashCode().toLong()).coerceAtLeast(1L),
+                fileSize = 0L,
+                downloadUrl = "https://drive.usercontent.google.com/download?id=$fileId&export=download&confirm=t"
+            )
+        }
+
+        // 3. Direct APK HTTP link
+        if (clean.startsWith("http://") || clean.startsWith("https://")) {
+            val syntheticId = "apk_${Math.abs(clean.hashCode())}"
+            return AppUpdateInfo(
+                hasUpdate = true,
+                fileId = syntheticId,
+                fileName = clean.substringAfterLast("/").substringBefore("?").ifBlank { "KingoKing_Update.apk" },
+                updatedAtMillis = Math.abs(clean.hashCode().toLong()).coerceAtLeast(1L),
+                fileSize = 0L,
+                downloadUrl = clean
+            )
+        }
+
+        return null
+    }
+
+    /**
      * Complete, copy-paste ready Google Apps Script that turns Google Drive
-     * into a free 24/7 real-time cloud server with per-user data, Email OTP & task sync.
+     * into a free 24/7 real-time cloud server with per-user data, Email OTP, "update" folder APK detector & task sync.
      */
     fun getGoogleAppsScriptTemplate(): String {
         return """
 // =========================================================================
-// KINGO KING - GOOGLE DRIVE 24/7 REAL-TIME CLOUD SERVER + EMAIL OTP SCRIPT
+// KINGO KING - GOOGLE DRIVE 24/7 REAL-TIME CLOUD SERVER + OTP + APK UPDATE
 // =========================================================================
 // HOW TO UPDATE YOUR EXISTING SCRIPT (KEEPING THE SAME URL!):
 // 1. Open https://script.google.com/ and open your existing Kingo King project.
@@ -554,9 +811,16 @@ object CloudDriveServerManager {
 // 4. Click "Deploy" -> "Manage deployments" -> Click Edit (✏️ icon)
 //    -> Under "Version", select "New version" -> Click "Deploy".
 //    (Your Web App /exec URL stays 100% the same!)
+//
+// MANDATORY APP UPDATE FOLDER ("update"):
+// - A folder named "update" is automatically created in your Google Drive.
+// - Whenever you upload a new .apk file into the "update" folder (or replace
+//   the old .apk with a new .apk), every user who opens the app will
+//   immediately get a Mandatory Update popup to download & install it!
 // =========================================================================
 
 var FOLDER_NAME = "KingoKing_Server";
+var UPDATE_FOLDER_NAME = "update";
 
 // Run this function once in the Apps Script editor to authorize Gmail/MailApp OTP sending!
 function authorizeEmailPermission() {
@@ -592,6 +856,69 @@ function getOrCreateFolder() {
     return folders.next();
   }
   return DriveApp.createFolder(FOLDER_NAME);
+}
+
+function getUpdateApkInfo() {
+  try {
+    var candidateFolders = [];
+    var namesToCheck = ["update", "Update", "UPDATE"];
+    for (var n = 0; n < namesToCheck.length; n++) {
+      var rootFolders = DriveApp.getFoldersByName(namesToCheck[n]);
+      while (rootFolders.hasNext()) {
+        candidateFolders.push(rootFolders.next());
+      }
+      var srvFolder = getOrCreateFolder();
+      var subFolders = srvFolder.getFoldersByName(namesToCheck[n]);
+      while (subFolders.hasNext()) {
+        candidateFolders.push(subFolders.next());
+      }
+    }
+    if (candidateFolders.length === 0) {
+      candidateFolders.push(DriveApp.createFolder(UPDATE_FOLDER_NAME));
+    }
+
+    var newestFile = null;
+    var newestMillis = 0;
+    for (var i = 0; i < candidateFolders.length; i++) {
+      var files = candidateFolders[i].getFiles();
+      while (files.hasNext()) {
+        var f = files.next();
+        if (f.isTrashed()) continue;
+        var fName = f.getName() || "";
+        var fMime = f.getMimeType() || "";
+        if (fName.toLowerCase().indexOf(".apk") !== -1 || fMime.indexOf("android.package-archive") !== -1 || f.getSize() > 100000) {
+          var updatedMs = f.getLastUpdated() ? f.getLastUpdated().getTime() : 1;
+          if (newestFile === null || updatedMs >= newestMillis) {
+            newestFile = f;
+            newestMillis = updatedMs;
+          }
+        }
+      }
+    }
+
+    if (newestFile !== null) {
+      try {
+        newestFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      } catch (shareErr) {}
+      var fId = newestFile.getId();
+      return {
+        "hasUpdate": true,
+        "fileId": fId,
+        "fileName": newestFile.getName(),
+        "updatedAtMillis": newestMillis,
+        "fileSize": newestFile.getSize(),
+        "downloadUrl": "https://drive.usercontent.google.com/download?id=" + fId + "&export=download&confirm=t"
+      };
+    }
+  } catch (e) {}
+  return {
+    "hasUpdate": false,
+    "fileId": "",
+    "fileName": "",
+    "updatedAtMillis": 0,
+    "fileSize": 0,
+    "downloadUrl": ""
+  };
 }
 
 function getFileContent(fileName, defaultContent) {
@@ -632,6 +959,7 @@ function doGet(e) {
     var posts = JSON.parse(getFileContent("posts.json", "[]"));
     var users = JSON.parse(getFileContent("users.json", "[]"));
     var payouts = JSON.parse(getFileContent("payouts.json", "[]"));
+    var appUpdate = getUpdateApkInfo();
     
     var response = {
       "status": "online",
@@ -641,6 +969,7 @@ function doGet(e) {
       "posts": posts,
       "users": users,
       "payouts": payouts,
+      "appUpdate": appUpdate,
       "timestamp": new Date().toISOString()
     };
     
@@ -725,13 +1054,15 @@ function doPost(e) {
       var currentPosts = JSON.parse(getFileContent("posts.json", "[]"));
       var currentUsers = JSON.parse(getFileContent("users.json", "[]"));
       var currentPayouts = JSON.parse(getFileContent("payouts.json", "[]"));
+      var currentAppUpdate = getUpdateApkInfo();
       return ContentService.createTextOutput(JSON.stringify({
         "success": true,
         "message": "Synced with Google Drive",
         "tasks": currentTasks,
         "posts": currentPosts,
         "users": currentUsers,
-        "payouts": currentPayouts
+        "payouts": currentPayouts,
+        "appUpdate": currentAppUpdate
       })).setMimeType(ContentService.MimeType.JSON);
     }
     

@@ -161,12 +161,13 @@ object WatchSessionRepository {
         com.example.service.YouTubeLiveSearchService.disarm()
 
         val activeId = _activeTaskId.value
+        val sixHoursMillis = 6 * 60 * 60 * 1000L
         if (activeId != null) {
-            onTaskIncompleteAndLocked?.invoke(activeId, cleanReason, 12 * 60 * 60 * 1000L)
+            onTaskIncompleteAndLocked?.invoke(activeId, cleanReason, sixHoursMillis)
         }
         val serviceCallback = onServiceTaskIncomplete
         if (serviceCallback != null) {
-            serviceCallback.invoke(activeId ?: "", cleanReason, 12 * 60 * 60 * 1000L)
+            serviceCallback.invoke(activeId ?: "", cleanReason, sixHoursMillis)
         } else {
             onRequestHideOverlay?.invoke()
         }

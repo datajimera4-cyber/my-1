@@ -3,48 +3,18 @@ package com.example.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountBalance
-import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.MonetizationOn
-import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.QrCode2
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -52,11 +22,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.example.data.COINS_PER_INR
+import com.example.ui.theme.AlertRed
 import com.example.ui.theme.AmberDark
 import com.example.ui.theme.AmberPrimary
-import com.example.ui.theme.Slate800
 import com.example.ui.theme.SuccessGreen
 import java.util.Locale
 
@@ -66,34 +35,30 @@ fun WithdrawDialog(
     onDismiss: () -> Unit,
     onSubmitWithdrawal: (coins: Int, method: String, destination: String) -> Unit
 ) {
-    var selectedMethod by remember { mutableStateOf("UPI") }
-    var coinsInputText by remember { mutableStateOf("1000") }
-    var destinationInput by remember { mutableStateOf("") }
+    val presetAmounts = listOf(1000, 2000, 5000, 10000)
+    var coinsInput by remember {
+        mutableStateOf(if (currentBalance >= 1000) currentBalance.toString() else "1000")
+    }
+    var upiIdInput by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
-    var isSubmitting by remember { mutableStateOf(false) }
 
-    val coins = coinsInputText.toIntOrNull() ?: 0
-    val inrValue = coins / COINS_PER_INR.toDouble()
-    val formattedInr = String.format(Locale.US, "%.2f", inrValue)
+    val parsedCoins = coinsInput.toIntOrNull() ?: 0
+    val inrPreview = parsedCoins.toDouble() / COINS_PER_INR.toDouble()
+    val formattedInr = String.format(Locale.US, "%.2f", inrPreview)
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp,
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
             modifier = Modifier
-                .fillMaxWidth(0.92f)
-                .padding(vertical = 16.dp)
-                .testTag("withdraw_dialog")
+                .fillMaxWidth()
+                .testTag("withdraw_dialog"),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 10.dp)
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(20.dp)
-                    .verticalScroll(rememberScrollState()),
+                    .padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 // Header
@@ -102,281 +67,221 @@ fun WithdrawDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text(
-                            text = "Payout / Withdraw Cash",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.AccountBalanceWallet,
+                            contentDescription = null,
+                            tint = AmberPrimary,
+                            modifier = Modifier.size(24.dp)
                         )
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Exchange rate: 1000 Coins = ₹10.00 INR",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = AmberDark,
-                            fontWeight = FontWeight.Bold
+                            text = "UPI Cash Withdrawal",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.ExtraBold
                         )
                     }
-
-                    IconButton(onClick = onDismiss) {
-                        Icon(imageVector = Icons.Default.Close, contentDescription = "Close")
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "Close")
                     }
                 }
 
-                // Balance summary card
-                Card(
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                    modifier = Modifier.fillMaxWidth()
+                // Available Balance & Live INR Preview Banner
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            AmberPrimary.copy(alpha = 0.12f),
+                            RoundedCornerShape(14.dp)
+                        )
+                        .border(1.dp, AmberPrimary.copy(alpha = 0.3f), RoundedCornerShape(14.dp))
+                        .padding(14.dp)
                 ) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
                             Text(
-                                text = "Available Balance",
+                                text = "Available Coins",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.MonetizationOn,
-                                    contentDescription = null,
-                                    tint = AmberPrimary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "$currentBalance Coins",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.ExtraBold
-                                )
-                            }
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .background(SuccessGreen.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
-                        ) {
                             Text(
-                                text = "≈ ₹${String.format(Locale.US, "%.2f", currentBalance / COINS_PER_INR.toDouble())} INR",
-                                color = SuccessGreen,
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.titleSmall
+                                text = "$currentBalance Coins",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = AmberDark
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = "UPI Payout Value",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "₹$formattedInr INR",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = SuccessGreen
                             )
                         }
                     }
                 }
 
-                // Payout Method Selector
+                // UPI Method Badge (Only UPI supported)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.QrCode2,
+                        contentDescription = null,
+                        tint = AmberPrimary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "Instant UPI Transfer",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Google Pay, PhonePe, Paytm UPI, BHIM (1000 Coins = ₹10)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                // Quick Select Preset Chips
                 Text(
-                    text = "Select Payment Method",
+                    text = "Select Coins to Withdraw (Min 1000 Coins = ₹10):",
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold
                 )
-
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    listOf("UPI", "Bank", "Paytm").forEach { method ->
-                        val isSelected = selectedMethod == method
-                        Card(
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (isSelected) AmberPrimary.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-                            ),
+                    presetAmounts.forEach { preset ->
+                        val isSelected = parsedCoins == preset
+                        val inrVal = preset / COINS_PER_INR
+                        Box(
                             modifier = Modifier
                                 .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    if (isSelected) AmberPrimary.copy(alpha = 0.2f)
+                                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                )
                                 .border(
-                                    width = if (isSelected) 2.dp else 1.dp,
-                                    color = if (isSelected) AmberPrimary else MaterialTheme.colorScheme.outlineVariant,
-                                    shape = RoundedCornerShape(12.dp)
+                                    width = 1.dp,
+                                    color = if (isSelected) AmberPrimary else Color.Transparent,
+                                    shape = RoundedCornerShape(10.dp)
                                 )
-                                .clickable { selectedMethod = method }
-                                .padding(vertical = 10.dp)
+                                .clickable {
+                                    coinsInput = preset.toString()
+                                    errorMessage = null
+                                }
+                                .padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Column(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = when (method) {
-                                        "UPI" -> Icons.Default.QrCode2
-                                        "Bank" -> Icons.Default.AccountBalance
-                                        else -> Icons.Default.PhoneAndroid
-                                    },
-                                    contentDescription = null,
-                                    tint = if (isSelected) AmberDark else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(20.dp)
-                                )
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(
-                                    text = method,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    text = "$preset",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
                                     color = if (isSelected) AmberDark else MaterialTheme.colorScheme.onSurface
                                 )
+                                Text(
+                                    text = "₹$inrVal",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = SuccessGreen
+                                )
                             }
                         }
                     }
                 }
 
-                // Amount Section
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        text = "Withdraw Coins (Min: 1000 Coins = ₹10 INR)",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    // Presets
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        listOf(1000, 2500, 5000).forEach { preset ->
-                            FilterChip(
-                                selected = coinsInputText == preset.toString(),
-                                onClick = { coinsInputText = preset.toString() },
-                                label = { Text("${preset}c (₹${preset / COINS_PER_INR})", fontSize = 11.sp) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = AmberPrimary,
-                                    selectedLabelColor = Color.Black
-                                )
-                            )
-                        }
-                        FilterChip(
-                            selected = coinsInputText == currentBalance.toString(),
-                            onClick = { coinsInputText = currentBalance.toString() },
-                            label = { Text("All Coins", fontSize = 11.sp) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = AmberPrimary,
-                                selectedLabelColor = Color.Black
-                            )
-                        )
-                    }
-
-                    OutlinedTextField(
-                        value = coinsInputText,
-                        onValueChange = { input ->
-                            coinsInputText = input.filter { it.isDigit() }
-                            errorMessage = null
-                        },
-                        label = { Text("Enter Coins to Withdraw") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().testTag("withdraw_coins_input"),
-                        leadingIcon = {
-                            Icon(imageVector = Icons.Default.MonetizationOn, contentDescription = null, tint = AmberPrimary)
-                        }
-                    )
-                }
-
-                // Account / Destination field
+                // Coins Input Field
                 OutlinedTextField(
-                    value = destinationInput,
+                    value = coinsInput,
                     onValueChange = {
-                        destinationInput = it
+                        coinsInput = it.filter { c -> c.isDigit() }
                         errorMessage = null
                     },
-                    label = {
-                        Text(
-                            when (selectedMethod) {
-                                "UPI" -> "UPI ID (e.g. mobile@upi, name@okhdfcbank)"
-                                "Bank" -> "Account Number & IFSC Code"
-                                else -> "Paytm 10-digit Mobile Number"
-                            }
-                        )
-                    },
-                    placeholder = {
-                        Text(
-                            when (selectedMethod) {
-                                "UPI" -> "user@upi"
-                                "Bank" -> "A/C: 1234567890, IFSC: HDFC0001234"
-                                else -> "9876543210"
-                            }
-                        )
-                    },
+                    label = { Text("Coins to Withdraw") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
                     shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth().testTag("withdraw_destination_input"),
-                    singleLine = true
-                )
-
-                // Converted Payout display
-                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(SuccessGreen.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
+                        .testTag("withdraw_coins_input")
+                )
+
+                // UPI ID Input Field
+                OutlinedTextField(
+                    value = upiIdInput,
+                    onValueChange = {
+                        upiIdInput = it
+                        errorMessage = null
+                    },
+                    label = { Text("Enter Your UPI ID") },
+                    placeholder = { Text("e.g. yourname@okaxis or 9876543210@ybl") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("withdraw_destination_input")
+                )
+
+                errorMessage?.let {
                     Text(
-                        text = "You Will Receive:",
-                        style = MaterialTheme.typography.bodyMedium,
+                        text = it,
+                        color = AlertRed,
+                        style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.SemiBold
                     )
-                    Text(
-                        text = "₹$formattedInr INR",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = SuccessGreen
-                    )
                 }
 
-                errorMessage?.let { err ->
-                    Text(
-                        text = err,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(2.dp))
-
-                // Submit Button
                 Button(
                     onClick = {
-                        if (coins < 1000) {
-                            errorMessage = "Minimum payout is 1000 Coins (₹10.00 INR)."
-                            return@Button
+                        when {
+                            parsedCoins < 1000 -> {
+                                errorMessage = "Minimum withdrawal is 1000 Coins (₹10.00 INR)."
+                            }
+                            parsedCoins > currentBalance -> {
+                                errorMessage = "Insufficient coins! Your balance is $currentBalance Coins."
+                            }
+                            upiIdInput.trim().length < 4 || !upiIdInput.contains("@") -> {
+                                errorMessage = "Please enter a valid UPI ID (e.g. name@upi)."
+                            }
+                            else -> {
+                                onSubmitWithdrawal(parsedCoins, "UPI", upiIdInput.trim())
+                            }
                         }
-                        if (coins > currentBalance) {
-                            errorMessage = "Insufficient coins! You have $currentBalance coins."
-                            return@Button
-                        }
-                        if (destinationInput.isBlank()) {
-                            errorMessage = "Please enter your $selectedMethod address."
-                            return@Button
-                        }
-
-                        isSubmitting = true
-                        onSubmitWithdrawal(coins, selectedMethod, destinationInput.trim())
                     },
-                    enabled = !isSubmitting && coins >= 1000 && coins <= currentBalance && destinationInput.isNotBlank(),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(50.dp)
-                        .testTag("submit_withdraw_button")
+                        .testTag("confirm_withdraw_button"),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen)
                 ) {
-                    if (isSubmitting) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.Black)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Processing Payout...", color = Color.Black, fontWeight = FontWeight.Bold)
-                    } else {
-                        Text(
-                            text = "Withdraw ₹$formattedInr Now",
-                            fontWeight = FontWeight.Bold,
-                            color = Color.Black,
-                            fontSize = 15.sp
-                        )
-                    }
+                    Text(
+                        text = "Withdraw ₹$formattedInr via UPI ($parsedCoins Coins)",
+                        color = Color.White,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 14.sp
+                    )
                 }
             }
         }

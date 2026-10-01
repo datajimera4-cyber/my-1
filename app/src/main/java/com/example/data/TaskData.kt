@@ -148,8 +148,13 @@ data class VideoTaskItem(
     val createdAt: Long = System.currentTimeMillis(),
     val lockedUntilMillis: Long = 0L,
     val isPinned: Boolean = false,
-    val pinnedAt: Long = 0L
+    val pinnedAt: Long = 0L,
+    val maxCompletions: Int = 0,
+    val completedCount: Int = 0
 ) {
+    val isCompletionLimitReached: Boolean
+        get() = maxCompletions > 0 && completedCount >= maxCompletions
+
     val isLocked: Boolean
         get() = System.currentTimeMillis() < lockedUntilMillis
 
@@ -169,6 +174,39 @@ data class VideoTaskItem(
     }
 }
 
+data class SupportMessage(
+    val id: String,
+    val userId: String,
+    val userEmail: String,
+    val userName: String,
+    val senderRole: String, // "USER" or "ADMIN"
+    val message: String,
+    val timestampMillis: Long = System.currentTimeMillis()
+)
+
+fun generateSixDigitReferralCode(email: String): String {
+    val clean = email.trim().lowercase()
+    if (clean.isBlank()) return "100000"
+    var hash = 5381L
+    for (ch in clean) {
+        hash = ((hash shl 5) + hash) + ch.code
+    }
+    val sixDigits = (Math.abs(hash) % 900000L) + 100000L
+    return sixDigits.toString()
+}
+
+data class AppUpdateInfo(
+    val hasUpdate: Boolean = false,
+    val fileId: String = "",
+    val fileName: String = "KingoKing_Update.apk",
+    val updatedAtMillis: Long = 0L,
+    val fileSize: Long = 0L,
+    val downloadUrl: String = ""
+) {
+    val signature: String
+        get() = "${fileId}_${updatedAtMillis}"
+}
+
 /**
  * User Account Profile for Email Authentication.
  */
@@ -185,7 +223,9 @@ data class UserProfile(
     val commentCountsJson: String = "{}",
     val taskLocksJson: String = "{}",
     val completedTaskIdsJson: String = "[]",
-    val lastUpdatedMillis: Long = System.currentTimeMillis()
+    val lastUpdatedMillis: Long = System.currentTimeMillis(),
+    val referralCode: String = generateSixDigitReferralCode(email),
+    val referredByCode: String = ""
 )
 
 /**

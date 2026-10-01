@@ -176,6 +176,23 @@ fun WatchEarnApp(
     val activeRewardCoins by viewModel.activeRewardCoins.collectAsState()
     val videoTasks by viewModel.videoTasks.collectAsState()
     val taskIncompleteMessage by viewModel.taskIncompleteMessage.collectAsState()
+    val remoteAppUpdate by viewModel.remoteAppUpdate.collectAsState()
+    val installedUpdateSignature by viewModel.installedUpdateSignature.collectAsState()
+
+    val pendingUpdate = remoteAppUpdate
+    if (BuildConfig.APP_ROLE != "ADMIN" &&
+        pendingUpdate != null &&
+        pendingUpdate.hasUpdate &&
+        (pendingUpdate.fileId.isNotBlank() || pendingUpdate.downloadUrl.isNotBlank()) &&
+        pendingUpdate.signature != installedUpdateSignature
+    ) {
+        com.example.ui.components.MandatoryUpdateDialog(
+            updateInfo = pendingUpdate,
+            onMarkUpdateInstalled = { sig ->
+                viewModel.markAppUpdateInstalled(sig)
+            }
+        )
+    }
 
     // Mandatory Login Gate: User must sign in or sign up before using Kingo King
     if (currentUser == null) {
@@ -224,7 +241,7 @@ fun WatchEarnApp(
                 AppScreen.TASKS -> TasksListScreen(viewModel = viewModel)
                 AppScreen.WALLET -> WalletScreen(viewModel = viewModel)
                 AppScreen.ME -> MeScreen(viewModel = viewModel)
-                AppScreen.TASK, AppScreen.TASK_DETAIL -> TaskScreen(viewModel = viewModel)
+                AppScreen.TASK, AppScreen.TASK_DETAIL -> HomeScreen(viewModel = viewModel)
                 AppScreen.SETUP -> SetupScreen(viewModel = viewModel)
                 AppScreen.DIAGNOSTICS -> DiagnosticsScreen(viewModel = viewModel)
                 AppScreen.ADMIN -> {

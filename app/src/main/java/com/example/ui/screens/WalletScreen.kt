@@ -220,7 +220,7 @@ fun WalletScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Withdraw / Payout Cash",
+                            text = "Withdraw via UPI",
                             fontWeight = FontWeight.Bold,
                             color = Color.Black,
                             fontSize = 15.sp

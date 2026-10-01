@@ -87,6 +87,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val payoutRequests: StateFlow<List<PayoutRequest>> = dataStoreManager.payoutRequestsFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
+    val supportMessages: StateFlow<List<com.example.data.SupportMessage>> = dataStoreManager.supportMessagesFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
     val cloudServerUrl: StateFlow<String> = dataStoreManager.cloudServerUrlFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, DataStoreManager.DEFAULT_CLOUD_SERVER_URL)
 
@@ -98,6 +101,40 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val dismissedPostIds: StateFlow<Set<String>> = dataStoreManager.dismissedPostIdsFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+
+    val remoteAppUpdate: StateFlow<com.example.data.AppUpdateInfo?> = dataStoreManager.remoteAppUpdateFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val installedUpdateSignature: StateFlow<String> = dataStoreManager.installedUpdateSignatureFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, "")
+
+    val updateDriveFolderUrl: StateFlow<String> = dataStoreManager.updateDriveFolderUrlFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, "")
+
+    fun markAppUpdateInstalled(signature: String) {
+        viewModelScope.launch {
+            dataStoreManager.setInstalledUpdateSignature(signature)
+        }
+    }
+
+    fun saveUpdateDriveFolderUrl(url: String, onResult: ((Boolean, String) -> Unit)? = null) {
+        viewModelScope.launch {
+            dataStoreManager.setUpdateDriveFolderUrl(url.trim())
+            val srvUrl = cloudServerUrl.value
+            if (srvUrl.isNotBlank()) {
+                val res = com.example.admin.CloudDriveServerManager.syncData(
+                    serverUrl = srvUrl,
+                    dataStoreManager = dataStoreManager,
+                    pushAdminContent = true,
+                    pushLocalChanges = true,
+                    pullRemoteFirst = true
+                )
+                onResult?.invoke(res.first, if (res.first) "Update folder synced!" else res.second)
+            } else {
+                onResult?.invoke(true, "Saved update folder URL locally.")
+            }
+        }
+    }
 
     val taskIncompleteMessage: StateFlow<String?> = WatchSessionRepository.taskIncompleteMessage
 
@@ -256,24 +293,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Real-time watcher for Admin Balance Updates -> notify User App immediately when Admin credits coins
+        // Real-time watcher for Admin Balance Updates & 10% Referral Withdraw Bonuses -> notify User App immediately
         viewModelScope.launch {
             dataStoreManager.transactionsFlow.collectLatest { txList ->
                 if (com.example.BuildConfig.APP_ROLE != "ADMIN") {
                     val notified = dataStoreManager.notifiedItemIdsFlow.first()
                     val newAdminTx = txList.filter { tx ->
-                        (tx.id.startsWith("admin_coin_") || tx.title.contains("Admin Balance Update")) &&
+                        (tx.id.startsWith("admin_coin_") ||
+                            tx.id.startsWith("ref_withdraw_bonus_") ||
+                            tx.title.contains("Admin Balance Update") ||
+                            tx.title.contains("Referral Withdraw Bonus")) &&
                                 !notified.contains(tx.id)
                     }
                     if (newAdminTx.isNotEmpty()) {
                         dataStoreManager.markItemsNotified(newAdminTx.map { it.id }.toSet())
                         val newest = newAdminTx.first()
                         val sign = if (newest.coins >= 0) "+${newest.coins}" else "${newest.coins}"
-                        com.example.service.NotificationChannels.sendAdminUpdateNotification(
-                            context = getApplication(),
-                            title = "👑 Wallet Updated by Admin ($sign Coins)",
-                            body = "Your Kingo King wallet balance has been updated in real time!"
-                        )
+                        if (newest.id.startsWith("ref_withdraw_bonus_") || newest.title.contains("Referral Withdraw Bonus")) {
+                            com.example.service.NotificationChannels.sendAdminUpdateNotification(
+                                context = getApplication(),
+                                title = "🤝 Referral Bonus Earned ($sign Coins)!",
+                                body = newest.title
+                            )
+                        } else {
+                            com.example.service.NotificationChannels.sendAdminUpdateNotification(
+                                context = getApplication(),
+                                title = "👑 Wallet Updated by Admin ($sign Coins)",
+                                body = "Your Kingo King wallet balance has been updated in real time!"
+                            )
+                        }
                     }
                 }
             }
@@ -367,6 +415,42 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             context = getApplication(),
                             title = "$prefix: ${newest.title}",
                             body = newest.message.ifBlank { "Tap to view the latest update in ${newest.targetTab} tab!" }
+                        )
+                    }
+                }
+            }
+        }
+
+        // Real-time watcher for incoming Support Chat replies
+        viewModelScope.launch {
+            dataStoreManager.supportMessagesFlow.collectLatest { msgs ->
+                val isAdminApp = com.example.BuildConfig.APP_ROLE == "ADMIN"
+                val notified = dataStoreManager.notifiedItemIdsFlow.first()
+                if (isAdminApp) {
+                    val newIncoming = msgs.filter { m ->
+                        m.senderRole == "USER" && !notified.contains(m.id)
+                    }
+                    if (newIncoming.isNotEmpty()) {
+                        dataStoreManager.markItemsNotified(newIncoming.map { it.id }.toSet())
+                        val latest = newIncoming.last()
+                        com.example.service.NotificationChannels.sendAdminUpdateNotification(
+                            context = getApplication(),
+                            title = "💬 Support Query from ${latest.userName} (${latest.userId})",
+                            body = latest.message
+                        )
+                    }
+                } else {
+                    val myEmail = currentUser.value?.email?.lowercase() ?: "guest@watchearn.com"
+                    val newReplies = msgs.filter { m ->
+                        m.senderRole == "ADMIN" && m.userEmail.equals(myEmail, ignoreCase = true) && !notified.contains(m.id)
+                    }
+                    if (newReplies.isNotEmpty()) {
+                        dataStoreManager.markItemsNotified(newReplies.map { it.id }.toSet())
+                        val latest = newReplies.last()
+                        com.example.service.NotificationChannels.sendAdminUpdateNotification(
+                            context = getApplication(),
+                            title = "💬 Admin Support Reply",
+                            body = latest.message
                         )
                     }
                 }
@@ -678,9 +762,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun signUp(email: String, password: String, name: String, onResult: (Boolean, String) -> Unit) {
+    fun signUp(
+        email: String,
+        password: String,
+        name: String,
+        referralCodeInput: String = "",
+        onResult: (Boolean, String) -> Unit
+    ) {
         viewModelScope.launch {
-            val res = dataStoreManager.signUpUser(email, password, name)
+            val res = dataStoreManager.signUpUser(email, password, name, referralCodeInput)
             // Immediately return result so UI transitions instantly without waiting for slow Drive file locks
             onResult(res.first, res.second)
             if (res.first) {
@@ -1054,10 +1144,51 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun lockTask(taskId: String, durationMillis: Long = 12 * 60 * 60 * 1000L) {
+    fun sendSupportMessage(
+        messageText: String,
+        targetUserEmail: String? = null,
+        targetUserId: String? = null,
+        targetUserName: String? = null
+    ) {
+        val cleanText = messageText.trim()
+        if (cleanText.isEmpty()) return
+        val isAdmin = com.example.BuildConfig.APP_ROLE == "ADMIN"
+        val activeUser = currentUser.value
+        val resolvedEmail = (targetUserEmail ?: activeUser?.email ?: "guest@watchearn.com").trim().lowercase()
+        val resolvedId = targetUserId ?: activeUser?.userId ?: "usr_${Math.abs(resolvedEmail.hashCode()) % 100000}"
+        val resolvedName = (targetUserName ?: activeUser?.name ?: resolvedEmail.substringBefore("@")).ifBlank { "User" }
+        val role = if (isAdmin) "ADMIN" else "USER"
+
+        viewModelScope.launch {
+            val msg = dataStoreManager.addSupportMessage(
+                userId = resolvedId,
+                userEmail = resolvedEmail,
+                userName = resolvedName,
+                senderRole = role,
+                messageText = cleanText
+            )
+            dataStoreManager.markItemsNotified(setOf(msg.id))
+            val url = cloudServerUrl.value
+            if (url.isNotBlank()) {
+                launch {
+                    try {
+                        com.example.admin.CloudDriveServerManager.syncData(
+                            serverUrl = url,
+                            dataStoreManager = dataStoreManager,
+                            pushAdminContent = isAdmin,
+                            pushLocalChanges = true,
+                            pullRemoteFirst = false
+                        )
+                    } catch (_: Exception) {}
+                }
+            }
+        }
+    }
+
+    fun lockTask(taskId: String, durationMillis: Long = 6 * 60 * 60 * 1000L) {
         viewModelScope.launch {
             dataStoreManager.lockTask(taskId, durationMillis)
-            WatchSessionRepository.addLog("Task #$taskId locked for 12 hours due to incomplete watch.", LogType.WARNING)
+            WatchSessionRepository.addLog("Task #$taskId locked for 6 hours due to incomplete watch.", LogType.WARNING)
         }
     }
 
@@ -1135,17 +1266,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             ?: videoTasks.value.firstOrNull()?.id
             ?: "default_task"
 
-        // Check if task is currently locked (8h for completed, 12h for incomplete)
+        // Check if task is currently locked (4h for completed, 6h for incomplete)
         val currentTask = videoTasks.value.find { it.id == resolvedTaskId }
         if (currentTask != null && currentTask.isLocked) {
             val remainStr = currentTask.getLockRemainingFormatted()
             if (currentTask.isCompleted) {
                 WatchSessionRepository.showTaskIncompleteMessage(
-                    "This task is completed and locked for 8 hours ($remainStr remaining)."
+                    "This task is completed and locked for 4 hours ($remainStr remaining)."
                 )
             } else {
                 WatchSessionRepository.showTaskIncompleteMessage(
-                    "This task is locked for 12 hours ($remainStr remaining) due to an incomplete session."
+                    "This task is locked for 6 hours ($remainStr remaining) due to an incomplete session."
                 )
             }
             return
@@ -1195,85 +1326,52 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
 
-            val targetVideoId = TitleMatcher.extractVideoId(effectiveUrl)
+            // Strictly use the video URL ONLY for fetching Title, Channel Name, and Thumbnail above.
+            // NEVER use the video URL to open or play the video in YouTube!
+            // Instead, open YouTube via its standard Home Launcher Intent and let YouTubeLiveSearchService
+            // locate & play the video via Browse Features or YouTube Search (0% External source).
+            WatchSessionRepository.updateSearchProgress(com.example.data.SearchProgressState(isSearching = false))
+            WatchSessionRepository.addLog("Opening YouTube app for organic search/browse: \"$title\" ($author)", LogType.INFO)
 
-            if (liveSearchMode.value) {
-                // LIVE MODE: Directly opens YouTube with the target title searched!
-                WatchSessionRepository.updateSearchProgress(com.example.data.SearchProgressState(isSearching = false))
-                WatchSessionRepository.addLog("Live Mode: Opening YouTube search for \"$title\"", LogType.INFO)
+            YouTubeLiveSearchService.armSearchTrigger(
+                title = title,
+                channel = author
+            )
 
-                // Arm the accessibility trigger to auto-type in search bar and click target video card
-                YouTubeLiveSearchService.armSearchTrigger(title, author, effectiveUrl, targetVideoId)
+            WatchSessionRepository.startTask(
+                taskTitle = title,
+                taskAuthor = author,
+                requiredSeconds = requiredSeconds,
+                initialWatchedMillis = 0L,
+                rewardCoins = rewardCoins,
+                taskId = resolvedTaskId
+            )
+            WatchTimerService.start(context)
 
-                WatchSessionRepository.startTask(
-                    taskTitle = title,
-                    taskAuthor = author,
-                    requiredSeconds = requiredSeconds,
-                    initialWatchedMillis = 0L,
-                    rewardCoins = rewardCoins,
-                    taskId = resolvedTaskId
-                )
-                WatchTimerService.start(context)
+            try {
+                val ytHomeIntent = PermissionHelper.openYouTubeAppHomeIntent(context)
+                context.startActivity(ytHomeIntent)
+            } catch (_: Exception) {}
 
-                // Open YouTube with the exact search query intent
-                val ytSearchIntent = PermissionHelper.openYouTubeSearchIntent(context, title)
-                try {
-                    context.startActivity(ytSearchIntent)
-                } catch (_: Exception) {
-                    val fallbackIntent = PermissionHelper.openVideoIntent(context, effectiveUrl, title)
-                    context.startActivity(fallbackIntent)
-                }
-
-                WatchSessionRepository.addLog(
-                    "YouTube opened for \"$title\"! Auto-searching and locating target video card...",
-                    LogType.SUCCESS
-                )
-            } else {
-                // DEFAULT SIMULATION MODE: Shows in-app typewriter/radar loading screen
-                val foundItem = YouTubeSearchEngine.searchAndLocateVideo(
-                    targetTitle = title,
-                    targetChannel = author,
-                    targetVideoId = targetVideoId
-                ) { progressState ->
-                    WatchSessionRepository.updateSearchProgress(progressState)
-                }
-
-                val targetUrlToLaunch = if (foundItem != null && foundItem.videoId.isNotEmpty()) {
-                    "https://www.youtube.com/watch?v=${foundItem.videoId}"
-                } else {
-                    effectiveUrl
-                }
-
-                YouTubeLiveSearchService.prepareForDirectWatch(
-                    title = title,
-                    channel = author,
-                    videoUrl = targetUrlToLaunch,
-                    videoId = targetVideoId
-                )
-
-                WatchSessionRepository.startTask(
-                    taskTitle = title,
-                    taskAuthor = author,
-                    requiredSeconds = requiredSeconds,
-                    initialWatchedMillis = 0L,
-                    rewardCoins = rewardCoins,
-                    taskId = resolvedTaskId
-                )
-
-                WatchTimerService.start(context)
-
-                val openIntent = PermissionHelper.openVideoIntent(context, targetUrlToLaunch, title)
-                context.startActivity(openIntent)
-            }
+            WatchSessionRepository.addLog(
+                "YouTube launched cleanly! Auto-searching \"$title\" inside YouTube...",
+                LogType.SUCCESS
+            )
         }
     }
 
     val currentMilestoneTier: StateFlow<WatchDurationTier?> = WatchSessionRepository.currentMilestoneTier
 
     fun resumeVideoInYouTube(context: Context) {
-        val targetUrl = _currentVideoUrl.value
-        val openIntent = PermissionHelper.openVideoIntent(context, targetUrl, targetTaskTitle.value)
-        context.startActivity(openIntent)
+        val title = targetTaskTitle.value ?: videoTasks.value.find { it.id == selectedTaskId.value }?.title ?: ""
+        val author = WatchSessionRepository.targetTaskAuthor.value ?: videoTasks.value.find { it.id == selectedTaskId.value }?.channelName ?: ""
+        if (title.isNotBlank()) {
+            YouTubeLiveSearchService.armSearchTrigger(title = title, channel = author)
+        }
+        try {
+            val openIntent = PermissionHelper.openYouTubeAppHomeIntent(context)
+            context.startActivity(openIntent)
+        } catch (_: Exception) {}
     }
 
     fun claimMilestoneReward(context: Context) {

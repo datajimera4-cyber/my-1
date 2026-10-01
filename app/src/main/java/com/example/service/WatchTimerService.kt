@@ -114,29 +114,15 @@ class WatchTimerService : Service() {
         WatchSessionRepository.onServiceTaskIncomplete = { taskId, reason, lockDuration ->
             completionJob?.cancel()
             timerLoopJob?.cancel()
+            floatingOverlayManager.hideOverlay()
             serviceScope.launch {
                 if (taskId.isNotBlank()) {
                     dataStoreManager.lockTask(taskId, lockDuration)
                 }
             }
             postRedAlertNotification("Task Incomplete!", reason)
-
-            if (!WatchSessionRepository.isAppInForeground && android.provider.Settings.canDrawOverlays(this)) {
-                floatingOverlayManager.showTaskIncompletePopup(reason) {
-                    stopForeground(STOP_FOREGROUND_REMOVE)
-                    stopSelf()
-                }
-                completionJob = serviceScope.launch {
-                    delay(25000L)
-                    floatingOverlayManager.hideOverlay()
-                    stopForeground(STOP_FOREGROUND_REMOVE)
-                    stopSelf()
-                }
-            } else {
-                floatingOverlayManager.hideOverlay()
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
-            }
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
         }
 
         WatchSessionRepository.onSaveProgressNeeded = { millis ->
@@ -230,6 +216,9 @@ class WatchTimerService : Service() {
                     hasSeenAudioPlaying = false
                     silentTicksCount = 0
                     wasAudioSilentWhileExplicitlyPaused = false
+                    if (floatingOverlayManager.isOverlayAttached()) {
+                        floatingOverlayManager.hideOverlay()
+                    }
                     delay(500L)
                     continue
                 }
@@ -270,9 +259,12 @@ class WatchTimerService : Service() {
                 )
 
                 val isMatched = WatchSessionRepository.matchResult.value != com.example.data.MatchResult.MISMATCH
+                val isSearchStillInProgress = YouTubeLiveSearchService.isServiceConnected &&
+                        YouTubeLiveSearchService.currentPhase != YouTubeLiveSearchService.LiveSearchPhase.IDLE &&
+                        YouTubeLiveSearchService.currentPhase != YouTubeLiveSearchService.LiveSearchPhase.COMPLETED
 
-                // Timer ticks ONLY when YouTube is active in foreground, target video matches, and video is playing (not paused)
-                val isPlaying = !isAppForeground && isYtForeground && sessionActive && isMatched && !isExplicitlyPaused
+                // Timer ticks ONLY when YouTube is active in foreground, target video has been clicked/opened, matches, and is playing (not paused)
+                val isPlaying = !isAppForeground && isYtForeground && sessionActive && isMatched && !isExplicitlyPaused && !isSearchStillInProgress
 
                 WatchSessionRepository.setPlaybackPlaying(isPlaying)
                 WatchSessionRepository.processTimerTick()
@@ -321,12 +313,10 @@ class WatchTimerService : Service() {
         stateObserverJob = serviceScope.launch {
             WatchSessionRepository.sessionState.collectLatest { state ->
                 when (state) {
-                    SessionState.INVALID -> {
-                        if (WatchSessionRepository.isAppInForeground) {
-                            floatingOverlayManager.hideOverlay()
-                            stopForeground(STOP_FOREGROUND_REMOVE)
-                            stopSelf()
-                        }
+                    SessionState.INVALID, SessionState.IDLE -> {
+                        floatingOverlayManager.hideOverlay()
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        stopSelf()
                     }
                     SessionState.COMPLETED -> {
                         // Will be stopped by onServiceCompletionTriggered

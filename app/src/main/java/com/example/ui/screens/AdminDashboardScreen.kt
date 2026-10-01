@@ -29,6 +29,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
@@ -45,6 +46,7 @@ import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.SupportAgent
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.AlertDialog
@@ -93,9 +95,11 @@ import coil.request.ImageRequest
 import com.example.data.AdminPostItem
 import com.example.data.PayoutRequest
 import com.example.data.PayoutStatus
+import com.example.data.SupportMessage
 import com.example.data.UserProfile
 import com.example.data.VideoTaskItem
 import com.example.ui.components.AddVideoTaskDialog
+import com.example.ui.components.SupportChatDialog
 import com.example.ui.theme.AlertRed
 import com.example.ui.theme.AmberDark
 import com.example.ui.theme.AmberPrimary
@@ -121,21 +125,33 @@ fun AdminDashboardScreen(
     val videoTasks by viewModel.videoTasks.collectAsState()
     val adminPosts by viewModel.adminPosts.collectAsState()
     val payoutRequests by viewModel.payoutRequests.collectAsState()
+    val supportMessages by viewModel.supportMessages.collectAsState()
     val allUsers by viewModel.allUsers.collectAsState()
     val serverRunning by viewModel.adminServerRunning.collectAsState()
     val serverUrl by viewModel.adminServerUrl.collectAsState()
     val cloudServerUrl by viewModel.cloudServerUrl.collectAsState()
     val cloudServerStatus by viewModel.cloudServerStatus.collectAsState()
+    val remoteAppUpdate by viewModel.remoteAppUpdate.collectAsState()
+    val updateDriveFolderUrl by viewModel.updateDriveFolderUrl.collectAsState()
     val walletBalance by viewModel.walletBalance.collectAsState()
 
     var selectedTabIndex by remember { mutableIntStateOf(0) }
-    var showAddTaskDialog by remember { mutableStateOf(false) }
+    var showAddTaskDialog by remember { mutableIntStateOf(0).let { mutableStateOf(false) } }
 
     // Dialogs for Admin actions
     var adjustCoinsUser by remember { mutableStateOf<UserProfile?>(null) }
     var adjustCoinsInput by remember { mutableStateOf("") }
+    var activeChatUser by remember { mutableStateOf<Triple<String, String, String>?>(null) } // (userId, userEmail, userName)
 
     val pendingPayoutsCount = payoutRequests.count { it.status == PayoutStatus.PENDING }
+    val supportThreadsCount = remember(supportMessages) {
+        supportMessages.map { it.userId.ifBlank { it.userEmail.lowercase() } }.distinct().size
+    }
+    val unAnsweredSupportCount = remember(supportMessages) {
+        supportMessages
+            .groupBy { it.userId.ifBlank { it.userEmail.lowercase() } }
+            .count { (_, msgs) -> msgs.maxByOrNull { it.timestampMillis }?.senderRole == "USER" }
+    }
 
     LaunchedEffect(Unit) {
         if (!serverRunning) {
@@ -277,18 +293,46 @@ fun AdminDashboardScreen(
                 Tab(
                     selected = selectedTabIndex == 3,
                     onClick = { selectedTabIndex = 3 },
-                    text = { Text("Users", fontWeight = FontWeight.Bold) },
-                    icon = { Icon(Icons.Default.People, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Support Chat", fontWeight = FontWeight.Bold)
+                            if (unAnsweredSupportCount > 0 || supportThreadsCount > 0) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .background(
+                                            if (unAnsweredSupportCount > 0) AlertRed else PrimaryBlue,
+                                            CircleShape
+                                        )
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = if (unAnsweredSupportCount > 0) "$unAnsweredSupportCount new" else "$supportThreadsCount",
+                                        color = Color.White,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                }
+                            }
+                        }
+                    },
+                    icon = { Icon(Icons.Default.SupportAgent, contentDescription = null, modifier = Modifier.size(18.dp)) }
                 )
                 Tab(
                     selected = selectedTabIndex == 4,
                     onClick = { selectedTabIndex = 4 },
-                    text = { Text("PC / Laptop", fontWeight = FontWeight.Bold) },
-                    icon = { Icon(Icons.Default.Laptop, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                    text = { Text("Users", fontWeight = FontWeight.Bold) },
+                    icon = { Icon(Icons.Default.People, contentDescription = null, modifier = Modifier.size(18.dp)) }
                 )
                 Tab(
                     selected = selectedTabIndex == 5,
                     onClick = { selectedTabIndex = 5 },
+                    text = { Text("PC / Laptop", fontWeight = FontWeight.Bold) },
+                    icon = { Icon(Icons.Default.Laptop, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                )
+                Tab(
+                    selected = selectedTabIndex == 6,
+                    onClick = { selectedTabIndex = 6 },
                     text = { Text("Google Drive Server", fontWeight = FontWeight.Bold) },
                     icon = { Icon(Icons.Default.Cloud, contentDescription = null, modifier = Modifier.size(18.dp)) }
                 )
@@ -332,16 +376,26 @@ fun AdminDashboardScreen(
                         Toast.makeText(context, "Payout Rejected & Coins Refunded.", Toast.LENGTH_SHORT).show()
                     }
                 )
-                3 -> UsersTabContent(
+                3 -> SupportChatTabContent(
+                    supportMessages = supportMessages,
+                    allUsers = allUsers,
+                    onOpenUserChat = { userId, userEmail, userName ->
+                        activeChatUser = Triple(userId, userEmail, userName)
+                    }
+                )
+                4 -> UsersTabContent(
                     users = allUsers,
                     tasks = videoTasks,
                     currentBalance = walletBalance,
                     onAdjustCoins = { user ->
                         adjustCoinsUser = user
                         adjustCoinsInput = user.coinsBalance.toString()
+                    },
+                    onChatWithUser = { user ->
+                        activeChatUser = Triple(user.userId, user.email, user.name.ifBlank { user.userId })
                     }
                 )
-                4 -> LaptopAccessTabContent(
+                5 -> LaptopAccessTabContent(
                     context = context,
                     serverRunning = serverRunning,
                     serverUrl = serverUrl,
@@ -357,10 +411,16 @@ fun AdminDashboardScreen(
                         }
                     }
                 )
-                5 -> GoogleDriveServerTabContent(
+                6 -> GoogleDriveServerTabContent(
                     context = context,
                     cloudServerUrl = cloudServerUrl,
                     cloudServerStatus = cloudServerStatus,
+                    remoteAppUpdate = remoteAppUpdate,
+                    updateDriveFolderUrl = updateDriveFolderUrl,
+                    onSaveUpdateFolderUrl = { folderUrl ->
+                        viewModel.saveUpdateDriveFolderUrl(folderUrl)
+                        Toast.makeText(context, "Google Drive 'update' folder synced!", Toast.LENGTH_SHORT).show()
+                    },
                     onSaveUrl = { viewModel.saveCloudServerUrl(it) },
                     onTestConnection = { onResult -> viewModel.testGoogleDriveConnection(onResult) },
                     onSyncNow = { onResult -> viewModel.syncWithGoogleDriveServer(onResult) }
@@ -377,6 +437,31 @@ fun AdminDashboardScreen(
                 viewModel.addVideoTask(newTask)
                 showAddTaskDialog = false
             }
+        )
+    }
+
+    // Active Admin Support Chat Dialog with User
+    activeChatUser?.let { (targetUserId, targetEmail, targetName) ->
+        val threadMessages = remember(supportMessages, targetUserId, targetEmail) {
+            supportMessages.filter {
+                (targetEmail.isNotBlank() && it.userEmail.equals(targetEmail, ignoreCase = true)) ||
+                    (targetUserId.isNotBlank() && it.userId == targetUserId)
+            }.sortedBy { it.timestampMillis }
+        }
+        SupportChatDialog(
+            title = "Chat: ${targetName.ifBlank { targetUserId }}",
+            subtitle = "User ID: $targetUserId • $targetEmail",
+            messages = threadMessages,
+            isAdminViewer = true,
+            onSendMessage = { replyText ->
+                viewModel.sendSupportMessage(
+                    messageText = replyText,
+                    targetUserEmail = targetEmail,
+                    targetUserId = targetUserId,
+                    targetUserName = targetName
+                )
+            },
+            onDismiss = { activeChatUser = null }
         )
     }
 
@@ -524,34 +609,63 @@ private fun TasksTabContent(
                         Spacer(modifier = Modifier.width(12.dp))
 
                         Column(modifier = Modifier.weight(1f)) {
-                            if (task.isPinned) {
-                                Box(
-                                    modifier = Modifier
-                                        .background(AmberPrimary, RoundedCornerShape(4.dp))
-                                        .padding(horizontal = 6.dp, vertical = 1.dp)
-                                ) {
-                                    Text(
-                                        text = "📌 PINNED AT TOP",
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Black,
-                                        color = Color.Black
-                                    )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                if (task.isPinned) {
+                                    Box(
+                                        modifier = Modifier
+                                            .background(AmberPrimary, RoundedCornerShape(4.dp))
+                                            .padding(horizontal = 6.dp, vertical = 1.dp)
+                                    ) {
+                                        Text(
+                                            text = "📌 PINNED",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Black,
+                                            color = Color.Black
+                                        )
+                                    }
                                 }
+                                if (task.maxCompletions > 0) {
+                                    val limitHit = task.isCompletionLimitReached
+                                    Box(
+                                        modifier = Modifier
+                                            .background(
+                                                if (limitHit) AlertRed.copy(alpha = 0.15f) else PrimaryBlue.copy(alpha = 0.15f),
+                                                RoundedCornerShape(4.dp)
+                                            )
+                                            .padding(horizontal = 6.dp, vertical = 1.dp)
+                                    ) {
+                                        Text(
+                                            text = if (limitHit) "🎯 LIMIT FULL (${task.completedCount}/${task.maxCompletions})"
+                                            else "🎯 Clicks: ${task.completedCount}/${task.maxCompletions}",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = if (limitHit) AlertRed else PrimaryBlue
+                                        )
+                                    }
+                                }
+                            }
+                            if (task.isPinned || task.maxCompletions > 0) {
                                 Spacer(modifier = Modifier.height(2.dp))
                             }
                             Text(
                                 text = task.title,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                                 fontSize = 14.sp
                             )
                             Text(
                                 text = "${task.channelName} • ${task.selectedDurationSeconds / 60} min",
                                 fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = "+${task.rewardCoins} coins",
+                                text = "+${task.rewardCoins} Coins",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = AmberPrimary
@@ -794,11 +908,198 @@ private fun PayoutsTabContent(
 }
 
 @Composable
+private fun SupportChatTabContent(
+    supportMessages: List<SupportMessage>,
+    allUsers: List<UserProfile>,
+    onOpenUserChat: (userId: String, userEmail: String, userName: String) -> Unit
+) {
+    val groupedThreads = remember(supportMessages, allUsers) {
+        val map = supportMessages.groupBy { msg ->
+            msg.userId.ifBlank { msg.userEmail.lowercase() }
+        }
+        map.entries.map { (key, msgs) ->
+            val sorted = msgs.sortedBy { it.timestampMillis }
+            val latest = sorted.last()
+            val matchedUser = allUsers.find {
+                it.userId == latest.userId || it.email.equals(latest.userEmail, ignoreCase = true)
+            }
+            val displayId = latest.userId.ifBlank { matchedUser?.userId ?: key }
+            val displayEmail = latest.userEmail.ifBlank { matchedUser?.email ?: "" }
+            val displayName = latest.userName.ifBlank { matchedUser?.name?.ifBlank { displayId } ?: displayId }
+            val waitingForAdmin = latest.senderRole == "USER"
+            Triple(Triple(displayId, displayEmail, displayName), sorted, waitingForAdmin)
+        }.sortedWith(
+            compareByDescending<Triple<Triple<String, String, String>, List<SupportMessage>, Boolean>> { it.third }
+                .thenByDescending { it.second.lastOrNull()?.timestampMillis ?: 0L }
+        )
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        if (groupedThreads.isEmpty()) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                ) {
+                    Box(modifier = Modifier.padding(32.dp), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                imageVector = Icons.Default.SupportAgent,
+                                contentDescription = null,
+                                tint = PrimaryBlue,
+                                modifier = Modifier.size(42.dp)
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text("No Support Messages Yet", fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "When any user sends a query from Support Chat, it will appear here under their User ID.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        } else {
+            items(groupedThreads, key = { it.first.first + "_" + it.first.second }) { (userInfo, msgs, waitingForAdmin) ->
+                val (userId, userEmail, userName) = userInfo
+                val lastMsg = msgs.last()
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(
+                            width = if (waitingForAdmin) 1.5.dp else 1.dp,
+                            color = if (waitingForAdmin) AmberPrimary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                            shape = RoundedCornerShape(16.dp)
+                        )
+                        .clickable { onOpenUserChat(userId, userEmail, userName) }
+                        .testTag("admin_support_thread_$userId")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(46.dp)
+                                .background(
+                                    if (waitingForAdmin) AmberPrimary.copy(alpha = 0.2f) else PrimaryBlue.copy(alpha = 0.15f),
+                                    CircleShape
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Chat,
+                                contentDescription = null,
+                                tint = if (waitingForAdmin) AmberDark else PrimaryBlue,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "ID: $userId • $userName",
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 14.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (waitingForAdmin) {
+                                    Box(
+                                        modifier = Modifier
+                                            .background(AlertRed, RoundedCornerShape(6.dp))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = "NEEDS REPLY",
+                                            color = Color.White,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Black
+                                        )
+                                    }
+                                } else {
+                                    Box(
+                                        modifier = Modifier
+                                            .background(SuccessGreen.copy(alpha = 0.18f), RoundedCornerShape(6.dp))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = "REPLIED",
+                                            color = SuccessGreen,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+
+                            if (userEmail.isNotBlank()) {
+                                Text(
+                                    text = userEmail,
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            Text(
+                                text = (if (lastMsg.senderRole == "ADMIN") "You: " else "User: ") + lastMsg.message,
+                                fontSize = 13.sp,
+                                fontWeight = if (waitingForAdmin) FontWeight.Bold else FontWeight.Normal,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        Button(
+                            onClick = { onOpenUserChat(userId, userEmail, userName) },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            modifier = Modifier.height(36.dp)
+                        ) {
+                            Text("Reply", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun UsersTabContent(
     users: List<UserProfile>,
     tasks: List<VideoTaskItem>,
     currentBalance: Int,
-    onAdjustCoins: (UserProfile) -> Unit
+    onAdjustCoins: (UserProfile) -> Unit,
+    onChatWithUser: (UserProfile) -> Unit
 ) {
     val effectiveUsers = if (users.isEmpty()) {
         listOf(UserProfile("user_app", "guest@watchearn.com", "VIP Watcher", coinsBalance = currentBalance))
@@ -925,9 +1226,23 @@ private fun UsersTabContent(
                             Text(
                                 text = if (user.name.isNotBlank()) "${user.name} (${user.email})" else user.email,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp
+                                fontSize = 14.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
-                            Text(text = "ID: ${user.userId}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                text = buildString {
+                                    append("ID: ${user.userId}")
+                                    if (user.referralCode.isNotBlank()) {
+                                        append(" • Refer Key: ${user.referralCode}")
+                                    }
+                                    if (user.referredByCode.isNotBlank()) {
+                                        append(" (Invited by: ${user.referredByCode})")
+                                    }
+                                },
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                             Text(
                                 text = "${user.coinsBalance} Coins (≈ ₹${String.format(Locale.US, "%.2f", user.coinsBalance / com.example.data.COINS_PER_INR.toDouble())})",
                                 fontWeight = FontWeight.ExtraBold,
@@ -936,12 +1251,25 @@ private fun UsersTabContent(
                             )
                         }
 
-                        OutlinedButton(
-                            onClick = { onAdjustCoins(user) },
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.height(36.dp)
-                        ) {
-                            Text("Edit Coins", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            OutlinedButton(
+                                onClick = { onChatWithUser(user) },
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                modifier = Modifier.height(36.dp)
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null, tint = PrimaryBlue, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Chat", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PrimaryBlue)
+                            }
+                            OutlinedButton(
+                                onClick = { onAdjustCoins(user) },
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                modifier = Modifier.height(36.dp)
+                            ) {
+                                Text("Coins", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
 
@@ -1210,6 +1538,9 @@ private fun GoogleDriveServerTabContent(
     context: Context,
     cloudServerUrl: String,
     cloudServerStatus: String,
+    remoteAppUpdate: com.example.data.AppUpdateInfo?,
+    updateDriveFolderUrl: String,
+    onSaveUpdateFolderUrl: (String) -> Unit,
     onSaveUrl: (String) -> Unit,
     onTestConnection: ((Boolean, String) -> Unit) -> Unit,
     onSyncNow: ((Boolean, String) -> Unit) -> Unit
@@ -1217,6 +1548,7 @@ private fun GoogleDriveServerTabContent(
     var urlInput by remember(cloudServerUrl) {
         mutableStateOf(cloudServerUrl.ifBlank { com.example.data.DataStoreManager.DEFAULT_ADMIN_CLOUD_SERVER_URL })
     }
+    var updateFolderInput by remember(updateDriveFolderUrl) { mutableStateOf(updateDriveFolderUrl) }
     var isTesting by remember { mutableStateOf(false) }
     var isSyncing by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
@@ -1434,6 +1766,85 @@ private fun GoogleDriveServerTabContent(
                             color = if (isSuccessStatus) SuccessGreen else AlertRed
                         )
                     }
+                }
+            }
+        }
+
+        // Mandatory App Update ("update" Google Drive Folder) Card
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Google Drive 'update' Folder (Mandatory App Update)",
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = PrimaryBlue
+                )
+                Text(
+                    text = "Apne Google Drive par 'update' naam ka folder banayein. Jab bhi aap us folder mein naya APK dalenge ya purana APK hata kar naya APK dalenge, sabhi users ke app khulte hi 'Please Update' ka mandatory popup aayega (Update ya Cancel).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 16.sp
+                )
+
+                if (remoteAppUpdate != null && remoteAppUpdate.hasUpdate) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(SuccessGreen.copy(alpha = 0.14f), RoundedCornerShape(10.dp))
+                            .padding(12.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = "✅ Active Update APK Detected in 'update' Folder:",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = SuccessGreen
+                            )
+                            Text(
+                                text = "File: ${remoteAppUpdate.fileName} (${String.format(Locale.US, "%.1f MB", remoteAppUpdate.fileSize / (1024.0 * 1024.0))})",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                            .padding(10.dp)
+                    ) {
+                        Text(
+                            text = "Status: Currently no APK inside 'update' folder (Normal app launch active).",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                OutlinedTextField(
+                    value = updateFolderInput,
+                    onValueChange = { updateFolderInput = it },
+                    label = { Text("Optional: Direct 'update' Folder or APK Link") },
+                    placeholder = { Text("https://drive.google.com/drive/folders/...", fontSize = 12.sp) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Button(
+                    onClick = { onSaveUpdateFolderUrl(updateFolderInput.trim()) },
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Sync, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Save 'update' Folder Link & Check APK", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             }
         }

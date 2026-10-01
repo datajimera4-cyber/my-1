@@ -70,6 +70,22 @@ object PermissionHelper {
         return Settings.canDrawOverlays(context)
     }
 
+    fun canDrawOverlays(context: Context): Boolean {
+        return Settings.canDrawOverlays(context)
+    }
+
+    fun openAccessibilitySettings(context: Context) {
+        try {
+            context.startActivity(createAccessibilitySettingsIntent())
+        } catch (_: Exception) {}
+    }
+
+    fun openOverlaySettings(context: Context) {
+        try {
+            context.startActivity(createOverlaySettingsIntent(context))
+        } catch (_: Exception) {}
+    }
+
     /**
      * Intent to open Overlay permission settings for Kingo King.
      */
@@ -130,62 +146,42 @@ object PermissionHelper {
     }
 
     /**
-     * Launches the video URL in the YouTube app with natural search referrer headers.
-     * Uses vnd.youtube:$id when installed so YouTube opens the actual full-screen video player
-     * instead of inline feed preview.
+     * Opens the official YouTube app cleanly via its standard Home Launcher Intent (ACTION_MAIN + CATEGORY_LAUNCHER),
+     * identical to tapping the YouTube icon on the device home screen.
+     * NEVER uses external video URLs or watch?v= deep links, ensuring 0% External traffic source in YouTube Analytics.
      */
-    fun openVideoIntent(context: Context, videoUrl: String, searchTitle: String? = null): Intent {
-        val videoId = TitleMatcher.extractVideoId(videoUrl)
-        val targetUrl = if (!videoId.isNullOrBlank()) {
-            "https://www.youtube.com/watch?v=$videoId"
-        } else {
-            videoUrl
-        }
-        val uri = Uri.parse(targetUrl)
-
-        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra(Intent.EXTRA_REFERRER, Uri.parse("android-app://com.google.android.youtube/search"))
-            if (!searchTitle.isNullOrBlank()) {
-                putExtra("query", searchTitle)
-                putExtra("search_query", searchTitle)
+    fun openYouTubeAppHomeIntent(context: Context): Intent {
+        if (isYouTubeAppInstalled(context)) {
+            val launchIntent = context.packageManager.getLaunchIntentForPackage(YOUTUBE_PACKAGE)
+            if (launchIntent != null) {
+                launchIntent.addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                            Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
+                )
+                return launchIntent
             }
         }
-
-        if (isYouTubeAppInstalled(context)) {
-            intent.setPackage(YOUTUBE_PACKAGE)
+        return Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_LAUNCHER)
+            setPackage(YOUTUBE_PACKAGE)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
-        return intent
     }
 
     /**
-     * Direct YouTube search intent (opens YouTube app straight to search results page).
-     * Uses ACTION_SEARCH if supported, falls back to search URI.
+     * Strictly opens the YouTube app via its Home Launcher Intent so YouTubeLiveSearchService
+     * finds and plays the video via YouTube Search or Browse Features (never via external video URL).
+     */
+    fun openVideoIntent(context: Context, videoUrl: String, searchTitle: String? = null): Intent {
+        return openYouTubeAppHomeIntent(context)
+    }
+
+    /**
+     * Strictly opens the YouTube app via its Home Launcher Intent so YouTubeLiveSearchService
+     * types the search query inside YouTube's native search bar (ensuring YouTube Search / Browse traffic source).
      */
     fun openYouTubeSearchIntent(context: Context, query: String): Intent {
-        val cleanQuery = query.replace("\"", "").trim()
-
-        if (isYouTubeAppInstalled(context)) {
-            val searchActionIntent = Intent(Intent.ACTION_SEARCH).apply {
-                setPackage(YOUTUBE_PACKAGE)
-                putExtra("query", cleanQuery)
-                putExtra(android.app.SearchManager.QUERY, cleanQuery)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            }
-            if (searchActionIntent.resolveActivity(context.packageManager) != null) {
-                return searchActionIntent
-            }
-        }
-
-        val searchUri = Uri.parse("https://www.youtube.com/results?search_query=${Uri.encode(cleanQuery)}")
-        val intent = Intent(Intent.ACTION_VIEW, searchUri).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            putExtra("query", cleanQuery)
-            putExtra("search_query", cleanQuery)
-        }
-        if (isYouTubeAppInstalled(context)) {
-            intent.setPackage(YOUTUBE_PACKAGE)
-        }
-        return intent
+        return openYouTubeAppHomeIntent(context)
     }
 }

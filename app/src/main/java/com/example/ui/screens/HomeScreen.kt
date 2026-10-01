@@ -1,18 +1,9 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -20,38 +11,18 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.AccountBalanceWallet
-import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Comment
+import androidx.compose.material.icons.filled.LiveTv
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MonetizationOn
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Timer
-import androidx.compose.material.icons.filled.Troubleshoot
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
-import com.example.ui.components.ActiveWatchTimerBanner
-import com.example.ui.components.SearchLoadingOverlay
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.filled.SupportAgent
+import androidx.compose.material.icons.filled.ThumbUp
+import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -59,432 +30,823 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
-import coil.request.ImageRequest
-import com.example.data.OEmbedResult
-import com.example.data.SampleTask
+import com.example.R
+import com.example.data.SessionState
+import com.example.data.VideoTaskItem
+import com.example.service.YouTubeLiveSearchService
+import com.example.ui.components.ActiveWatchTimerBanner
 import com.example.ui.components.AdminPostsBannerSection
+import com.example.ui.components.DurationSelectionDialog
+import com.example.ui.components.SearchLoadingOverlay
+import com.example.ui.components.SupportChatDialog
+import com.example.ui.theme.AlertRed
 import com.example.ui.theme.AmberDark
 import com.example.ui.theme.AmberLight
 import com.example.ui.theme.AmberPrimary
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
 import com.example.ui.theme.SuccessGreen
+import com.example.util.PermissionHelper
 import com.example.util.TimeFormatter
-import com.example.util.TitleMatcher
 import com.example.viewmodel.AppScreen
 import com.example.viewmodel.MainViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     viewModel: MainViewModel,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val walletBalance by viewModel.walletBalance.collectAsState()
-    val videoTasks by viewModel.videoTasks.collectAsState()
-    val adminPosts by viewModel.adminPosts.collectAsState()
-    val dismissedPostIds by viewModel.dismissedPostIds.collectAsState()
-    val featuredTask = remember(videoTasks) { videoTasks.firstOrNull() }
-    val isCompleted = featuredTask?.isCompleted == true
-    val oEmbedState by viewModel.oEmbedState.collectAsState()
-    val activeUrl by viewModel.currentVideoUrl.collectAsState()
-    val searchProgress by viewModel.searchProgress.collectAsState()
-    val liveSearchMode by viewModel.liveSearchMode.collectAsState()
+    val walletBalance by viewModel.walletBalance.collectAsStateWithLifecycle()
+    val tasks by viewModel.videoTasks.collectAsStateWithLifecycle()
+    val sessionState by viewModel.sessionState.collectAsStateWithLifecycle()
+    val watchedMillis by viewModel.watchedMillis.collectAsStateWithLifecycle()
+    val requiredMillis by viewModel.requiredMillis.collectAsStateWithLifecycle()
+    val searchProgress by viewModel.searchProgress.collectAsStateWithLifecycle()
+    val likedTasks by viewModel.likedTasks.collectAsStateWithLifecycle()
+    val commentCounts by viewModel.commentCounts.collectAsStateWithLifecycle()
+    val adminPosts by viewModel.adminPosts.collectAsStateWithLifecycle()
+    val dismissedPostIds by viewModel.dismissedPostIds.collectAsStateWithLifecycle()
+    val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
+    val supportMessages by viewModel.supportMessages.collectAsStateWithLifecycle()
 
-    val thumbnailUrl = remember(activeUrl) {
-        val effectiveUrl = if (activeUrl == "PASTE_MY_YOUTUBE_LINK_HERE") {
-            SampleTask.fallbackDemoUrl
-        } else {
-            activeUrl
-        }
-        TitleMatcher.getThumbnailUrl(effectiveUrl)
+    val featuredTasks = remember(tasks) { tasks.take(3) }
+    var taskForTierDialog by remember { mutableStateOf<VideoTaskItem?>(null) }
+    var showPermissionGateDialog by remember { mutableStateOf(false) }
+    var showSupportChatDialog by remember { mutableStateOf(false) }
+
+    // Live permission check refreshed whenever screen resumes
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var isAccessibilityReady by remember {
+        mutableStateOf(
+            YouTubeLiveSearchService.isServiceConnected ||
+                    PermissionHelper.isAccessibilityServiceEnabled(context)
+        )
+    }
+    var isOverlayReady by remember {
+        mutableStateOf(PermissionHelper.canDrawOverlays(context))
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        com.example.ui.components.KingoLogoBadge(
-                            isAdmin = false,
-                            size = 38.dp
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                text = "KINGO KING",
-                                fontWeight = FontWeight.Black,
-                                fontSize = 18.sp,
-                                letterSpacing = 0.8.sp
-                            )
-                            Text(
-                                text = "Sit Back - Watch & Earn",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = AmberPrimary,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 10.sp
-                            )
-                        }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface
-                )
-            )
-        },
-        modifier = modifier.testTag("home_screen")
-    ) { innerPadding ->
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                isAccessibilityReady = YouTubeLiveSearchService.isServiceConnected ||
+                        PermissionHelper.isAccessibilityServiceEnabled(context)
+                isOverlayReady = PermissionHelper.canDrawOverlays(context)
+                if (isAccessibilityReady && isOverlayReady) {
+                    showPermissionGateDialog = false
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    val allPermissionsReady = isAccessibilityReady && isOverlayReady
+
+    val activeSearchTitle by viewModel.targetTaskTitle.collectAsStateWithLifecycle()
+    val activeSearchTask = remember(tasks, activeSearchTitle) {
+        tasks.find { it.title == activeSearchTitle } ?: tasks.firstOrNull()
+    }
+    SearchLoadingOverlay(
+        searchState = searchProgress,
+        targetTitle = activeSearchTitle ?: activeSearchTask?.title ?: "",
+        targetChannel = activeSearchTask?.channelName ?: "",
+        thumbnailUrl = activeSearchTask?.thumbnailUrl
+    )
+
+    Box(modifier = modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = innerPadding.calculateTopPadding())
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp)
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Live / Active Watch Session Floating Bar
-            ActiveWatchTimerBanner(viewModel = viewModel)
+            // Top App Brand & Support Bar
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = stringResource(R.string.app_name),
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(
+                            imageVector = Icons.Default.Verified,
+                            contentDescription = "Verified",
+                            tint = AmberPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Text(
+                        text = if (currentUser != null) {
+                            "Welcome, ${currentUser?.name?.ifBlank { currentUser?.email?.substringBefore("@") }}"
+                        } else {
+                            "Watch YouTube Videos & Earn Coins"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
 
-            // Admin Banners / Posts / Alerts for HOME tab
+                // Live Support Button in Top Bar
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = AmberPrimary.copy(alpha = 0.15f),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .clickable { showSupportChatDialog = true }
+                        .testTag("home_support_chat_button")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SupportAgent,
+                            contentDescription = "Chat Support",
+                            tint = AmberPrimary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Support",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = AmberPrimary
+                        )
+                    }
+                }
+            }
+
+            // Admin Banners / Posts (Clean without extra Admin/Pinned badges)
             AdminPostsBannerSection(
                 posts = adminPosts,
-                currentTab = "HOME",
                 dismissedIds = dismissedPostIds,
-                onDismissPost = { viewModel.dismissAdminPost(it) }
+                targetTab = "HOME",
+                onDismiss = { viewModel.dismissAdminPost(it) }
             )
 
-            // 1. Shiny Wallet Balance Card
+            // Active Watch Session Banner (if currently watching)
+            if (sessionState == SessionState.ACTIVE || sessionState == SessionState.WAITING) {
+                ActiveWatchTimerBanner(viewModel = viewModel)
+            }
+
+            // Hero Coin Balance Card (Coins only - no INR on Home screen)
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { viewModel.navigateTo(AppScreen.WALLET) }
-                    .testTag("wallet_balance_card"),
-                shape = RoundedCornerShape(20.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-                colors = CardDefaults.cardColors(containerColor = Slate900)
+                    .testTag("home_wallet_card"),
+                shape = RoundedCornerShape(24.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
             ) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(
-                            Brush.horizontalGradient(
-                                colors = listOf(Slate900, Slate800, AmberDark.copy(alpha = 0.4f))
+                            Brush.linearGradient(
+                                colors = listOf(Slate900, Slate800)
                             )
                         )
+                        .border(1.dp, AmberPrimary.copy(alpha = 0.28f), RoundedCornerShape(24.dp))
                         .padding(20.dp)
                 ) {
-                    Column {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
-                            modifier = Modifier.fillMaxWidth()
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "WALLET BALANCE • 1000 Coins = 10 INR",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = AmberLight,
-                                letterSpacing = 0.5.sp
-                            )
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                contentDescription = "View Wallet",
-                                tint = AmberLight,
-                                modifier = Modifier.size(18.dp)
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .background(AmberPrimary.copy(alpha = 0.18f), CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.MonetizationOn,
+                                        contentDescription = null,
+                                        tint = AmberPrimary,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text(
+                                        text = "Total Coin Balance",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = Color.White.copy(alpha = 0.75f)
+                                    )
+                                    Row(verticalAlignment = Alignment.Bottom) {
+                                        Text(
+                                            text = "$walletBalance",
+                                            style = MaterialTheme.typography.headlineLarge,
+                                            fontWeight = FontWeight.Black,
+                                            color = AmberPrimary,
+                                            modifier = Modifier.testTag("home_coin_balance_text")
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "COINS",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = AmberLight,
+                                            modifier = Modifier.padding(bottom = 4.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            Button(
+                                onClick = { viewModel.switchTab(AppScreen.WALLET) },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = AmberPrimary,
+                                    contentColor = Color.Black
+                                ),
+                                shape = RoundedCornerShape(14.dp),
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+                                modifier = Modifier.testTag("home_open_wallet_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AccountBalanceWallet,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Wallet",
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 13.sp
+                                )
+                            }
                         }
 
-                        Spacer(modifier = Modifier.height(8.dp))
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
 
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.MonetizationOn,
-                                contentDescription = "Coin Icon",
-                                tint = AmberPrimary,
-                                modifier = Modifier.size(36.dp)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Text(
-                                text = "$walletBalance",
-                                style = MaterialTheme.typography.headlineLarge,
-                                fontWeight = FontWeight.Black,
-                                color = Color.White
+                                text = "Complete watch tasks to earn instant coins",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.White.copy(alpha = 0.75f),
+                                fontSize = 12.sp,
+                                modifier = Modifier.weight(1f)
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Coins (≈ ₹${String.format(java.util.Locale.US, "%.2f", walletBalance / com.example.data.COINS_PER_INR.toDouble())} INR)",
-                                style = MaterialTheme.typography.titleMedium,
+                                text = "${tasks.count { !it.isLocked }} Available",
+                                style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = AmberPrimary
+                                color = SuccessGreen
                             )
                         }
                     }
                 }
             }
 
-            // 2. Section Header
+            // Setup Banner ONLY if Accessibility or Overlay Permission is not enabled yet
+            if (!allPermissionsReady) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showPermissionGateDialog = true }
+                        .testTag("home_permission_warning_card"),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = AlertRed.copy(alpha = 0.1f)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, AlertRed.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = AlertRed,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = "Enable Task Verification Permissions",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = AlertRed,
+                                    fontSize = 13.sp
+                                )
+                                Text(
+                                    text = "Required once for YouTube timer overlay & auto-verification",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = AlertRed
+                        ) {
+                            Text(
+                                text = "Enable",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Featured Tasks Section Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Featured Task",
+                    text = "Featured Tasks",
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.ExtraBold
                 )
+                Text(
+                    text = "Top ${featuredTasks.size} of ${tasks.size}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
+            // Show up to 3 Featured Tasks (Card click does nothing; only Watch Task button starts task)
+            if (featuredTasks.isEmpty()) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                    )
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(28.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "No active video tasks available right now.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            } else {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    featuredTasks.forEach { task ->
+                        FeaturedHomeTaskCard(
+                            task = task,
+                            isLiked = likedTasks.contains(task.id),
+                            commentCount = commentCounts[task.id] ?: 0,
+                            onWatchTaskClick = {
+                                val accOk = YouTubeLiveSearchService.isServiceConnected ||
+                                        PermissionHelper.isAccessibilityServiceEnabled(context)
+                                val overOk = PermissionHelper.canDrawOverlays(context)
+                                isAccessibilityReady = accOk
+                                isOverlayReady = overOk
+                                if (!accOk || !overOk) {
+                                    showPermissionGateDialog = true
+                                } else {
+                                    taskForTierDialog = task
+                                }
+                            }
+                        )
+                    }
+
+                    // View All Tasks Button Below the 3 Featured Tasks
+                    OutlinedButton(
+                        onClick = { viewModel.switchTab(AppScreen.TASKS) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("home_view_all_tasks_button"),
+                        shape = RoundedCornerShape(14.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.2.dp, AmberPrimary)
+                    ) {
+                        Text(
+                            text = "View All Tasks (${tasks.size})",
+                            fontWeight = FontWeight.ExtraBold,
+                            color = AmberPrimary,
+                            fontSize = 14.sp
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            tint = AmberPrimary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+    }
+
+    // Duration Tier Selection Dialog
+    taskForTierDialog?.let { chosenTask ->
+        DurationSelectionDialog(
+            videoTitle = chosenTask.title,
+            videoChannel = chosenTask.channelName,
+            thumbnailUrl = chosenTask.thumbnailUrl,
+            durationSeconds = chosenTask.durationSeconds,
+            isLive = chosenTask.isLive,
+            initialTierSeconds = chosenTask.selectedDurationSeconds,
+            onDismiss = { taskForTierDialog = null },
+            onConfirmSelection = { tier ->
+                taskForTierDialog = null
+                viewModel.startTaskWithTier(chosenTask, tier, context)
+            }
+        )
+    }
+
+    // Support Chat Dialog
+    if (showSupportChatDialog) {
+        SupportChatDialog(
+            currentUser = currentUser,
+            allMessages = supportMessages,
+            onSendMessage = { msg -> viewModel.sendSupportMessage(msg) },
+            onDismiss = { showSupportChatDialog = false }
+        )
+    }
+
+    // Mandatory Permission Gate Dialog
+    if (showPermissionGateDialog) {
+        AlertDialog(
+            onDismissRequest = { showPermissionGateDialog = false },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = AlertRed,
+                    modifier = Modifier.size(36.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "Permissions Required",
+                    fontWeight = FontWeight.ExtraBold
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Please enable both permissions below to start watching and earning coins:",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isAccessibilityReady) SuccessGreen.copy(alpha = 0.12f) else AlertRed.copy(alpha = 0.1f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "1. Accessibility Service",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                                Text(
+                                    text = if (isAccessibilityReady) "Enabled ✓" else "Required to verify YouTube video",
+                                    fontSize = 11.sp,
+                                    color = if (isAccessibilityReady) SuccessGreen else AlertRed
+                                )
+                            }
+                            if (!isAccessibilityReady) {
+                                Button(
+                                    onClick = { PermissionHelper.openAccessibilitySettings(context) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                    modifier = Modifier.height(34.dp)
+                                ) {
+                                    Text("Allow", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+                            } else {
+                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = SuccessGreen)
+                            }
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isOverlayReady) SuccessGreen.copy(alpha = 0.12f) else AlertRed.copy(alpha = 0.1f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "2. Display Over Other Apps",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                                Text(
+                                    text = if (isOverlayReady) "Enabled ✓" else "Required for live floating timer",
+                                    fontSize = 11.sp,
+                                    color = if (isOverlayReady) SuccessGreen else AlertRed
+                                )
+                            }
+                            if (!isOverlayReady) {
+                                Button(
+                                    onClick = { PermissionHelper.openOverlaySettings(context) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                    modifier = Modifier.height(34.dp)
+                                ) {
+                                    Text("Allow", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+                            } else {
+                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = SuccessGreen)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showPermissionGateDialog = false }) {
+                    Text("Close", fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun FeaturedHomeTaskCard(
+    task: VideoTaskItem,
+    isLiked: Boolean,
+    commentCount: Int,
+    onWatchTaskClick: () -> Unit
+) {
+    val taskLocked = task.isLocked
+    val lockCountdown = if (taskLocked) task.getLockRemainingFormatted() else ""
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("home_featured_task_card_${task.id}"),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // Video Thumbnail Banner
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(156.dp)
+                    .background(Slate900)
+            ) {
+                if (task.thumbnailUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = task.thumbnailUrl,
+                        contentDescription = task.title,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+
+                // Gradient overlay at bottom of thumbnail
                 Box(
                     modifier = Modifier
+                        .fillMaxSize()
                         .background(
-                            if (isCompleted) SuccessGreen.copy(alpha = 0.2f)
-                            else AmberPrimary.copy(alpha = 0.2f),
-                            RoundedCornerShape(12.dp)
+                            Brush.verticalGradient(
+                                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))
+                            )
                         )
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+
+                // Top-left Live / Video Length Badge
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(10.dp)
+                        .background(
+                            if (task.isLive) AlertRed else Color.Black.copy(alpha = 0.75f),
+                            RoundedCornerShape(8.dp)
+                        )
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (task.isLive) {
+                            Icon(
+                                imageVector = Icons.Default.LiveTv,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                        }
+                        Text(
+                            text = if (task.isLive) "LIVE" else TimeFormatter.formatSecondsToMmSs(task.durationSeconds),
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                // Top-right Coin Reward Badge (Coins only)
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(10.dp)
+                        .background(AmberPrimary, RoundedCornerShape(10.dp))
+                        .padding(horizontal = 10.dp, vertical = 5.dp)
                 ) {
                     Text(
-                        text = if (isCompleted) "Completed" else "Available",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isCompleted) SuccessGreen else AmberPrimary
+                        text = "+10 to +110 Coins",
+                        color = Color.Black,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.ExtraBold
                     )
                 }
             }
 
-            // 3. Main Task Card
-            Card(
+            // Details & Action Button
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { viewModel.navigateTo(AppScreen.TASK) }
-                    .testTag("task_card"),
-                shape = RoundedCornerShape(18.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Column {
-                    // Thumbnail container
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(190.dp)
-                            .background(Color.Black),
-                        contentAlignment = Alignment.Center
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = task.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = task.channelName,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                // Like & Comment Bonus Status Chips
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (isLiked) SuccessGreen.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
                     ) {
-                        if (!thumbnailUrl.isNullOrBlank()) {
-                            AsyncImage(
-                                model = ImageRequest.Builder(context)
-                                    .data(thumbnailUrl)
-                                    .crossfade(true)
-                                    .build(),
-                                contentDescription = "Video Thumbnail",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.Default.PlayArrow,
-                                contentDescription = "Play Placeholder",
-                                tint = Color.Gray,
-                                modifier = Modifier.size(56.dp)
-                            )
-                        }
-
-                        // Floating play badge
-                        Box(
-                            modifier = Modifier
-                                .size(50.dp)
-                                .background(Color.Black.copy(alpha = 0.6f), CircleShape),
-                            contentAlignment = Alignment.Center
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                imageVector = if (isCompleted) Icons.Default.CheckCircle else Icons.Default.PlayArrow,
+                                imageVector = Icons.Default.ThumbUp,
                                 contentDescription = null,
-                                tint = if (isCompleted) SuccessGreen else Color.White,
-                                modifier = Modifier.size(30.dp)
+                                tint = if (isLiked) SuccessGreen else AmberDark,
+                                modifier = Modifier.size(12.dp)
                             )
-                        }
-
-                        // Duration pill overlay
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .padding(10.dp)
-                                .background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(6.dp))
-                                .padding(horizontal = 8.dp, vertical = 3.dp)
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.Timer,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(12.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "Watch ${TimeFormatter.formatSecondsToMmSs(SampleTask.requiredSeconds)} min",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = Color.White,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        }
-
-                        // Reward Badge overlay (top left)
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.TopStart)
-                                .padding(10.dp)
-                                .background(AmberPrimary, RoundedCornerShape(8.dp))
-                                .padding(horizontal = 10.dp, vertical = 4.dp)
-                        ) {
+                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "+${SampleTask.rewardCoins} coins",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color.Black
+                                text = if (isLiked) "Liked (+5c ✓)" else "Like +5 Coins",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (isLiked) SuccessGreen else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
 
-                    // Content below thumbnail
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        when (val state = oEmbedState) {
-                            is OEmbedResult.Success -> {
-                                Text(
-                                    text = state.title,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = state.authorName.ifEmpty { "YouTube Creator" },
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            is OEmbedResult.Loading -> {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(vertical = 8.dp)
-                                ) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(16.dp),
-                                        strokeWidth = 2.dp
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "Fetching YouTube video details...",
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
-                                }
-                            }
-                            is OEmbedResult.Error -> {
-                                Text(
-                                    text = "Task Video Link",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = state.message,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.error,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            OEmbedResult.Idle -> {
-                                Text(
-                                    text = "Ready to load task",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(14.dp))
-
-                        Button(
-                            onClick = { viewModel.navigateTo(AppScreen.TASK) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(48.dp)
-                                .testTag("open_task_button"),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isCompleted) SuccessGreen else AmberPrimary
-                            )
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (commentCount >= 2) SuccessGreen.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = if (isCompleted) "View Completed Task" else "Open Task",
-                                fontWeight = FontWeight.Bold,
-                                color = Color.Black
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
                             Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                imageVector = Icons.Default.Comment,
                                 contentDescription = null,
-                                tint = Color.Black,
-                                modifier = Modifier.size(18.dp)
+                                tint = if (commentCount > 0) SuccessGreen else AmberDark,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Comment ($commentCount/2) +5 Coins",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (commentCount > 0) SuccessGreen else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
                 }
-            }
 
-            // View All Video Tasks shortcut button
-            Button(
-                onClick = { viewModel.switchTab(AppScreen.TASKS) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .testTag("home_view_all_tasks_button"),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.PlayArrow,
-                    contentDescription = null,
-                    tint = Color.Black,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "View All Video Tasks",
-                    fontWeight = FontWeight.Bold,
-                    color = Color.Black
-                )
+                // Watch Task Button (Only clicking this button starts the task)
+                Button(
+                    onClick = onWatchTaskClick,
+                    enabled = !taskLocked,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(46.dp)
+                        .testTag("home_watch_task_button_${task.id}"),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AmberPrimary,
+                        contentColor = Color.Black,
+                        disabledContainerColor = if (task.isCompleted) SuccessGreen.copy(alpha = 0.15f) else AlertRed.copy(alpha = 0.14f),
+                        disabledContentColor = if (task.isCompleted) SuccessGreen else AlertRed
+                    )
+                ) {
+                    if (taskLocked) {
+                        Icon(
+                            imageVector = if (task.isCompleted) Icons.Default.CheckCircle else Icons.Default.Lock,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (task.isCompleted) {
+                                "Completed • Unlocks in $lockCountdown"
+                            } else {
+                                "Locked (6h) • Unlocks in $lockCountdown"
+                            },
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Watch Task",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
             }
         }
-    }
-
-    // Organic Search Discovery Loading Overlay
-    val targetTitle = when (val state = oEmbedState) {
-        is OEmbedResult.Success -> state.title
-        else -> "Target YouTube Video"
-    }
-    val targetChannel = when (val state = oEmbedState) {
-        is OEmbedResult.Success -> state.authorName
-        else -> "YouTube Channel"
-    }
-
-    if (!liveSearchMode) {
-        SearchLoadingOverlay(
-            searchState = searchProgress,
-            targetTitle = targetTitle,
-            targetChannel = targetChannel,
-            thumbnailUrl = thumbnailUrl
-        )
     }
 }

@@ -60,6 +60,10 @@ class DataStoreManager(private val context: Context) {
         private val KEY_ADMIN_POSTS = stringPreferencesKey("admin_posts_json")
         private val KEY_NOTIFIED_ITEM_IDS = stringPreferencesKey("notified_item_ids_json")
         private val KEY_DISMISSED_POST_IDS = stringPreferencesKey("dismissed_post_ids_json")
+        private val KEY_SUPPORT_MESSAGES = stringPreferencesKey("support_messages_json")
+        private val KEY_REMOTE_APP_UPDATE_JSON = stringPreferencesKey("remote_app_update_json")
+        private val KEY_INSTALLED_UPDATE_SIGNATURE = stringPreferencesKey("installed_update_signature")
+        private val KEY_UPDATE_DRIVE_FOLDER_URL = stringPreferencesKey("update_drive_folder_url")
 
         @Volatile
         var lastLocalMutationMillis: Long = 0L
@@ -107,6 +111,19 @@ class DataStoreManager(private val context: Context) {
         } catch (_: Exception) {
             emptySet()
         }
+    }
+
+    val remoteAppUpdateFlow: Flow<AppUpdateInfo?> = context.dataStore.data.map { prefs ->
+        val json = prefs[KEY_REMOTE_APP_UPDATE_JSON] ?: return@map null
+        parseAppUpdateInfoJson(json)
+    }
+
+    val installedUpdateSignatureFlow: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_INSTALLED_UPDATE_SIGNATURE] ?: ""
+    }
+
+    val updateDriveFolderUrlFlow: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_UPDATE_DRIVE_FOLDER_URL] ?: ""
     }
 
     val deletedTaskIdsFlow: Flow<Set<String>> = context.dataStore.data.map { prefs ->
@@ -167,7 +184,7 @@ class DataStoreManager(private val context: Context) {
     }
 
     val liveSearchModeFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
-        prefs[KEY_LIVE_SEARCH_MODE] ?: false
+        prefs[KEY_LIVE_SEARCH_MODE] ?: true
     }
 
     val selectedTaskIdFlow: Flow<String?> = context.dataStore.data.map { prefs ->
@@ -207,6 +224,11 @@ class DataStoreManager(private val context: Context) {
         parsePayoutRequestsJson(json)
     }
 
+    val supportMessagesFlow: Flow<List<SupportMessage>> = context.dataStore.data.map { prefs ->
+        val json = prefs[KEY_SUPPORT_MESSAGES] ?: "[]"
+        parseSupportMessagesJson(json)
+    }
+
     val videoTasksFlow: Flow<List<VideoTaskItem>> = context.dataStore.data.map { prefs ->
         val json = prefs[KEY_VIDEO_TASKS]
         val list = if (json == null) {
@@ -214,7 +236,12 @@ class DataStoreManager(private val context: Context) {
         } else {
             parseVideoTasksJson(json)
         }
-        list.sortedWith(
+        val visibleList = if (com.example.BuildConfig.APP_ROLE == "ADMIN") {
+            list.filter { !it.isCompletionLimitReached }
+        } else {
+            list.filter { !it.isCompletionLimitReached }
+        }
+        visibleList.sortedWith(
             compareByDescending<VideoTaskItem> { it.isPinned }
                 .thenByDescending { if (it.isPinned) it.pinnedAt else 0L }
         )
@@ -383,7 +410,65 @@ class DataStoreManager(private val context: Context) {
         }
     }
 
-    suspend fun lockTask(taskId: String, durationMillis: Long = 12 * 60 * 60 * 1000L) {
+    suspend fun saveRemoteAppUpdate(updateInfo: AppUpdateInfo?) {
+        context.dataStore.edit { prefs ->
+            if (updateInfo == null || !updateInfo.hasUpdate || (updateInfo.fileId.isBlank() && updateInfo.downloadUrl.isBlank())) {
+                prefs.remove(KEY_REMOTE_APP_UPDATE_JSON)
+                // If the update folder was emptied, clear installed signature so future uploads always trigger
+                prefs.remove(KEY_INSTALLED_UPDATE_SIGNATURE)
+            } else {
+                prefs[KEY_REMOTE_APP_UPDATE_JSON] = serializeAppUpdateInfoJson(updateInfo)
+            }
+        }
+    }
+
+    suspend fun setInstalledUpdateSignature(signature: String) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_INSTALLED_UPDATE_SIGNATURE] = signature
+        }
+    }
+
+    suspend fun setUpdateDriveFolderUrl(url: String) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_UPDATE_DRIVE_FOLDER_URL] = url.trim()
+        }
+    }
+
+    private fun parseAppUpdateInfoJson(json: String): AppUpdateInfo? {
+        if (json.isBlank()) return null
+        return try {
+            val obj = JSONObject(json)
+            val hasUpdate = obj.optBoolean("hasUpdate", false)
+            val fileId = obj.optString("fileId", "")
+            val downloadUrl = obj.optString("downloadUrl", "")
+            if (!hasUpdate || (fileId.isBlank() && downloadUrl.isBlank())) return null
+            AppUpdateInfo(
+                hasUpdate = true,
+                fileId = fileId,
+                fileName = obj.optString("fileName", "KingoKing_Update.apk").ifBlank { "KingoKing_Update.apk" },
+                updatedAtMillis = obj.optLong("updatedAtMillis", 0L),
+                fileSize = obj.optLong("fileSize", 0L),
+                downloadUrl = downloadUrl.ifBlank {
+                    "https://drive.usercontent.google.com/download?id=$fileId&export=download&confirm=t"
+                }
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun serializeAppUpdateInfoJson(info: AppUpdateInfo): String {
+        return JSONObject().apply {
+            put("hasUpdate", info.hasUpdate)
+            put("fileId", info.fileId)
+            put("fileName", info.fileName)
+            put("updatedAtMillis", info.updatedAtMillis)
+            put("fileSize", info.fileSize)
+            put("downloadUrl", info.downloadUrl)
+        }.toString()
+    }
+
+    suspend fun lockTask(taskId: String, durationMillis: Long = 6 * 60 * 60 * 1000L) {
         context.dataStore.edit { prefs ->
             val json = prefs[KEY_VIDEO_TASKS]
             val currentList = if (json.isNullOrBlank()) getDefaultTasks().toMutableList() else parseVideoTasksJson(json).toMutableList()
@@ -543,6 +628,49 @@ class DataStoreManager(private val context: Context) {
                     newBalanceOverride = newBalance,
                     newTxJsonOverride = serializedTx
                 )
+
+                // Credit 10% Referral Withdrawal Bonus to Referrer (User A) when User B withdraws!
+                val bonusCoins = (coins * 10) / 100
+                if (bonusCoins > 0) {
+                    val allUsers = parseUsersJson(prefs[KEY_USERS] ?: "[]").toMutableList()
+                    val currentUserObj = allUsers.find { it.email.equals(currentEmail, ignoreCase = true) }
+                    val refCode = currentUserObj?.referredByCode?.ifBlank {
+                        extractReferredByCodeFromTransactions(serializedTx)
+                    } ?: extractReferredByCodeFromTransactions(serializedTx)
+
+                    if (refCode.isNotBlank()) {
+                        val refIdx = allUsers.indexOfFirst {
+                            !it.email.equals(currentEmail, ignoreCase = true) &&
+                                (it.referralCode == refCode || generateSixDigitReferralCode(it.email) == refCode)
+                        }
+                        if (refIdx != -1) {
+                            val referrer = allUsers[refIdx]
+                            val bonusTxId = "ref_withdraw_bonus_$reqId"
+                            val refTxList = parseTransactionsJson(referrer.transactionsJson).toMutableList()
+                            if (refTxList.none { it.id == bonusTxId }) {
+                                val nowMs = System.currentTimeMillis()
+                                val withdrawerName = currentUserObj?.name?.ifBlank { currentUserObj.userId } ?: currentEmail.substringBefore("@")
+                                refTxList.add(
+                                    0,
+                                    WalletTransaction(
+                                        id = bonusTxId,
+                                        title = "🤝 10% Referral Withdraw Bonus from $withdrawerName (${coins}c Withdraw)",
+                                        coins = bonusCoins,
+                                        timestampMillis = nowMs
+                                    )
+                                )
+                                val newRefBal = referrer.coinsBalance + bonusCoins
+                                allUsers[refIdx] = referrer.copy(
+                                    coinsBalance = newRefBal,
+                                    transactionsJson = serializeTransactionsJson(refTxList),
+                                    lastUpdatedMillis = maxOf(nowMs + 60_000L, referrer.lastUpdatedMillis + 1000L)
+                                )
+                                prefs[KEY_USERS] = serializeUsersJson(allUsers)
+                            }
+                        }
+                    }
+                }
+
                 success = true
             }
         }
@@ -772,7 +900,12 @@ class DataStoreManager(private val context: Context) {
         return found
     }
 
-    suspend fun signUpUser(email: String, password: String, name: String): Pair<Boolean, String> {
+    suspend fun signUpUser(
+        email: String,
+        password: String,
+        name: String,
+        referralCodeInput: String = ""
+    ): Pair<Boolean, String> {
         val cleanEmail = email.trim().lowercase()
         if (cleanEmail.isEmpty() || !cleanEmail.contains("@")) {
             return Pair(false, "Please enter a valid email address.")
@@ -781,7 +914,18 @@ class DataStoreManager(private val context: Context) {
             return Pair(false, "Password must be at least 4 characters.")
         }
 
-        var result = Pair(true, "Account created successfully!")
+        val cleanRefCode = referralCodeInput.trim()
+        val myGeneratedRefCode = generateSixDigitReferralCode(cleanEmail)
+        if (cleanRefCode.isNotEmpty()) {
+            if (cleanRefCode.length != 6 || !cleanRefCode.all { it.isDigit() }) {
+                return Pair(false, "Refer Key must be a 6-digit number (or leave it empty).")
+            }
+            if (cleanRefCode == myGeneratedRefCode) {
+                return Pair(false, "You cannot use your own 6-digit Refer Key.")
+            }
+        }
+
+        var result = Pair(true, "Account created! +50 Coins Welcome Bonus added!")
         context.dataStore.edit { prefs ->
             val users = parseUsersJson(prefs[KEY_USERS] ?: "[]").toMutableList()
             if (users.any { it.email.equals(cleanEmail, ignoreCase = true) }) {
@@ -789,19 +933,55 @@ class DataStoreManager(private val context: Context) {
                 return@edit
             }
             val now = System.currentTimeMillis()
+            val initialTransactions = mutableListOf<WalletTransaction>()
+
+            // 1. Every new user gets +50 Coins First-Time Sign Up Bonus
+            var startingCoins = 50
+            initialTransactions.add(
+                WalletTransaction(
+                    id = "signup_welcome_bonus_${Math.abs(cleanEmail.hashCode())}",
+                    title = "🎉 First-Time Sign Up Bonus",
+                    coins = 50,
+                    timestampMillis = now
+                )
+            )
+
+            // 2. If 6-digit Refer Key was entered, User B also gets +50 Invite Coins!
+            var appliedRefCode = ""
+            if (cleanRefCode.length == 6 && cleanRefCode.all { it.isDigit() }) {
+                appliedRefCode = cleanRefCode
+                startingCoins += 50
+                initialTransactions.add(
+                    0,
+                    WalletTransaction(
+                        id = "signup_ref_$cleanRefCode",
+                        title = "🎁 Referral Invite Bonus (Refer Key: $cleanRefCode)",
+                        coins = 50,
+                        timestampMillis = now + 1L
+                    )
+                )
+                result = Pair(
+                    true,
+                    "Account created! +50 Sign Up Bonus & +50 Referral Invite Coins (+100 Coins Total) added!"
+                )
+            }
+
+            val serializedInitialTx = serializeTransactionsJson(initialTransactions)
             val newUser = UserProfile(
                 userId = "usr_${Math.abs(cleanEmail.hashCode()) % 100000}",
                 email = cleanEmail,
                 name = name.ifBlank { cleanEmail.substringBefore("@") },
                 passwordHash = password,
-                coinsBalance = 0,
+                coinsBalance = startingCoins,
                 completedTasksCount = 0,
                 joinedAtMillis = now,
-                transactionsJson = "[]",
+                transactionsJson = serializedInitialTx,
                 likedTasksJson = "[]",
                 commentCountsJson = "{}",
                 taskLocksJson = "{}",
-                lastUpdatedMillis = now
+                lastUpdatedMillis = now,
+                referralCode = myGeneratedRefCode,
+                referredByCode = appliedRefCode
             )
             users.add(newUser)
             prefs[KEY_USERS] = serializeUsersJson(users)
@@ -1055,13 +1235,15 @@ class DataStoreManager(private val context: Context) {
             val index = currentList.indexOfFirst { it.id == taskId }
             if (index != -1) {
                 val t = currentList[index]
-                val lockDuration = 8 * 60 * 60 * 1000L
+                val lockDuration = 4 * 60 * 60 * 1000L
                 val lockUntil = System.currentTimeMillis() + lockDuration
+                val newCompletedCount = t.completedCount + 1
                 currentList[index] = t.copy(
                     isCompleted = true,
                     watchedMillis = 0L,
                     rewardCoins = rewardCoins,
-                    lockedUntilMillis = lockUntil
+                    lockedUntilMillis = lockUntil,
+                    completedCount = newCompletedCount
                 )
                 val serializedTasks = serializeVideoTasksJson(currentList)
                 prefs[KEY_VIDEO_TASKS] = serializedTasks
@@ -1274,7 +1456,9 @@ class DataStoreManager(private val context: Context) {
                         createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
                         lockedUntilMillis = effectiveLockedUntil,
                         isPinned = obj.optBoolean("isPinned", false),
-                        pinnedAt = obj.optLong("pinnedAt", 0L)
+                        pinnedAt = obj.optLong("pinnedAt", 0L),
+                        maxCompletions = obj.optInt("maxCompletions", 0),
+                        completedCount = obj.optInt("completedCount", 0)
                     )
                 )
             }
@@ -1303,6 +1487,8 @@ class DataStoreManager(private val context: Context) {
                 put("lockedUntilMillis", item.lockedUntilMillis)
                 put("isPinned", item.isPinned)
                 put("pinnedAt", item.pinnedAt)
+                put("maxCompletions", item.maxCompletions)
+                put("completedCount", item.completedCount)
             }
             array.put(obj)
         }
@@ -1344,27 +1530,53 @@ class DataStoreManager(private val context: Context) {
         return array.toString()
     }
 
+    private fun extractReferredByCodeFromTransactions(txJson: String): String {
+        if (txJson.isBlank() || txJson == "[]") return ""
+        return try {
+            val arr = JSONArray(txJson)
+            for (i in 0 until arr.length()) {
+                val obj = arr.optJSONObject(i) ?: continue
+                val id = obj.optString("id", "")
+                if (id.startsWith("signup_ref_")) {
+                    val code = id.removePrefix("signup_ref_").trim()
+                    if (code.length == 6 && code.all { it.isDigit() }) return code
+                }
+            }
+            ""
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
     private fun parseUsersJson(json: String): List<UserProfile> {
         val list = mutableListOf<UserProfile>()
         try {
             val array = JSONArray(json)
             for (i in 0 until array.length()) {
                 val obj = array.getJSONObject(i)
+                val emailVal = obj.optString("email", "")
+                val txJsonVal = obj.optString("transactionsJson", "[]")
+                val explicitRefBy = obj.optString("referredByCode", "")
+                val effectiveRefBy = explicitRefBy.ifBlank { extractReferredByCodeFromTransactions(txJsonVal) }
+                val explicitRefCode = obj.optString("referralCode", "")
+                val effectiveRefCode = explicitRefCode.ifBlank { generateSixDigitReferralCode(emailVal) }
                 list.add(
                     UserProfile(
                         userId = obj.optString("userId", UUID.randomUUID().toString()),
-                        email = obj.optString("email", ""),
+                        email = emailVal,
                         name = obj.optString("name", ""),
                         passwordHash = obj.optString("passwordHash", ""),
                         coinsBalance = obj.optInt("coinsBalance", 0),
                         completedTasksCount = obj.optInt("completedTasksCount", 0),
                         joinedAtMillis = obj.optLong("joinedAtMillis", System.currentTimeMillis()),
-                        transactionsJson = obj.optString("transactionsJson", "[]"),
+                        transactionsJson = txJsonVal,
                         likedTasksJson = obj.optString("likedTasksJson", "[]"),
                         commentCountsJson = obj.optString("commentCountsJson", "{}"),
                         taskLocksJson = obj.optString("taskLocksJson", "{}"),
                         completedTaskIdsJson = obj.optString("completedTaskIdsJson", "[]"),
-                        lastUpdatedMillis = obj.optLong("lastUpdatedMillis", 0L)
+                        lastUpdatedMillis = obj.optLong("lastUpdatedMillis", 0L),
+                        referralCode = effectiveRefCode,
+                        referredByCode = effectiveRefBy
                     )
                 )
             }
@@ -1391,6 +1603,8 @@ class DataStoreManager(private val context: Context) {
                 put("taskLocksJson", u.taskLocksJson)
                 put("completedTaskIdsJson", u.completedTaskIdsJson)
                 put("lastUpdatedMillis", u.lastUpdatedMillis)
+                put("referralCode", u.referralCode.ifBlank { generateSixDigitReferralCode(u.email) })
+                put("referredByCode", u.referredByCode.ifBlank { extractReferredByCodeFromTransactions(u.transactionsJson) })
             }
             array.put(obj)
         }
@@ -1530,17 +1744,100 @@ class DataStoreManager(private val context: Context) {
                         isCompleted = local.isCompleted,
                         watchedMillis = local.watchedMillis,
                         lockedUntilMillis = local.lockedUntilMillis,
-                        selectedDurationSeconds = local.selectedDurationSeconds
+                        selectedDurationSeconds = local.selectedDurationSeconds,
+                        maxCompletions = if (remote.maxCompletions > 0) remote.maxCompletions else local.maxCompletions,
+                        completedCount = maxOf(remote.completedCount, local.completedCount)
                     )
                 } else {
                     remote
                 }
-            }.sortedWith(
+            }.filter { !it.isCompletionLimitReached }.sortedWith(
                 compareByDescending<VideoTaskItem> { it.isPinned }
                     .thenByDescending { if (it.isPinned) it.pinnedAt else 0L }
             )
             prefs[KEY_VIDEO_TASKS] = serializeVideoTasksJson(merged)
         }
+    }
+
+    suspend fun addSupportMessage(
+        userId: String,
+        userEmail: String,
+        userName: String,
+        senderRole: String,
+        messageText: String
+    ): SupportMessage {
+        val now = System.currentTimeMillis()
+        lastLocalMutationMillis = now
+        val msg = SupportMessage(
+            id = "chat_${now}_${(100..999).random()}",
+            userId = userId,
+            userEmail = userEmail.trim().lowercase(),
+            userName = userName.trim().ifBlank { userEmail.substringBefore("@") },
+            senderRole = senderRole.uppercase(),
+            message = messageText.trim(),
+            timestampMillis = now
+        )
+        context.dataStore.edit { prefs ->
+            val currentList = parseSupportMessagesJson(prefs[KEY_SUPPORT_MESSAGES] ?: "[]").toMutableList()
+            currentList.add(msg)
+            val sorted = currentList.sortedBy { it.timestampMillis }.takeLast(300)
+            prefs[KEY_SUPPORT_MESSAGES] = serializeSupportMessagesJson(sorted)
+        }
+        return msg
+    }
+
+    suspend fun syncRemoteSupportMessagesFromServer(remoteMessages: List<SupportMessage>) {
+        if (remoteMessages.isEmpty()) return
+        context.dataStore.edit { prefs ->
+            val localList = parseSupportMessagesJson(prefs[KEY_SUPPORT_MESSAGES] ?: "[]")
+            val combinedMap = linkedMapOf<String, SupportMessage>()
+            for (m in (localList + remoteMessages)) {
+                if (m.id.isNotBlank() && m.message.isNotBlank()) {
+                    combinedMap[m.id] = m
+                }
+            }
+            val merged = combinedMap.values.sortedBy { it.timestampMillis }.takeLast(300)
+            prefs[KEY_SUPPORT_MESSAGES] = serializeSupportMessagesJson(merged)
+        }
+    }
+
+    private fun parseSupportMessagesJson(json: String): List<SupportMessage> {
+        val list = mutableListOf<SupportMessage>()
+        try {
+            val array = JSONArray(json)
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                list.add(
+                    SupportMessage(
+                        id = obj.optString("id", UUID.randomUUID().toString()),
+                        userId = obj.optString("userId", ""),
+                        userEmail = obj.optString("userEmail", ""),
+                        userName = obj.optString("userName", ""),
+                        senderRole = obj.optString("senderRole", "USER"),
+                        message = obj.optString("message", ""),
+                        timestampMillis = obj.optLong("timestampMillis", System.currentTimeMillis())
+                    )
+                )
+            }
+        } catch (_: Exception) {}
+        return list.sortedBy { it.timestampMillis }
+    }
+
+    private fun serializeSupportMessagesJson(messages: List<SupportMessage>): String {
+        val array = JSONArray()
+        for (m in messages) {
+            val obj = JSONObject().apply {
+                put("id", m.id)
+                put("userId", m.userId)
+                put("userEmail", m.userEmail)
+                put("userName", m.userName)
+                put("senderRole", m.senderRole)
+                put("message", m.message)
+                put("timestampMillis", m.timestampMillis)
+            }
+            array.put(obj)
+        }
+        return array.toString()
     }
 
     suspend fun syncRemoteUsersFromServer(remoteUsers: List<UserProfile>, isAdmin: Boolean) {
@@ -1588,13 +1885,17 @@ class DataStoreManager(private val context: Context) {
                         remote.passwordHash.ifBlank { local.passwordHash }
                     }
 
-                    // 3. Detect if remote has any new Admin coin update or payout refund transaction not in local
+                    // 3. Detect if remote has any new Admin coin update, payout refund, or 10% referral withdrawal bonus transaction not in local
                     val remoteTxList = parseTransactionsJson(remote.transactionsJson)
                     val localTxList = parseTransactionsJson(local.transactionsJson)
                     val localTxIds = localTxList.map { it.id }.toSet()
                     val remoteTxMap = remoteTxList.associateBy { it.id }
                     val hasNewAdminTransaction = remoteTxList.any { tx ->
-                        (tx.id.startsWith("admin_coin_") || tx.id.startsWith("refund_") || tx.title.contains("Admin Balance Update")) &&
+                        (tx.id.startsWith("admin_coin_") ||
+                            tx.id.startsWith("refund_") ||
+                            tx.id.startsWith("ref_withdraw_bonus_") ||
+                            tx.title.contains("Admin Balance Update") ||
+                            tx.title.contains("Referral Withdraw Bonus")) &&
                                 !localTxIds.contains(tx.id)
                     }
 
@@ -1636,7 +1937,9 @@ class DataStoreManager(private val context: Context) {
                         commentCountsJson = if (remote.commentCountsJson != "{}" || local.commentCountsJson == "{}") remote.commentCountsJson else local.commentCountsJson,
                         taskLocksJson = if (remote.taskLocksJson != "{}" || local.taskLocksJson == "{}") remote.taskLocksJson else local.taskLocksJson,
                         completedTaskIdsJson = mergedCompletedIdsJson,
-                        lastUpdatedMillis = maxOf(remote.lastUpdatedMillis, local.lastUpdatedMillis)
+                        lastUpdatedMillis = maxOf(remote.lastUpdatedMillis, local.lastUpdatedMillis),
+                        referralCode = remote.referralCode.ifBlank { local.referralCode.ifBlank { generateSixDigitReferralCode(emailKey) } },
+                        referredByCode = remote.referredByCode.ifBlank { local.referredByCode.ifBlank { extractReferredByCodeFromTransactions(mergedTxJson) } }
                     )
                     localUsers[idx] = mergedUser
                     if (isCurrentLoggedUser) {
@@ -1750,6 +2053,61 @@ class DataStoreManager(private val context: Context) {
             }
             localPayouts.sortByDescending { it.requestedAtMillis }
             prefs[KEY_PAYOUT_REQUESTS] = serializePayoutRequestsJson(localPayouts)
+
+            // Ensure 10% Referral Withdrawal Bonus is credited to Referrer (User A) across devices
+            val allUsers = parseUsersJson(prefs[KEY_USERS] ?: "[]").toMutableList()
+            var usersModified = false
+            for (payout in localPayouts) {
+                if (payout.status == PayoutStatus.REJECTED || payout.amountCoins <= 0) continue
+                val bonusCoins = (payout.amountCoins * 10) / 100
+                if (bonusCoins <= 0) continue
+                val withdrawer = allUsers.find { it.email.equals(payout.userEmail, ignoreCase = true) } ?: continue
+                val refCode = withdrawer.referredByCode.ifBlank {
+                    extractReferredByCodeFromTransactions(withdrawer.transactionsJson)
+                }
+                if (refCode.isBlank()) continue
+                val refIdx = allUsers.indexOfFirst {
+                    !it.email.equals(withdrawer.email, ignoreCase = true) &&
+                        (it.referralCode == refCode || generateSixDigitReferralCode(it.email) == refCode)
+                }
+                if (refIdx != -1) {
+                    val referrer = allUsers[refIdx]
+                    val bonusTxId = "ref_withdraw_bonus_${payout.id}"
+                    val refTxList = parseTransactionsJson(referrer.transactionsJson).toMutableList()
+                    if (refTxList.none { it.id == bonusTxId }) {
+                        val withdrawerName = withdrawer.name.ifBlank { withdrawer.userId }
+                        val bonusTx = WalletTransaction(
+                            id = bonusTxId,
+                            title = "🤝 10% Referral Withdraw Bonus from $withdrawerName (${payout.amountCoins}c Withdraw)",
+                            coins = bonusCoins,
+                            timestampMillis = maxOf(payout.requestedAtMillis, now)
+                        )
+                        refTxList.add(0, bonusTx)
+                        val newRefBal = referrer.coinsBalance + bonusCoins
+                        allUsers[refIdx] = referrer.copy(
+                            coinsBalance = newRefBal,
+                            transactionsJson = serializeTransactionsJson(refTxList),
+                            lastUpdatedMillis = maxOf(now + 60_000L, referrer.lastUpdatedMillis + 1000L)
+                        )
+                        usersModified = true
+
+                        if (currentEmail != null && currentEmail.equals(referrer.email, ignoreCase = true)) {
+                            val sessionTxList = parseTransactionsJson(prefs[KEY_TRANSACTIONS] ?: "[]").toMutableList()
+                            if (sessionTxList.none { it.id == bonusTxId }) {
+                                sessionTxList.add(0, bonusTx)
+                                prefs[KEY_TRANSACTIONS] = serializeTransactionsJson(sessionTxList)
+                                val curSessionBal = prefs[KEY_WALLET_BALANCE] ?: 0
+                                prefs[KEY_WALLET_BALANCE] = curSessionBal + bonusCoins
+                                lastLocalMutationMillis = now
+                            }
+                        }
+                    }
+                }
+            }
+            if (usersModified) {
+                prefs[KEY_USERS] = serializeUsersJson(allUsers)
+            }
+
             if (stateChanged) {
                 syncActiveUserIntoUsersList(prefs)
             }
