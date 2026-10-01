@@ -88,10 +88,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val cloudServerUrl: StateFlow<String> = dataStoreManager.cloudServerUrlFlow
-        .stateIn(viewModelScope, SharingStarted.Eagerly, "")
+        .stateIn(viewModelScope, SharingStarted.Eagerly, DataStoreManager.DEFAULT_CLOUD_SERVER_URL)
 
     val cloudServerStatus: StateFlow<String> = dataStoreManager.cloudServerStatusFlow
-        .stateIn(viewModelScope, SharingStarted.Eagerly, "Not Connected (Local Mode)")
+        .stateIn(viewModelScope, SharingStarted.Eagerly, "Connected to Default Drive Server")
 
     val adminPosts: StateFlow<List< com.example.data.AdminPostItem >> = dataStoreManager.adminPostsFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, dataStoreManager.getDefaultAdminPosts())

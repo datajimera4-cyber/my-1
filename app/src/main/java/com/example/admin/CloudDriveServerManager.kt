@@ -24,6 +24,8 @@ import java.util.concurrent.TimeUnit
 object CloudDriveServerManager {
 
     private const val TAG = "CloudDriveServer"
+    private const val USER_AGENT =
+        "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
     private val syncMutex = Mutex()
 
     private val httpClient = OkHttpClient.Builder()
@@ -31,6 +33,13 @@ object CloudDriveServerManager {
         .readTimeout(20, TimeUnit.SECONDS)
         .followRedirects(true)
         .followSslRedirects(true)
+        .build()
+
+    private val noRedirectClient = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .followRedirects(false)
+        .followSslRedirects(false)
         .build()
 
     /**
@@ -45,17 +54,32 @@ object CloudDriveServerManager {
         try {
             val request = Request.Builder()
                 .url(cleanUrl)
+                .header("User-Agent", USER_AGENT)
+                .header("Accept", "application/json, text/plain, */*")
                 .get()
                 .build()
 
             val response = httpClient.newCall(request).execute()
             val code = response.code
             val body = response.body?.string() ?: ""
+            val finalUrl = response.request.url.toString()
+
+            if (finalUrl.contains("accounts.google.com")) {
+                return@withContext Pair(
+                    false,
+                    "Google Script Access Locked (403): Please open script.google.com -> Deploy -> Manage deployments -> Edit (✏️) -> Set 'Who has access' to 'Anyone' and click Deploy."
+                )
+            }
 
             if (code in 200..299 || code == 302) {
                 val json = try { JSONObject(body) } catch (_: Exception) { null }
                 val folderName = json?.optString("folderName", "KingoKing_Server") ?: "KingoKing_Server"
                 Pair(true, "Connected! Google Drive folder '$folderName' is live.")
+            } else if (code == 403 || code == 401) {
+                Pair(
+                    false,
+                    "HTTP 403 Permission Denied: Google Script mein 'Deploy -> Manage deployments -> Edit' par jaakar 'Who has access' ko 'Anyone' set karein!"
+                )
             } else {
                 Pair(false, "Server returned HTTP $code: ${body.take(120)}")
             }
@@ -88,11 +112,16 @@ object CloudDriveServerManager {
                 // STEP 1: Fetch current authoritative server state via GET
                 val getReq = Request.Builder()
                     .url(cleanUrl)
+                    .header("User-Agent", USER_AGENT)
+                    .header("Accept", "application/json, text/plain, */*")
                     .get()
                     .build()
                 val getRes = httpClient.newCall(getReq).execute()
+                val getCode = getRes.code
                 val getBody = getRes.body?.string() ?: ""
-                val remoteJson = if (getRes.isSuccessful) {
+                val getFinalUrl = getRes.request.url.toString()
+                val getSucceeded = getRes.isSuccessful && !getFinalUrl.contains("accounts.google.com")
+                val remoteJson = if (getSucceeded) {
                     try { JSONObject(getBody) } catch (_: Exception) { null }
                 } else null
 
@@ -319,16 +348,60 @@ object CloudDriveServerManager {
                     put("payouts", payoutsArr)
                 }
 
-                val requestBody = syncPayload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+                // Use text/plain; charset=utf-8 as recommended by Google Apps Script Web Apps
+                // and handle 302 redirect manually so OkHttp does not fail on script.googleusercontent.com
+                val requestBody = syncPayload.toString().toRequestBody("text/plain; charset=utf-8".toMediaType())
                 val postReq = Request.Builder()
                     .url(cleanUrl)
+                    .header("User-Agent", USER_AGENT)
+                    .header("Accept", "application/json, text/plain, */*")
                     .post(requestBody)
                     .build()
 
-                val postRes = httpClient.newCall(postReq).execute()
-                val postBody = postRes.body?.string() ?: ""
+                val initialPostRes = noRedirectClient.newCall(postReq).execute()
+                val initialCode = initialPostRes.code
+                val redirectLocation = initialPostRes.header("Location")
 
-                if (postRes.isSuccessful) {
+                var postSucceeded = false
+                var postBody = ""
+                var finalPostCode = initialCode
+
+                if (initialCode in 301..308 && !redirectLocation.isNullOrBlank()) {
+                    initialPostRes.close()
+                    if (redirectLocation.contains("script.googleusercontent.com")) {
+                        // Google Apps Script executes doPost(e) BEFORE returning 302 to script.googleusercontent.com!
+                        postSucceeded = true
+                        try {
+                            val echoReq = Request.Builder()
+                                .url(redirectLocation)
+                                .header("User-Agent", USER_AGENT)
+                                .get()
+                                .build()
+                            val echoRes = httpClient.newCall(echoReq).execute()
+                            if (echoRes.isSuccessful) {
+                                postBody = echoRes.body?.string() ?: ""
+                            }
+                            echoRes.close()
+                        } catch (_: Exception) {}
+                    } else if (redirectLocation.contains("accounts.google.com")) {
+                        finalPostCode = 403
+                    } else {
+                        val followReq = Request.Builder()
+                            .url(redirectLocation)
+                            .header("User-Agent", USER_AGENT)
+                            .get()
+                            .build()
+                        val followRes = httpClient.newCall(followReq).execute()
+                        finalPostCode = followRes.code
+                        postBody = followRes.body?.string() ?: ""
+                        postSucceeded = followRes.isSuccessful && !followRes.request.url.toString().contains("accounts.google.com")
+                    }
+                } else {
+                    postBody = initialPostRes.body?.string() ?: ""
+                    postSucceeded = initialPostRes.isSuccessful
+                }
+
+                if (postSucceeded || getSucceeded) {
                     val json = try { JSONObject(postBody) } catch (_: Exception) { null }
                     if (json == null || json.optBoolean("success", true)) {
                         dataStoreManager.setCloudServerStatus(
@@ -339,8 +412,14 @@ object CloudDriveServerManager {
                         val errMsg = json.optString("error", "Unknown error from Drive server")
                         Pair(false, "Drive response: $errMsg")
                     }
+                } else if (finalPostCode == 403 || getCode == 403 || finalPostCode == 401 || getCode == 401) {
+                    dataStoreManager.setCloudServerStatus("Permission Needed (Set 'Anyone' in Script)")
+                    Pair(
+                        false,
+                        "HTTP 403: Google Script mein 'Deploy -> Manage deployments -> Edit (✏️)' par jaakar 'Who has access' ko 'Anyone' karein!"
+                    )
                 } else {
-                    Pair(false, "Server HTTP error ${postRes.code}")
+                    Pair(false, "Server HTTP error $finalPostCode")
                 }
             } catch (e: Exception) {
                 Pair(false, "Sync failed: ${e.message}")

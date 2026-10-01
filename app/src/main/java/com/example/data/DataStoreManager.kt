@@ -20,6 +20,14 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 class DataStoreManager(private val context: Context) {
 
     companion object {
+        // =========================================================================
+        // DEFAULT GOOGLE DRIVE SERVER URL
+        // Future mein agar aapko Google Apps Script ka link change karna ho,
+        // to bas neeche wali line mein naya "/exec" URL daal dein:
+        // =========================================================================
+        const val DEFAULT_CLOUD_SERVER_URL =
+            "https://script.google.com/macros/s/AKfycbzeuvE2McdDn-PAw9CNUHs_QkoIbk7R4oAFtrk8c-RKmJX9r0a8p_xEqaS6bLV6FuW3/exec"
+
         private val KEY_WALLET_BALANCE = intPreferencesKey("wallet_balance")
         private val KEY_TASK_COMPLETED = booleanPreferencesKey("task_completed")
         private val KEY_WATCHED_MILLIS = longPreferencesKey("watched_millis")
@@ -97,11 +105,12 @@ class DataStoreManager(private val context: Context) {
     }
 
     val cloudServerUrlFlow: Flow<String> = context.dataStore.data.map { prefs ->
-        prefs[KEY_CLOUD_SERVER_URL] ?: ""
+        val saved = prefs[KEY_CLOUD_SERVER_URL]?.trim()
+        if (saved.isNullOrBlank()) DEFAULT_CLOUD_SERVER_URL else saved
     }
 
     val cloudServerStatusFlow: Flow<String> = context.dataStore.data.map { prefs ->
-        prefs[KEY_CLOUD_SERVER_STATUS] ?: "Not Connected (Local Mode)"
+        prefs[KEY_CLOUD_SERVER_STATUS] ?: "Connected to Default Drive Server"
     }
 
     val likedTasksFlow: Flow<Set<String>> = context.dataStore.data.map { prefs ->
