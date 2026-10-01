@@ -252,7 +252,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     } catch (_: Exception) {}
                 }
-                delay(3_000L)
+                delay(1_500L)
+            }
+        }
+
+        // Real-time watcher for Admin Balance Updates -> notify User App immediately when Admin credits coins
+        viewModelScope.launch {
+            dataStoreManager.transactionsFlow.collectLatest { txList ->
+                if (com.example.BuildConfig.APP_ROLE != "ADMIN") {
+                    val notified = dataStoreManager.notifiedItemIdsFlow.first()
+                    val newAdminTx = txList.filter { tx ->
+                        (tx.id.startsWith("admin_coin_") || tx.title.contains("Admin Balance Update")) &&
+                                !notified.contains(tx.id) &&
+                                (System.currentTimeMillis() - tx.timestampMillis) < 10 * 60 * 1000L
+                    }
+                    if (newAdminTx.isNotEmpty()) {
+                        dataStoreManager.markItemsNotified(newAdminTx.map { it.id }.toSet())
+                        val newest = newAdminTx.first()
+                        val sign = if (newest.coins >= 0) "+${newest.coins}" else "${newest.coins}"
+                        com.example.service.NotificationChannels.sendAdminUpdateNotification(
+                            context = getApplication(),
+                            title = "👑 Wallet Updated by Admin ($sign Coins)",
+                            body = "Your Kingo King wallet balance has been updated in real time!"
+                        )
+                    }
+                }
             }
         }
 
@@ -370,7 +394,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val url = cloudServerUrl.value
             if (url.isNotBlank()) {
                 try {
-                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager)
+                    com.example.admin.CloudDriveServerManager.syncData(
+                        serverUrl = url,
+                        dataStoreManager = dataStoreManager,
+                        pushAdminContent = true,
+                        pushLocalChanges = true,
+                        pullRemoteFirst = false
+                    )
                 } catch (_: Exception) {}
             }
             WatchSessionRepository.addLog("Created new video task: \"$finalTitle\"", LogType.SUCCESS)
@@ -489,12 +519,140 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    private var lastVerifiedOtpEmail: String = ""
+    private var lastGeneratedOtpCode: String = ""
+    private var lastOtpGeneratedAtMillis: Long = 0L
+
+    private fun isValidEmailFormat(email: String): Boolean {
+        val clean = email.trim().lowercase()
+        val regex = Regex("^[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}$")
+        return regex.matches(clean)
+    }
+
+    fun sendEmailVerificationOtp(
+        email: String,
+        isPasswordReset: Boolean,
+        onResult: (Boolean, String, String?) -> Unit
+    ) {
+        val cleanEmail = email.trim().lowercase()
+        if (!isValidEmailFormat(cleanEmail)) {
+            onResult(false, "Please enter a valid email address (e.g. name@gmail.com).", null)
+            return
+        }
+
+        viewModelScope.launch {
+            val url = cloudServerUrl.value
+            // Pull latest users from server first so we accurately check existing accounts
+            if (url.isNotBlank()) {
+                try {
+                    com.example.admin.CloudDriveServerManager.syncData(
+                        serverUrl = url,
+                        dataStoreManager = dataStoreManager,
+                        pushAdminContent = false,
+                        pushLocalChanges = false
+                    )
+                } catch (_: Exception) {}
+            }
+
+            val emailExists = dataStoreManager.doesUserEmailExist(cleanEmail)
+            if (isPasswordReset && !emailExists) {
+                onResult(false, "No account found with $cleanEmail. Please Create Account first.", null)
+                return@launch
+            }
+            if (!isPasswordReset && emailExists) {
+                onResult(false, "Account with $cleanEmail already exists. Please Sign In or use Forgot Password.", null)
+                return@launch
+            }
+
+            val otp = (100000..999999).random().toString()
+            lastVerifiedOtpEmail = cleanEmail
+            lastGeneratedOtpCode = otp
+            lastOtpGeneratedAtMillis = System.currentTimeMillis()
+
+            // 1. Trigger email dispatch via connected Google Drive Script (if authorized in script)
+            if (url.isNotBlank()) {
+                launch {
+                    try {
+                        com.example.admin.CloudDriveServerManager.sendOtpEmail(
+                            serverUrl = url,
+                            email = cleanEmail,
+                            otpCode = otp,
+                            purpose = if (isPasswordReset) "Password Reset" else "Account Verification"
+                        )
+                    } catch (_: Exception) {}
+                }
+            }
+
+            // 2. Dispatch instant system notification with the 6-digit OTP code
+            com.example.service.NotificationChannels.sendAdminUpdateNotification(
+                context = getApplication(),
+                title = "🔐 Kingo King Verification OTP: $otp",
+                body = "Use 6-digit code $otp to verify $cleanEmail (${if (isPasswordReset) "Password Reset" else "New Account"})."
+            )
+
+            onResult(
+                true,
+                "6-digit verification code sent for $cleanEmail! Enter the OTP below to continue.",
+                otp
+            )
+        }
+    }
+
+    fun verifyEmailOtp(email: String, enteredOtp: String): Boolean {
+        val cleanEmail = email.trim().lowercase()
+        val cleanOtp = enteredOtp.trim()
+        if (cleanOtp.length != 6 || lastGeneratedOtpCode.isBlank()) return false
+        val notExpired = (System.currentTimeMillis() - lastOtpGeneratedAtMillis) < 15 * 60 * 1000L
+        return notExpired && cleanEmail.equals(lastVerifiedOtpEmail, ignoreCase = true) && cleanOtp == lastGeneratedOtpCode
+    }
+
+    fun resetPasswordWithOtp(
+        email: String,
+        enteredOtp: String,
+        newPassword: String,
+        onResult: (Boolean, String) -> Unit
+    ) {
+        val cleanEmail = email.trim().lowercase()
+        if (!verifyEmailOtp(cleanEmail, enteredOtp)) {
+            onResult(false, "Invalid or expired 6-digit OTP code. Please check and try again.")
+            return
+        }
+        if (newPassword.length < 4) {
+            onResult(false, "New password must be at least 4 characters.")
+            return
+        }
+
+        viewModelScope.launch {
+            val res = dataStoreManager.resetUserPassword(cleanEmail, newPassword)
+            onResult(res.first, res.second)
+            if (res.first) {
+                lastGeneratedOtpCode = ""
+                WatchSessionRepository.addLog("Password reset completed for: $cleanEmail", LogType.SUCCESS)
+                val url = cloudServerUrl.value
+                if (url.isNotBlank()) {
+                    launch {
+                        try {
+                            com.example.admin.CloudDriveServerManager.syncData(
+                                serverUrl = url,
+                                dataStoreManager = dataStoreManager,
+                                pushAdminContent = false,
+                                pushLocalChanges = true,
+                                pullRemoteFirst = false
+                            )
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
+        }
+    }
+
     fun signUp(email: String, password: String, name: String, onResult: (Boolean, String) -> Unit) {
         viewModelScope.launch {
             val res = dataStoreManager.signUpUser(email, password, name)
             // Immediately return result so UI transitions instantly without waiting for slow Drive file locks
             onResult(res.first, res.second)
             if (res.first) {
+                lastGeneratedOtpCode = ""
                 WatchSessionRepository.addLog("User signed up: $email (syncing to Drive in background)", LogType.SUCCESS)
                 val url = cloudServerUrl.value
                 if (url.isNotBlank()) {
@@ -504,7 +662,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 serverUrl = url,
                                 dataStoreManager = dataStoreManager,
                                 pushAdminContent = false,
-                                pushLocalChanges = true
+                                pushLocalChanges = true,
+                                pullRemoteFirst = false
                             )
                         } catch (_: Exception) {}
                     }
@@ -529,7 +688,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 serverUrl = url,
                                 dataStoreManager = dataStoreManager,
                                 pushAdminContent = false,
-                                pushLocalChanges = true
+                                pushLocalChanges = false
                             )
                         } catch (_: Exception) {}
                     }
@@ -537,7 +696,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
 
-            // 2. If account not yet cached on this phone, do a single fast GET-only pull from Drive
+            // 2. If account not yet cached on this phone (or password was updated), pull latest from Drive
             if (url.isNotBlank()) {
                 try {
                     com.example.admin.CloudDriveServerManager.syncData(
@@ -553,19 +712,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             onResult(remoteRes.first, remoteRes.second)
             if (remoteRes.first) {
                 WatchSessionRepository.addLog("User logged in & loaded Drive profile: $email", LogType.SUCCESS)
-                if (url.isNotBlank()) {
-                    launch {
-                        try {
-                            com.example.admin.CloudDriveServerManager.syncData(
-                                serverUrl = url,
-                                dataStoreManager = dataStoreManager,
-                                pushAdminContent = false,
-                                pushLocalChanges = true,
-                                pullRemoteFirst = false
-                            )
-                        } catch (_: Exception) {}
-                    }
-                }
             }
         }
     }
@@ -607,7 +753,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val url = cloudServerUrl.value
             if (url.isNotBlank()) {
                 try {
-                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager, pushAdminContent = true)
+                    com.example.admin.CloudDriveServerManager.syncData(
+                        serverUrl = url,
+                        dataStoreManager = dataStoreManager,
+                        pushAdminContent = true,
+                        pushLocalChanges = true,
+                        pullRemoteFirst = false
+                    )
                 } catch (_: Exception) {}
             }
             WatchSessionRepository.addLog("Admin: Payout approved for request #$requestId", LogType.SUCCESS)
@@ -620,7 +772,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val url = cloudServerUrl.value
             if (url.isNotBlank()) {
                 try {
-                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager, pushAdminContent = true)
+                    com.example.admin.CloudDriveServerManager.syncData(
+                        serverUrl = url,
+                        dataStoreManager = dataStoreManager,
+                        pushAdminContent = true,
+                        pushLocalChanges = true,
+                        pullRemoteFirst = false
+                    )
                 } catch (_: Exception) {}
             }
             WatchSessionRepository.addLog("Admin: Payout rejected ($reason). Coins refunded.", LogType.WARNING)
@@ -633,7 +791,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val url = cloudServerUrl.value
             if (url.isNotBlank()) {
                 try {
-                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager)
+                    com.example.admin.CloudDriveServerManager.syncData(
+                        serverUrl = url,
+                        dataStoreManager = dataStoreManager,
+                        pushAdminContent = true,
+                        pushLocalChanges = true,
+                        pullRemoteFirst = false
+                    )
                 } catch (_: Exception) {}
             }
             WatchSessionRepository.addLog("Admin: Deleted task #$taskId", LogType.INFO)
@@ -646,7 +810,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val url = cloudServerUrl.value
             if (url.isNotBlank()) {
                 try {
-                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager)
+                    com.example.admin.CloudDriveServerManager.syncData(
+                        serverUrl = url,
+                        dataStoreManager = dataStoreManager,
+                        pushAdminContent = true,
+                        pushLocalChanges = true,
+                        pullRemoteFirst = false
+                    )
                 } catch (_: Exception) {}
             }
             WatchSessionRepository.addLog(
@@ -696,7 +866,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val url = cloudServerUrl.value
             if (url.isNotBlank()) {
                 try {
-                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager)
+                    com.example.admin.CloudDriveServerManager.syncData(
+                        serverUrl = url,
+                        dataStoreManager = dataStoreManager,
+                        pushAdminContent = true,
+                        pushLocalChanges = true,
+                        pullRemoteFirst = false
+                    )
                 } catch (_: Exception) {}
             }
             WatchSessionRepository.addLog("Admin published ${post.postType} to ${post.targetTab}: \"${post.title}\"", LogType.SUCCESS)
@@ -709,7 +885,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val url = cloudServerUrl.value
             if (url.isNotBlank()) {
                 try {
-                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager)
+                    com.example.admin.CloudDriveServerManager.syncData(
+                        serverUrl = url,
+                        dataStoreManager = dataStoreManager,
+                        pushAdminContent = true,
+                        pushLocalChanges = true,
+                        pullRemoteFirst = false
+                    )
                 } catch (_: Exception) {}
             }
             WatchSessionRepository.addLog(
@@ -725,7 +907,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val url = cloudServerUrl.value
             if (url.isNotBlank()) {
                 try {
-                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager)
+                    com.example.admin.CloudDriveServerManager.syncData(
+                        serverUrl = url,
+                        dataStoreManager = dataStoreManager,
+                        pushAdminContent = true,
+                        pushLocalChanges = true,
+                        pullRemoteFirst = false
+                    )
                 } catch (_: Exception) {}
             }
             WatchSessionRepository.addLog("Admin deleted post #$postId", LogType.INFO)
@@ -744,7 +932,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val url = cloudServerUrl.value
             if (url.isNotBlank()) {
                 try {
-                    com.example.admin.CloudDriveServerManager.syncData(url, dataStoreManager, pushAdminContent = true)
+                    com.example.admin.CloudDriveServerManager.syncData(
+                        serverUrl = url,
+                        dataStoreManager = dataStoreManager,
+                        pushAdminContent = true,
+                        pushLocalChanges = true,
+                        pullRemoteFirst = false
+                    )
                 } catch (_: Exception) {}
             }
             WatchSessionRepository.addLog("Admin: Updated coins to $newCoins for $userEmail", LogType.SUCCESS)

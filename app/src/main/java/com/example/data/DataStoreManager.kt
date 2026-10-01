@@ -60,6 +60,12 @@ class DataStoreManager(private val context: Context) {
         private val KEY_ADMIN_POSTS = stringPreferencesKey("admin_posts_json")
         private val KEY_NOTIFIED_ITEM_IDS = stringPreferencesKey("notified_item_ids_json")
         private val KEY_DISMISSED_POST_IDS = stringPreferencesKey("dismissed_post_ids_json")
+
+        @Volatile
+        var lastLocalMutationMillis: Long = 0L
+
+        val pendingAdminCoinUpdates = java.util.concurrent.ConcurrentHashMap<String, Pair<Int, Long>>()
+        val pendingPasswordResets = java.util.concurrent.ConcurrentHashMap<String, Pair<String, Long>>()
     }
 
     val adminPostsFlow: Flow<List<AdminPostItem>> = context.dataStore.data.map { prefs ->
@@ -118,8 +124,12 @@ class DataStoreManager(private val context: Context) {
     }
 
     val cloudServerUrlFlow: Flow<String> = context.dataStore.data.map { prefs ->
-        val saved = prefs[KEY_CLOUD_SERVER_URL]?.trim()
-        if (saved.isNullOrBlank()) DEFAULT_CLOUD_SERVER_URL else saved
+        if (com.example.BuildConfig.APP_ROLE != "ADMIN") {
+            DEFAULT_USER_CLOUD_SERVER_URL
+        } else {
+            val saved = prefs[KEY_CLOUD_SERVER_URL]?.trim()
+            if (saved.isNullOrBlank()) DEFAULT_ADMIN_CLOUD_SERVER_URL else saved
+        }
     }
 
     val cloudServerStatusFlow: Flow<String> = context.dataStore.data.map { prefs ->
@@ -264,6 +274,7 @@ class DataStoreManager(private val context: Context) {
     }
 
     suspend fun addRewardTransaction(taskTitle: String, coins: Int) {
+        lastLocalMutationMillis = System.currentTimeMillis()
         context.dataStore.edit { prefs ->
             val currentBalance = prefs[KEY_WALLET_BALANCE] ?: 0
             val newBalance = currentBalance + coins
@@ -293,6 +304,7 @@ class DataStoreManager(private val context: Context) {
     }
 
     suspend fun recordTaskLike(taskId: String, taskTitle: String = "YouTube Video"): Pair<Boolean, String> {
+        lastLocalMutationMillis = System.currentTimeMillis()
         var added = false
         var message = ""
         context.dataStore.edit { prefs ->
@@ -437,6 +449,7 @@ class DataStoreManager(private val context: Context) {
     }
 
     suspend fun recordTaskComment(taskId: String, taskTitle: String = "YouTube Video"): Pair<Boolean, String> {
+        lastLocalMutationMillis = System.currentTimeMillis()
         var added = false
         var message = ""
         context.dataStore.edit { prefs ->
@@ -481,6 +494,7 @@ class DataStoreManager(private val context: Context) {
     }
 
     suspend fun withdrawCoins(coins: Int, method: String, destination: String): Boolean {
+        lastLocalMutationMillis = System.currentTimeMillis()
         var success = false
         context.dataStore.edit { prefs ->
             val currentBalance = prefs[KEY_WALLET_BALANCE] ?: 0
@@ -715,20 +729,89 @@ class DataStoreManager(private val context: Context) {
         }
     }
 
+    suspend fun doesUserEmailExist(email: String): Boolean {
+        val cleanEmail = email.trim().lowercase()
+        if (cleanEmail.isBlank()) return false
+        var exists = false
+        context.dataStore.edit { prefs ->
+            val users = parseUsersJson(prefs[KEY_USERS] ?: "[]")
+            exists = users.any { it.email.equals(cleanEmail, ignoreCase = true) }
+        }
+        return exists
+    }
+
+    suspend fun resetUserPassword(email: String, newPassword: String): Pair<Boolean, String> {
+        val cleanEmail = email.trim().lowercase()
+        if (cleanEmail.isEmpty() || !cleanEmail.contains("@")) {
+            return Pair(false, "Please enter a valid email address.")
+        }
+        if (newPassword.length < 4) {
+            return Pair(false, "New password must be at least 4 characters.")
+        }
+        val now = System.currentTimeMillis()
+        lastLocalMutationMillis = now
+        pendingPasswordResets[cleanEmail] = Pair(newPassword, now)
+        var result = Pair(false, "No account found with this email address.")
+        context.dataStore.edit { prefs ->
+            val users = parseUsersJson(prefs[KEY_USERS] ?: "[]").toMutableList()
+            val idx = users.indexOfFirst { it.email.equals(cleanEmail, ignoreCase = true) }
+            if (idx != -1) {
+                val updatedUser = users[idx].copy(
+                    passwordHash = newPassword,
+                    lastUpdatedMillis = now + 60_000L
+                )
+                users[idx] = updatedUser
+                prefs[KEY_USERS] = serializeUsersJson(users)
+                prefs[KEY_CURRENT_USER_EMAIL] = cleanEmail
+                applyUserProfileToSessionPrefs(prefs, updatedUser)
+                result = Pair(true, "Password reset successful! Welcome back, ${updatedUser.name.ifBlank { cleanEmail.substringBefore("@") }}!")
+            }
+        }
+        return result
+    }
+
     suspend fun adminUpdateUserCoins(userEmail: String, newCoins: Int) {
+        val cleanEmail = userEmail.trim().lowercase()
+        val safeCoins = newCoins.coerceAtLeast(0)
+        val now = System.currentTimeMillis()
+        val updatedTimestamp = now + 120_000L
+        lastLocalMutationMillis = now
+        if (cleanEmail.isNotBlank()) {
+            pendingAdminCoinUpdates[cleanEmail] = Pair(safeCoins, now)
+        }
         context.dataStore.edit { prefs ->
             val currentEmail = prefs[KEY_CURRENT_USER_EMAIL]
-            if (currentEmail.equals(userEmail, ignoreCase = true) || userEmail.isBlank() || userEmail == "current") {
-                prefs[KEY_WALLET_BALANCE] = newCoins.coerceAtLeast(0)
+            if (currentEmail.equals(cleanEmail, ignoreCase = true) || cleanEmail.isBlank() || cleanEmail == "current") {
+                prefs[KEY_WALLET_BALANCE] = safeCoins
             }
             val users = parseUsersJson(prefs[KEY_USERS] ?: "[]").toMutableList()
-            val index = users.indexOfFirst { it.email.equals(userEmail, ignoreCase = true) }
+            val index = users.indexOfFirst { it.email.equals(cleanEmail, ignoreCase = true) }
             if (index != -1) {
-                users[index] = users[index].copy(
-                    coinsBalance = newCoins.coerceAtLeast(0),
-                    lastUpdatedMillis = System.currentTimeMillis() + 5000L
+                val existing = users[index]
+                val diff = safeCoins - existing.coinsBalance
+                val txList = parseTransactionsJson(existing.transactionsJson).toMutableList()
+                if (diff != 0) {
+                    val sign = if (diff > 0) "+$diff" else "$diff"
+                    txList.add(
+                        0,
+                        WalletTransaction(
+                            id = "admin_coin_${now}",
+                            title = "👑 Admin Balance Update ($sign Coins)",
+                            coins = diff,
+                            timestampMillis = now
+                        )
+                    )
+                }
+                val serializedTx = serializeTransactionsJson(txList)
+                users[index] = existing.copy(
+                    coinsBalance = safeCoins,
+                    transactionsJson = serializedTx,
+                    lastUpdatedMillis = updatedTimestamp
                 )
                 prefs[KEY_USERS] = serializeUsersJson(users)
+                if (currentEmail.equals(cleanEmail, ignoreCase = true)) {
+                    prefs[KEY_TRANSACTIONS] = serializedTx
+                }
             }
         }
     }
@@ -1271,30 +1354,84 @@ class DataStoreManager(private val context: Context) {
         context.dataStore.edit { prefs ->
             val localUsers = parseUsersJson(prefs[KEY_USERS] ?: "[]").toMutableList()
             val currentEmail = prefs[KEY_CURRENT_USER_EMAIL]
+            val now = System.currentTimeMillis()
 
             for (remote in remoteUsers) {
-                if (remote.email.isBlank()) continue
-                val idx = localUsers.indexOfFirst { it.email.equals(remote.email, ignoreCase = true) }
+                val emailKey = remote.email.trim().lowercase()
+                if (emailKey.isBlank()) continue
+                val idx = localUsers.indexOfFirst { it.email.equals(emailKey, ignoreCase = true) }
                 if (idx == -1) {
                     localUsers.add(remote)
-                    if (!isAdmin && currentEmail != null && currentEmail.equals(remote.email, ignoreCase = true)) {
+                    if (!isAdmin && currentEmail != null && currentEmail.equals(emailKey, ignoreCase = true)) {
                         applyUserProfileToSessionPrefs(prefs, remote)
                     }
                 } else {
                     val local = localUsers[idx]
-                    // If remote is newer or if we are pulling another user's stats into Admin
-                    val isCurrentLoggedUser = !isAdmin && currentEmail != null && currentEmail.equals(remote.email, ignoreCase = true)
-                    if (!isCurrentLoggedUser || remote.lastUpdatedMillis > local.lastUpdatedMillis) {
+                    val isCurrentLoggedUser = !isAdmin && currentEmail != null && currentEmail.equals(emailKey, ignoreCase = true)
+
+                    // 1. Check if Admin recently updated this user's coins locally (prevents 2-3s revert on Admin App!)
+                    val pendingCoinUpdate = pendingAdminCoinUpdates[emailKey]
+                    if (pendingCoinUpdate != null) {
+                        val (expectedCoins, updatedAt) = pendingCoinUpdate
+                        if (remote.coinsBalance == expectedCoins) {
+                            // Server now reflects Admin's coin update!
+                            pendingAdminCoinUpdates.remove(emailKey)
+                        } else if (now - updatedAt < 60_000L) {
+                            // Keep Admin's updated coin balance & transactions; do not let stale GET overwrite it
+                            continue
+                        } else {
+                            pendingAdminCoinUpdates.remove(emailKey)
+                        }
+                    }
+
+                    // 2. Check if User recently reset their password locally
+                    val pendingPw = pendingPasswordResets[emailKey]
+                    val effectivePasswordHash = if (pendingPw != null && (now - pendingPw.second < 60_000L)) {
+                        if (remote.passwordHash == pendingPw.first) {
+                            pendingPasswordResets.remove(emailKey)
+                        }
+                        pendingPw.first
+                    } else {
+                        remote.passwordHash.ifBlank { local.passwordHash }
+                    }
+
+                    // 3. Detect if remote has any new Admin coin update transaction not in local
+                    val remoteTxList = parseTransactionsJson(remote.transactionsJson)
+                    val localTxList = parseTransactionsJson(local.transactionsJson)
+                    val localTxIds = localTxList.map { it.id }.toSet()
+                    val hasNewAdminTransaction = remoteTxList.any { tx ->
+                        (tx.id.startsWith("admin_coin_") || tx.title.contains("Admin Balance Update")) &&
+                                !localTxIds.contains(tx.id)
+                    }
+
+                    // 4. Merge transactions without losing any entries
+                    val mergedTxList = (remoteTxList + localTxList)
+                        .distinctBy { it.id }
+                        .sortedByDescending { it.timestampMillis }
+                    val mergedTxJson = if (mergedTxList.isNotEmpty()) serializeTransactionsJson(mergedTxList) else "[]"
+
+                    val userHasNotMutatedRecently = (now - lastLocalMutationMillis) > 6_000L
+                    val shouldAcceptRemoteBalance = isAdmin ||
+                            hasNewAdminTransaction ||
+                            remote.lastUpdatedMillis >= local.lastUpdatedMillis ||
+                            local.lastUpdatedMillis == 0L ||
+                            (remote.coinsBalance != local.coinsBalance && userHasNotMutatedRecently)
+
+                    if (shouldAcceptRemoteBalance) {
                         val mergedUser = remote.copy(
-                            passwordHash = remote.passwordHash.ifBlank { local.passwordHash },
-                            transactionsJson = if (remote.transactionsJson != "[]" || local.transactionsJson == "[]") remote.transactionsJson else local.transactionsJson,
+                            passwordHash = effectivePasswordHash,
+                            transactionsJson = mergedTxJson,
                             likedTasksJson = if (remote.likedTasksJson != "[]" || local.likedTasksJson == "[]") remote.likedTasksJson else local.likedTasksJson,
                             commentCountsJson = if (remote.commentCountsJson != "{}" || local.commentCountsJson == "{}") remote.commentCountsJson else local.commentCountsJson,
-                            taskLocksJson = if (remote.taskLocksJson != "{}" || local.taskLocksJson == "{}") remote.taskLocksJson else local.taskLocksJson
+                            taskLocksJson = if (remote.taskLocksJson != "{}" || local.taskLocksJson == "{}") remote.taskLocksJson else local.taskLocksJson,
+                            lastUpdatedMillis = maxOf(remote.lastUpdatedMillis, local.lastUpdatedMillis)
                         )
                         localUsers[idx] = mergedUser
                         if (isCurrentLoggedUser) {
-                            applyUserProfileToSessionPrefs(prefs, mergedUser)
+                            val currentSessionBal = prefs[KEY_WALLET_BALANCE] ?: 0
+                            if (hasNewAdminTransaction || mergedUser.coinsBalance != currentSessionBal || remote.lastUpdatedMillis > local.lastUpdatedMillis) {
+                                applyUserProfileToSessionPrefs(prefs, mergedUser)
+                            }
                         }
                     }
                 }

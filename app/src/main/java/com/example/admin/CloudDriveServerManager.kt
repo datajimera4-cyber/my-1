@@ -118,13 +118,21 @@ object CloudDriveServerManager {
                 var getCode = 200
                 var getSucceeded = false
                 var remoteJson: JSONObject? = null
+                val pollStartMillis = System.currentTimeMillis()
 
                 if (pullRemoteFirst || !pushLocalChanges) {
-                    // STEP 1: Fast GET to fetch latest server state
+                    // STEP 1: Fast cache-busted GET to fetch latest server state immediately
+                    val getUrl = if (cleanUrl.contains("?")) {
+                        "$cleanUrl&nocache=${System.currentTimeMillis()}"
+                    } else {
+                        "$cleanUrl?nocache=${System.currentTimeMillis()}"
+                    }
                     val getReq = Request.Builder()
-                        .url(cleanUrl)
+                        .url(getUrl)
                         .header("User-Agent", USER_AGENT)
                         .header("Accept", "application/json, text/plain, */*")
+                        .header("Cache-Control", "no-cache, no-store, must-revalidate")
+                        .header("Pragma", "no-cache")
                         .get()
                         .build()
                     val getRes = httpClient.newCall(getReq).execute()
@@ -133,7 +141,9 @@ object CloudDriveServerManager {
                     val getFinalUrl = getRes.request.url.toString()
                     getRes.close()
                     getSucceeded = getRes.isSuccessful && !getFinalUrl.contains("accounts.google.com")
-                    remoteJson = if (getSucceeded) {
+                    // If a local write occurred while this background GET was in flight, discard stale GET payload
+                    val staleDueToConcurrentWrite = !pushLocalChanges && DataStoreManager.lastLocalMutationMillis > pollStartMillis
+                    remoteJson = if (getSucceeded && !staleDueToConcurrentWrite) {
                         try { JSONObject(getBody) } catch (_: Exception) { null }
                     } else null
                 }
@@ -450,6 +460,39 @@ object CloudDriveServerManager {
     }
 
     /**
+     * Sends a 6-digit OTP email via the connected Google Drive Apps Script (MailApp.sendEmail).
+     */
+    suspend fun sendOtpEmail(
+        serverUrl: String,
+        email: String,
+        otpCode: String,
+        purpose: String
+    ): Boolean = withContext(Dispatchers.IO) {
+        val cleanUrl = serverUrl.trim()
+        if (cleanUrl.isBlank()) return@withContext false
+        try {
+            val payload = JSONObject().apply {
+                put("action", "send_otp")
+                put("email", email.trim())
+                put("otp", otpCode)
+                put("purpose", purpose)
+            }
+            val body = payload.toString().toRequestBody("text/plain; charset=utf-8".toMediaType())
+            val req = Request.Builder()
+                .url(cleanUrl)
+                .header("User-Agent", USER_AGENT)
+                .post(body)
+                .build()
+            val res = noRedirectClient.newCall(req).execute()
+            val ok = res.isSuccessful || res.code in 301..308
+            res.close()
+            ok
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
      * Complete, copy-paste ready Google Apps Script that turns Google Drive
      * into a free 24/7 real-time cloud server with per-user data & task sync.
      */
@@ -537,6 +580,16 @@ function doPost(e) {
     var postData = JSON.parse(e.postData.contents);
     var action = postData.action || "sync_all";
     
+    if (action === "send_otp" && postData.email && postData.otp) {
+      var subject = "Kingo King - Your Verification Code: " + postData.otp;
+      var msg = "Hello,\n\nYour 6-digit verification OTP for " + (postData.purpose || "Kingo King") + " is:\n\n" + postData.otp + "\n\nValid for 10 minutes.\n\n- Team Kingo King";
+      try {
+        MailApp.sendEmail(postData.email, subject, msg);
+      } catch (mailErr) {}
+      return ContentService.createTextOutput(JSON.stringify({ "success": true, "otpSent": true }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
     if (action === "sync_all") {
       if (postData.tasks) {
         saveFileContent("tasks.json", JSON.stringify(postData.tasks));

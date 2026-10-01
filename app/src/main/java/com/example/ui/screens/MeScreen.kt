@@ -83,12 +83,7 @@ fun MeScreen(
     val adminPosts by viewModel.adminPosts.collectAsState()
     val dismissedPostIds by viewModel.dismissedPostIds.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
-    val cloudServerUrl by viewModel.cloudServerUrl.collectAsState()
-    val cloudServerStatus by viewModel.cloudServerStatus.collectAsState()
-
-    var serverUrlInput by remember(cloudServerUrl) { mutableStateOf(cloudServerUrl) }
-    var showServerUrlEditor by remember { mutableStateOf(false) }
-    var isSyncingDrive by remember { mutableStateOf(false) }
+    var showChangePasswordDialog by remember { mutableStateOf(false) }
 
     val completedCount = videoTasks.count { it.isCompleted }
 
@@ -562,90 +557,157 @@ fun MeScreen(
                         }
                     }
 
-                    // Google Drive Cloud Server Sync Row
-                    Card(
-                        shape = RoundedCornerShape(14.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("me_cloud_sync_card")
-                    ) {
-                        Column(
+                    // Change / Reset Password Row
+                    if (isUserLoggedIn) {
+                        Card(
+                            shape = RoundedCornerShape(14.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                                .clickable { showChangePasswordDialog = true }
+                                .testTag("me_change_password_row")
                         ) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { showServerUrlEditor = !showServerUrlEditor },
+                                    .padding(16.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "Google Drive Cloud Server",
-                                        fontWeight = FontWeight.Bold,
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
-                                    Text(
-                                        text = if (cloudServerUrl.isNotBlank()) cloudServerStatus else "Not connected • Tap to set Drive Server URL",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = if (cloudServerUrl.isNotBlank()) SuccessGreen else AmberDark,
-                                        fontSize = 11.sp
-                                    )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .background(AmberPrimary.copy(alpha = 0.2f), CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Lock,
+                                            contentDescription = null,
+                                            tint = AmberDark,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column {
+                                        Text(
+                                            text = "Change Account Password",
+                                            fontWeight = FontWeight.Bold,
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                        Text(
+                                            text = "Verify via 6-digit OTP & update your password",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontSize = 11.sp
+                                        )
+                                    }
                                 }
-                                TextButton(onClick = { showServerUrlEditor = !showServerUrlEditor }) {
-                                    Text(
-                                        text = if (showServerUrlEditor) "Hide" else "Server URL",
-                                        color = AmberDark,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp
-                                    )
-                                }
-                            }
 
-                            if (showServerUrlEditor || cloudServerUrl.isBlank()) {
-                                OutlinedTextField(
-                                    value = serverUrlInput,
-                                    onValueChange = { serverUrlInput = it },
-                                    label = { Text("Google Apps Script Web App URL (/exec)") },
-                                    singleLine = true,
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier.fillMaxWidth()
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
                                 )
-                                Button(
-                                    onClick = {
-                                        val clean = serverUrlInput.trim()
-                                        if (clean.isBlank()) {
-                                            Toast.makeText(context, "Please paste your Google Script Web App URL", Toast.LENGTH_SHORT).show()
-                                            return@Button
-                                        }
-                                        isSyncingDrive = true
-                                        viewModel.saveCloudServerUrl(clean)
-                                        viewModel.syncWithGoogleDriveServer { ok, msg ->
-                                            isSyncingDrive = false
-                                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                                            if (ok) showServerUrlEditor = false
-                                        }
-                                    },
-                                    enabled = !isSyncingDrive,
-                                    shape = RoundedCornerShape(10.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(
-                                        text = if (isSyncingDrive) "Syncing with Drive..." else "Save & Sync Now",
-                                        color = Color.Black,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    if (showChangePasswordDialog && currentUser != null) {
+        var otpCodeInput by remember { mutableStateOf("") }
+        var generatedCode by remember { mutableStateOf<String?>(null) }
+        var otpSent by remember { mutableStateOf(false) }
+        var newPass by remember { mutableStateOf("") }
+        var feedbackMsg by remember { mutableStateOf<String?>(null) }
+
+        AlertDialog(
+            onDismissRequest = { showChangePasswordDialog = false },
+            title = { Text("Change Password", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Account: ${currentUser?.email}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            viewModel.sendEmailVerificationOtp(
+                                email = currentUser?.email ?: "",
+                                isPasswordReset = true
+                            ) { ok, msg, code ->
+                                feedbackMsg = msg
+                                if (ok) {
+                                    otpSent = true
+                                    generatedCode = code
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(if (otpSent) "Resend 6-Digit OTP" else "Send Verification OTP")
+                    }
+                    generatedCode?.let { code ->
+                        Text(
+                            text = "Verified OTP: $code (Tap to Auto-Fill)",
+                            color = SuccessGreen,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            modifier = Modifier.clickable { otpCodeInput = code }
+                        )
+                    }
+                    if (otpSent) {
+                        OutlinedTextField(
+                            value = otpCodeInput,
+                            onValueChange = { if (it.length <= 6) otpCodeInput = it.filter { ch -> ch.isDigit() } },
+                            label = { Text("6-Digit OTP") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = newPass,
+                            onValueChange = { newPass = it },
+                            label = { Text("New Password (min 4 chars)") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    feedbackMsg?.let {
+                        Text(it, fontSize = 12.sp, color = AmberDark, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.resetPasswordWithOtp(
+                            email = currentUser?.email ?: "",
+                            enteredOtp = otpCodeInput,
+                            newPassword = newPass
+                        ) { ok, msg ->
+                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                            if (ok) showChangePasswordDialog = false
+                            else feedbackMsg = msg
+                        }
+                    },
+                    enabled = otpSent && otpCodeInput.length == 6 && newPass.length >= 4,
+                    colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary)
+                ) {
+                    Text("Update Password", color = Color.Black, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showChangePasswordDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
