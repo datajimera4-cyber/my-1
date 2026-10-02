@@ -151,6 +151,9 @@ class YouTubeLiveSearchService : AccessibilityService() {
         private var hasTappedChannelVideosTab: Boolean = false
 
         @Volatile
+        private var searchStrategyStage: Int = 0
+
+        @Volatile
         private var overrideSearchQuery: String? = null
 
         @Volatile
@@ -276,6 +279,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
             hasSearchedWithHandleOrQuotes = false
             hasOpenedChannelPage = false
             hasTappedChannelVideosTab = false
+            searchStrategyStage = 0
             lastSearchActionTimestamp = 0L
             isVideoExplicitlyPaused = false
             resetMonitoringCounters()
@@ -315,6 +319,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
             hasSearchedWithHandleOrQuotes = false
             hasOpenedChannelPage = false
             hasTappedChannelVideosTab = false
+            searchStrategyStage = 0
             lastSearchActionTimestamp = 0L
             isVideoExplicitlyPaused = false
             resetMonitoringCounters()
@@ -799,10 +804,57 @@ class YouTubeLiveSearchService : AccessibilityService() {
         }
     }
 
+    private fun getStrategyQuery(stage: Int, title: String): String {
+        val cleanTitle = title.trim()
+        val cleanChannel = targetSearchChannel?.trim().orEmpty()
+        val cleanHandle = targetChannelHandle?.trim().orEmpty()
+        val cleanVid = targetVideoId?.trim().orEmpty()
+        val hasRealChannel = cleanChannel.isNotBlank() &&
+                !cleanChannel.equals("YouTube Creator", ignoreCase = true) &&
+                !cleanChannel.equals("YouTube Channel", ignoreCase = true)
+
+        return when (stage) {
+            0 -> cleanTitle // Strategy 1: Pure exact title first!
+            1 -> {
+                // Strategy 2: Quoted Title + Channel Name ("$title" $channel)
+                if (hasRealChannel) {
+                    if (!cleanTitle.contains(cleanChannel, ignoreCase = true)) {
+                        "\"$cleanTitle\" $cleanChannel"
+                    } else {
+                        "\"$cleanTitle\""
+                    }
+                } else {
+                    "\"$cleanTitle\""
+                }
+            }
+            2 -> {
+                // Strategy 3: Channel Handle or Channel Name first + Title (@handle $title)
+                if (cleanHandle.startsWith("@") && cleanHandle.length >= 3) {
+                    "$cleanHandle $cleanTitle"
+                } else if (hasRealChannel) {
+                    "$cleanChannel $cleanTitle"
+                } else {
+                    cleanTitle
+                }
+            }
+            3 -> {
+                // Strategy 4: Title + Admin Video ID from URL ($title $videoId)
+                if (cleanVid.length == 11) {
+                    "$cleanTitle $cleanVid"
+                } else if (hasRealChannel) {
+                    "$cleanTitle $cleanChannel"
+                } else {
+                    cleanTitle
+                }
+            }
+            else -> cleanTitle
+        }
+    }
+
     private fun getActiveQueryToType(title: String): String {
         val custom = overrideSearchQuery?.trim()
         if (!custom.isNullOrBlank()) return custom
-        return buildSearchQuery(title, targetSearchChannel, exactQuotedTitle = false)
+        return getStrategyQuery(searchStrategyStage, title)
     }
 
     private fun triggerInAppSearchWithQuery(queryText: String, reasonLog: String) {
@@ -1020,9 +1072,9 @@ class YouTubeLiveSearchService : AccessibilityService() {
                             return
                         }
 
-                        // Priority 1 (Scrolls 0..10): Keep searching & scrolling inside the YouTube Search Results List FIRST!
-                        // Stage A (Scroll 4): Apply "Live" filter chip in Search Results for live tasks, or "Recently uploaded"/"Videos" chip for regular tasks
-                        if (scrollAttempts == 4 && !hasOpenedChannelPage && !hasTappedRecentFilterChip) {
+                        // Priority 1: Multi-strategy search progression in Search Results List FIRST
+                        // Stage A (Scroll 3): Apply "Live" filter chip in Search Results for live tasks, or "Recently uploaded" chip
+                        if (scrollAttempts == 3 && !hasOpenedChannelPage && !hasTappedRecentFilterChip) {
                             val chipClicked = if (isTargetLiveStream) {
                                 findAndClickLiveFilterChip(rootNode)
                             } else {
@@ -1040,27 +1092,46 @@ class YouTubeLiveSearchService : AccessibilityService() {
                             }
                         }
 
-                        // Stage B (Scroll 6): Refine query inside Search Results list using Admin Video ID + Title (or @handle + Title)
-                        if (scrollAttempts == 6 && !hasSearchedWithHandleOrQuotes && !hasOpenedChannelPage) {
-                            hasSearchedWithHandleOrQuotes = true
-                            val cleanVid = targetVideoId?.trim().orEmpty()
-                            val cleanHandle = targetChannelHandle?.trim().orEmpty()
-                            val refinedQuery = when {
-                                cleanVid.length == 11 -> "$titleToFind $cleanVid"
-                                cleanHandle.startsWith("@") && cleanHandle.length >= 3 -> "$cleanHandle $titleToFind"
-                                else -> titleToFind.trim()
-                            }
+                        // Strategy 2 (Scroll 5): If not found with pure title, search with Quoted Title + Channel ("$title" $channel)
+                        if (scrollAttempts == 5 && searchStrategyStage < 1 && !hasOpenedChannelPage) {
+                            searchStrategyStage = 1
+                            val refinedQuery = getStrategyQuery(1, titleToFind)
                             scrollAttempts++
                             triggerInAppSearchWithQuery(
                                 queryText = refinedQuery,
-                                reasonLog = "YouTube Search: Refining search in search list with \"$refinedQuery\""
+                                reasonLog = "YouTube Search (Strategy 2): Searching with quotes & channel: \"$refinedQuery\""
                             )
                             return
                         }
 
-                        // Priority 2 — LAST OPTION ONLY (Scroll 11+): Only if the target video was NOT found in the Search Results list
-                        // after thorough scrolling and query refinement, open the Creator's Channel Page -> Live / Videos tab!
-                        if (scrollAttempts in 11..13 && !hasOpenedChannelPage) {
+                        // Strategy 3 (Scroll 8): If still not found, search with Channel Handle / Name first + Title
+                        if (scrollAttempts == 8 && searchStrategyStage < 2 && !hasOpenedChannelPage) {
+                            searchStrategyStage = 2
+                            val refinedQuery = getStrategyQuery(2, titleToFind)
+                            scrollAttempts++
+                            triggerInAppSearchWithQuery(
+                                queryText = refinedQuery,
+                                reasonLog = "YouTube Search (Strategy 3): Searching with channel handle/name: \"$refinedQuery\""
+                            )
+                            return
+                        }
+
+                        // Strategy 4 (Scroll 11): If still not found, refine with Title + Video ID
+                        val cleanVid = targetVideoId?.trim().orEmpty()
+                        if (scrollAttempts == 11 && searchStrategyStage < 3 && cleanVid.length == 11 && !hasOpenedChannelPage) {
+                            searchStrategyStage = 3
+                            val refinedQuery = getStrategyQuery(3, titleToFind)
+                            scrollAttempts++
+                            triggerInAppSearchWithQuery(
+                                queryText = refinedQuery,
+                                reasonLog = "YouTube Search (Strategy 4): Searching with Admin Video ID: \"$refinedQuery\""
+                            )
+                            return
+                        }
+
+                        // Priority 2 — LAST OPTION ONLY (Scroll 14+): Only if the target video was NOT found in the Search Results list
+                        // after thorough multi-strategy search, open the Creator's Channel Card -> Live / Videos tab!
+                        if (scrollAttempts in 14..16 && !hasOpenedChannelPage) {
                             if (findAndClickChannelCard(rootNode, targetSearchChannel, targetChannelHandle)) {
                                 hasOpenedChannelPage = true
                                 scrollAttempts = 0
@@ -1073,8 +1144,8 @@ class YouTubeLiveSearchService : AccessibilityService() {
                             }
                         }
 
-                        // Stage D (Scroll 14): Last-option fallback if Channel Card wasn't visible yet — search the creator's @handle / channel name
-                        if (scrollAttempts == 14 && !hasOpenedChannelPage) {
+                        // Last-option fallback if Channel Card wasn't visible yet — search the creator's @handle / channel name
+                        if (scrollAttempts == 17 && !hasOpenedChannelPage) {
                             val channelQuery = targetChannelHandle?.takeIf { it.length >= 3 }
                                 ?: targetSearchChannel?.takeIf {
                                     it.length >= 2 &&
@@ -1091,7 +1162,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
                             }
                         }
 
-                        if (scrollAttempts in 15..17 && !hasOpenedChannelPage) {
+                        if (scrollAttempts in 18..20 && !hasOpenedChannelPage) {
                             if (findAndClickChannelCard(rootNode, targetSearchChannel, targetChannelHandle)) {
                                 hasOpenedChannelPage = true
                                 scrollAttempts = 0
@@ -1104,8 +1175,8 @@ class YouTubeLiveSearchService : AccessibilityService() {
                             }
                         }
 
-                        // If inside Channel Page and not found on first 4 scrolls of initial tab, check Live / Videos tab
-                        if (hasOpenedChannelPage && scrollAttempts == 4) {
+                        // If inside Channel Page and not found on first 3 scrolls of initial tab, check Live / Videos tab
+                        if (hasOpenedChannelPage && scrollAttempts == 3) {
                             val switched = if (isTargetLiveStream) {
                                 findAndClickChannelLiveTab(rootNode) || findAndClickChannelVideosTab(rootNode)
                             } else {

@@ -210,28 +210,28 @@ fun HomeScreen(
                 ActiveWatchTimerBanner(viewModel = viewModel)
             }
 
-            // Hero Coin Balance Card (Coins only - no INR on Home screen)
+            // Hero Coin Balance Card (iOS Wallet Card Style)
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("home_wallet_card"),
                 shape = RoundedCornerShape(24.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
             ) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(
                             Brush.linearGradient(
-                                colors = listOf(Slate900, Slate800)
+                                colors = listOf(Color(0xFF1E2433), Color(0xFF121722), Color(0xFF0D111A))
                             )
                         )
-                        .border(1.dp, AmberPrimary.copy(alpha = 0.28f), RoundedCornerShape(24.dp))
+                        .border(1.dp, AmberPrimary.copy(alpha = 0.32f), RoundedCornerShape(24.dp))
                         .padding(20.dp)
                 ) {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -241,7 +241,7 @@ fun HomeScreen(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Box(
                                     modifier = Modifier
-                                        .size(38.dp)
+                                        .size(42.dp)
                                         .background(AmberPrimary.copy(alpha = 0.18f), CircleShape),
                                     contentAlignment = Alignment.Center
                                 ) {
@@ -249,28 +249,31 @@ fun HomeScreen(
                                         imageVector = Icons.Default.MonetizationOn,
                                         contentDescription = null,
                                         tint = AmberPrimary,
-                                        modifier = Modifier.size(22.dp)
+                                        modifier = Modifier.size(24.dp)
                                     )
                                 }
-                                Spacer(modifier = Modifier.width(10.dp))
+                                Spacer(modifier = Modifier.width(12.dp))
                                 Column {
                                     Text(
-                                        text = "Total Coin Balance",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = Color.White.copy(alpha = 0.75f)
+                                        text = "TOTAL BALANCE",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 1.sp,
+                                        color = Color.White.copy(alpha = 0.70f)
                                     )
                                     Row(verticalAlignment = Alignment.Bottom) {
                                         Text(
                                             text = "$walletBalance",
                                             style = MaterialTheme.typography.headlineLarge,
                                             fontWeight = FontWeight.Black,
+                                            fontSize = 32.sp,
                                             color = AmberPrimary,
                                             modifier = Modifier.testTag("home_coin_balance_text")
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text(
                                             text = "COINS",
-                                            style = MaterialTheme.typography.labelLarge,
+                                            style = MaterialTheme.typography.labelMedium,
                                             fontWeight = FontWeight.ExtraBold,
                                             color = AmberLight,
                                             modifier = Modifier.padding(bottom = 4.dp)
@@ -285,8 +288,8 @@ fun HomeScreen(
                                     containerColor = AmberPrimary,
                                     contentColor = Color.Black
                                 ),
-                                shape = RoundedCornerShape(14.dp),
-                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+                                shape = RoundedCornerShape(16.dp),
+                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                                 modifier = Modifier.testTag("home_open_wallet_button")
                             ) {
                                 Icon(
@@ -303,7 +306,7 @@ fun HomeScreen(
                             }
                         }
 
-                        HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -311,18 +314,34 @@ fun HomeScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "Complete watch tasks to earn instant coins",
+                                text = "Complete video tasks to earn coins",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = Color.White.copy(alpha = 0.75f),
+                                color = Color.White.copy(alpha = 0.70f),
                                 fontSize = 12.sp,
                                 modifier = Modifier.weight(1f)
                             )
-                            Text(
-                                text = "${tasks.count { !it.isLocked }} Available",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = SuccessGreen
-                            )
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = SuccessGreen.copy(alpha = 0.16f)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(6.dp)
+                                            .background(SuccessGreen, CircleShape)
+                                    )
+                                    Spacer(modifier = Modifier.width(5.dp))
+                                    Text(
+                                        text = "${tasks.count { !it.isLocked }} Available",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = SuccessGreen
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -646,17 +665,18 @@ private fun FeaturedHomeTaskCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f), RoundedCornerShape(22.dp))
             .testTag("home_featured_task_card_${task.id}"),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            // Video Thumbnail Banner
+            // Video Thumbnail Banner (16:9 Adaptive Ratio)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(156.dp)
+                    .aspectRatio(16f / 9f)
                     .background(Slate900)
             ) {
                 if (task.thumbnailUrl.isNotBlank()) {
@@ -674,18 +694,18 @@ private fun FeaturedHomeTaskCard(
                         .fillMaxSize()
                         .background(
                             Brush.verticalGradient(
-                                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))
+                                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.65f))
                             )
                         )
                 )
 
-                // Top-left Live / Video Length Badge
+                // Bottom-left Live / Video Length Badge
                 Box(
                     modifier = Modifier
-                        .align(Alignment.TopStart)
+                        .align(Alignment.BottomStart)
                         .padding(10.dp)
                         .background(
-                            if (task.isLive) AlertRed else Color.Black.copy(alpha = 0.75f),
+                            if (task.isLive) AlertRed else Color.Black.copy(alpha = 0.78f),
                             RoundedCornerShape(8.dp)
                         )
                         .padding(horizontal = 8.dp, vertical = 4.dp)
@@ -713,7 +733,7 @@ private fun FeaturedHomeTaskCard(
                     }
                 }
 
-                // Top-right Coin Reward Badge (Coins only)
+                // Top-right Coin Reward Badge
                 val coinBadgeLabel = remember(task.isLive, task.durationSeconds, task.selectedDurationSeconds) {
                     val tiers = getEffectiveDurationTiers(task)
                     val minC = tiers.firstOrNull()?.coins ?: 10
@@ -730,7 +750,7 @@ private fun FeaturedHomeTaskCard(
                     Text(
                         text = coinBadgeLabel,
                         color = Color.Black,
-                        fontSize = 11.sp,
+                        fontSize = 11.5.sp,
                         fontWeight = FontWeight.ExtraBold
                     )
                 }
@@ -740,24 +760,35 @@ private fun FeaturedHomeTaskCard(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
                         text = task.title,
-                        style = MaterialTheme.typography.titleSmall,
+                        style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Text(
-                        text = task.channelName,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = task.channelName,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = AmberPrimary,
+                            modifier = Modifier.size(13.dp)
+                        )
+                    }
                 }
 
                 // Like & Comment Bonus Status Chips
@@ -767,23 +798,23 @@ private fun FeaturedHomeTaskCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = if (isLiked) SuccessGreen.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isLiked) SuccessGreen.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
                                 imageVector = Icons.Default.ThumbUp,
                                 contentDescription = null,
                                 tint = if (isLiked) SuccessGreen else AmberDark,
-                                modifier = Modifier.size(12.dp)
+                                modifier = Modifier.size(13.dp)
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(5.dp))
                             Text(
                                 text = if (isLiked) "Liked (+5c ✓)" else "Like +5c",
-                                fontSize = 10.5.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
                                 softWrap = false,
@@ -793,23 +824,23 @@ private fun FeaturedHomeTaskCard(
                     }
 
                     Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = if (commentCount >= 2) SuccessGreen.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (commentCount >= 2) SuccessGreen.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Comment,
                                 contentDescription = null,
                                 tint = if (commentCount > 0) SuccessGreen else AmberDark,
-                                modifier = Modifier.size(12.dp)
+                                modifier = Modifier.size(13.dp)
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(5.dp))
                             Text(
                                 text = "Comment ($commentCount/2) +5c",
-                                fontSize = 10.5.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
                                 softWrap = false,
@@ -825,13 +856,13 @@ private fun FeaturedHomeTaskCard(
                     enabled = !taskLocked,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 46.dp)
+                        .heightIn(min = 48.dp)
                         .testTag("home_watch_task_button_${task.id}"),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = AmberPrimary,
                         contentColor = Color.Black,
-                        disabledContainerColor = if (task.isCompleted) SuccessGreen.copy(alpha = 0.15f) else AlertRed.copy(alpha = 0.14f),
+                        disabledContainerColor = if (task.isCompleted) SuccessGreen.copy(alpha = 0.14f) else AlertRed.copy(alpha = 0.12f),
                         disabledContentColor = if (task.isCompleted) SuccessGreen else AlertRed
                     )
                 ) {
@@ -846,7 +877,7 @@ private fun FeaturedHomeTaskCard(
                             text = if (task.isCompleted) {
                                 "Completed • Unlocks in $lockCountdown"
                             } else {
-                                "Locked (6h) • Unlocks in $lockCountdown"
+                                "Locked • Unlocks in $lockCountdown"
                             },
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.sp,
