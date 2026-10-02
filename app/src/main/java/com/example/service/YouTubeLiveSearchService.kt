@@ -63,6 +63,9 @@ class YouTubeLiveSearchService : AccessibilityService() {
         @Volatile
         var targetVideoDurationSeconds: Int = 0
 
+        @Volatile
+        var isTargetLiveStream: Boolean = false
+
         private val rejectedSameTitleDurations = java.util.Collections.synchronizedSet(mutableSetOf<Int>())
 
         @Volatile
@@ -249,14 +252,16 @@ class YouTubeLiveSearchService : AccessibilityService() {
             videoUrl: String? = null,
             videoId: String? = null,
             channelHandle: String? = null,
-            videoDurationSeconds: Int = 0
+            videoDurationSeconds: Int = 0,
+            isLiveStream: Boolean = false
         ) {
             targetSearchTitle = title
             targetSearchChannel = channel
             targetChannelHandle = channelHandle
             targetVideoUrl = videoUrl
             targetVideoId = videoId?.trim()?.takeIf { it.isNotBlank() } ?: TitleMatcher.extractVideoId(videoUrl)
-            targetVideoDurationSeconds = videoDurationSeconds
+            isTargetLiveStream = isLiveStream || (videoUrl?.contains("/live/", ignoreCase = true) == true)
+            targetVideoDurationSeconds = if (isTargetLiveStream) 0 else videoDurationSeconds
             rejectedSameTitleDurations.clear()
             hasClickedTarget = false
             isWatchPlayerConfirmedOpen = false
@@ -296,6 +301,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
             targetVideoUrl = null
             targetVideoId = null
             targetVideoDurationSeconds = 0
+            isTargetLiveStream = false
             rejectedSameTitleDurations.clear()
             hasClickedTarget = false
             scrollAttempts = 0
@@ -973,18 +979,31 @@ class YouTubeLiveSearchService : AccessibilityService() {
                         }
                     }
 
-                    // If we navigated into the creator's Channel Page, switch to the "Videos" tab
-                    // so brand-new uploads appear chronologically at #1!
+                    // If we navigated into the creator's Channel Page (as last fallback option),
+                    // switch to the "Live" tab when isTargetLiveStream is enabled, or "Videos" tab otherwise!
                     if (hasOpenedChannelPage && !hasTappedChannelVideosTab) {
-                        if (findAndClickChannelVideosTab(rootNode)) {
-                            hasTappedChannelVideosTab = true
-                            scrollAttempts = 0
-                            lastSearchActionTimestamp = System.currentTimeMillis()
-                            WatchSessionRepository.addLog(
-                                "Channel Browse: Switched to channel 'Videos' tab for newest uploads",
-                                LogType.INFO
-                            )
-                            return
+                        if (isTargetLiveStream) {
+                            if (findAndClickChannelLiveTab(rootNode)) {
+                                hasTappedChannelVideosTab = true
+                                scrollAttempts = 0
+                                lastSearchActionTimestamp = System.currentTimeMillis()
+                                WatchSessionRepository.addLog(
+                                    "Channel Browse: Switched to channel 'Live' tab for live stream task",
+                                    LogType.INFO
+                                )
+                                return
+                            }
+                        } else {
+                            if (findAndClickChannelVideosTab(rootNode)) {
+                                hasTappedChannelVideosTab = true
+                                scrollAttempts = 0
+                                lastSearchActionTimestamp = System.currentTimeMillis()
+                                WatchSessionRepository.addLog(
+                                    "Channel Browse: Switched to channel 'Videos' tab for newest uploads",
+                                    LogType.INFO
+                                )
+                                return
+                            }
                         }
                     }
 
@@ -1001,21 +1020,28 @@ class YouTubeLiveSearchService : AccessibilityService() {
                             return
                         }
 
-                        // Stage A (Scroll 3): For newly uploaded videos, tap "Recently uploaded" / "Unwatched" / "Videos" filter chip if present
-                        if (scrollAttempts == 3 && !hasOpenedChannelPage && !hasTappedRecentFilterChip) {
-                            if (findAndClickRecentlyUploadedChip(rootNode)) {
+                        // Priority 1 (Scrolls 0..10): Keep searching & scrolling inside the YouTube Search Results List FIRST!
+                        // Stage A (Scroll 4): Apply "Live" filter chip in Search Results for live tasks, or "Recently uploaded"/"Videos" chip for regular tasks
+                        if (scrollAttempts == 4 && !hasOpenedChannelPage && !hasTappedRecentFilterChip) {
+                            val chipClicked = if (isTargetLiveStream) {
+                                findAndClickLiveFilterChip(rootNode)
+                            } else {
+                                findAndClickRecentlyUploadedChip(rootNode)
+                            }
+                            if (chipClicked) {
                                 hasTappedRecentFilterChip = true
                                 lastSearchActionTimestamp = System.currentTimeMillis()
                                 WatchSessionRepository.addLog(
-                                    "YouTube Search: Applied filter chip for video discovery",
+                                    if (isTargetLiveStream) "YouTube Search: Applied 'Live' filter chip in search list"
+                                    else "YouTube Search: Applied filter chip for video discovery",
                                     LogType.INFO
                                 )
                                 return
                             }
                         }
 
-                        // Stage B (Scroll 4): Search using Admin link's exact videoId + Title (or @handle + Title)
-                        if (scrollAttempts == 4 && !hasSearchedWithHandleOrQuotes && !hasOpenedChannelPage) {
+                        // Stage B (Scroll 6): Refine query inside Search Results list using Admin Video ID + Title (or @handle + Title)
+                        if (scrollAttempts == 6 && !hasSearchedWithHandleOrQuotes && !hasOpenedChannelPage) {
                             hasSearchedWithHandleOrQuotes = true
                             val cleanVid = targetVideoId?.trim().orEmpty()
                             val cleanHandle = targetChannelHandle?.trim().orEmpty()
@@ -1027,29 +1053,28 @@ class YouTubeLiveSearchService : AccessibilityService() {
                             scrollAttempts++
                             triggerInAppSearchWithQuery(
                                 queryText = refinedQuery,
-                                reasonLog = "YouTube Search: Refining search with Admin Video ID \"$refinedQuery\""
+                                reasonLog = "YouTube Search: Refining search in search list with \"$refinedQuery\""
                             )
                             return
                         }
 
-                        // Stage C (Scroll 6..8): If the creator's Channel Card is visible in the search results,
-                        // open the Channel Page -> Videos tab where all uploads are listed at the top
-                        if (scrollAttempts in 6..8 && !hasOpenedChannelPage) {
+                        // Priority 2 — LAST OPTION ONLY (Scroll 11+): Only if the target video was NOT found in the Search Results list
+                        // after thorough scrolling and query refinement, open the Creator's Channel Page -> Live / Videos tab!
+                        if (scrollAttempts in 11..13 && !hasOpenedChannelPage) {
                             if (findAndClickChannelCard(rootNode, targetSearchChannel, targetChannelHandle)) {
                                 hasOpenedChannelPage = true
                                 scrollAttempts = 0
                                 lastSearchActionTimestamp = System.currentTimeMillis()
                                 WatchSessionRepository.addLog(
-                                    "YouTube Search -> Channel Browse: Opened creator channel card to locate video",
+                                    "YouTube Search -> Channel Browse (Last Option): Opened creator channel card to locate video",
                                     LogType.INFO
                                 )
                                 return
                             }
                         }
 
-                        // Stage D (Scroll 9): If Channel Card wasn't visible yet and we know the creator's @handle or channel name,
-                        // search the creator's @handle / channel directly so the Channel Card appears at #1!
-                        if (scrollAttempts == 9 && !hasOpenedChannelPage) {
+                        // Stage D (Scroll 14): Last-option fallback if Channel Card wasn't visible yet — search the creator's @handle / channel name
+                        if (scrollAttempts == 14 && !hasOpenedChannelPage) {
                             val channelQuery = targetChannelHandle?.takeIf { it.length >= 3 }
                                 ?: targetSearchChannel?.takeIf {
                                     it.length >= 2 &&
@@ -1060,35 +1085,40 @@ class YouTubeLiveSearchService : AccessibilityService() {
                                 scrollAttempts++
                                 triggerInAppSearchWithQuery(
                                     queryText = channelQuery,
-                                    reasonLog = "YouTube Search: Searching creator channel \"$channelQuery\" to open Videos tab"
+                                    reasonLog = "YouTube Search (Last Option): Searching creator channel \"$channelQuery\""
                                 )
                                 return
                             }
                         }
 
-                        if (scrollAttempts in 10..12 && !hasOpenedChannelPage) {
+                        if (scrollAttempts in 15..17 && !hasOpenedChannelPage) {
                             if (findAndClickChannelCard(rootNode, targetSearchChannel, targetChannelHandle)) {
                                 hasOpenedChannelPage = true
                                 scrollAttempts = 0
                                 lastSearchActionTimestamp = System.currentTimeMillis()
                                 WatchSessionRepository.addLog(
-                                    "YouTube Search -> Channel Browse: Opened creator channel card to locate video",
+                                    "YouTube Search -> Channel Browse (Last Option): Opened creator channel card to locate video",
                                     LogType.INFO
                                 )
                                 return
                             }
                         }
 
-                        // If inside Channel Page and not found on first 3 scrolls of Videos tab, also check Shorts / Live tab
+                        // If inside Channel Page and not found on first 4 scrolls of initial tab, check Live / Videos tab
                         if (hasOpenedChannelPage && scrollAttempts == 4) {
-                            if (findAndClickChannelShortsOrLiveTab(rootNode)) {
+                            val switched = if (isTargetLiveStream) {
+                                findAndClickChannelLiveTab(rootNode) || findAndClickChannelVideosTab(rootNode)
+                            } else {
+                                findAndClickChannelShortsOrLiveTab(rootNode)
+                            }
+                            if (switched) {
                                 lastSearchActionTimestamp = System.currentTimeMillis()
                                 scrollAttempts++
                                 return
                             }
                         }
 
-                        if (scrollAttempts < 18) {
+                        if (scrollAttempts < 22) {
                             scrollAttempts++
                             lastSearchActionTimestamp = System.currentTimeMillis() - 650L // ~700ms between scrolls
                             if (!scrollForward(rootNode)) {
@@ -1662,12 +1692,22 @@ class YouTubeLiveSearchService : AccessibilityService() {
                 val lowerCard = fullCardText.lowercase()
                 val rowViewId = (rowContainer.viewIdResourceName ?: toClick.viewIdResourceName ?: "").lowercase()
 
+                val hasLiveStreamSignals = lowerCard.contains("live") ||
+                        lowerCard.contains("लाइव") ||
+                        lowerCard.contains("watching") ||
+                        lowerCard.contains("लोग देख रहे हैं") ||
+                        lowerCard.contains("streamed") ||
+                        lowerCard.contains("streaming") ||
+                        lowerCard.contains("premiere") ||
+                        lowerCard.contains("scheduled")
                 val hasVideoDuration = Regex("\\b\\d{1,2}:\\d{2}\\b").containsMatchIn(lowerCard) ||
                         Regex("\\b\\d+\\s*(?:minutes?|mins?|seconds?|secs?|hours?|मिनट|सेकंड|घंटे)\\b", RegexOption.IGNORE_CASE).containsMatchIn(lowerCard)
-                val hasViewsOrTime = lowerCard.contains("views") ||
+                val hasViewsOrTime = hasLiveStreamSignals ||
+                        lowerCard.contains("views") ||
                         lowerCard.contains("no views") ||
                         lowerCard.contains("watching") ||
                         lowerCard.contains("ago") ||
+                        lowerCard.contains("पहले") ||
                         lowerCard.contains("just now") ||
                         lowerCard.contains("play video") ||
                         lowerCard.contains("बार देखा गया") ||
@@ -1693,8 +1733,8 @@ class YouTubeLiveSearchService : AccessibilityService() {
                 val isTitleOnlyChannelName = normChannel.isNotEmpty() &&
                         (normExtracted == normChannel || normExtracted.replace(" ", "") == normChannel.replace(" ", ""))
 
-                val isLikelyChannelProfileRow = (isTitleOnlyChannelName || (!hasVideoDuration && (lowerCard.contains("subscribers") || lowerCard.contains("subscriber") || lowerCard.contains("सदस्य")))) &&
-                        !hasVideoDuration
+                val isLikelyChannelProfileRow = (isTitleOnlyChannelName || (!hasVideoDuration && !hasLiveStreamSignals && (lowerCard.contains("subscribers") || lowerCard.contains("subscriber") || lowerCard.contains("सदस्य")))) &&
+                        !hasVideoDuration && !hasLiveStreamSignals
 
                 val normFullCard = TitleMatcher.normalize(fullCardText)
                 val compactFullCard = normFullCard.replace(" ", "")
@@ -1714,6 +1754,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
                 val hasRequiredCardSignals = !requireFeedCardMetadata ||
                         hasVideoDuration ||
                         hasViewsOrTime ||
+                        hasLiveStreamSignals ||
                         hasVideoCardViewId ||
                         (normExtracted == normTarget && normTarget.length >= 10)
 
@@ -1721,11 +1762,13 @@ class YouTubeLiveSearchService : AccessibilityService() {
                 // When a channel has multiple videos with the same title, each video has its own specific duration (and videoId).
                 val cleanVid = targetVideoId?.trim().orEmpty()
                 val cardHasExplicitVideoId = cleanVid.length == 11 && fullCardText.contains(cleanVid, ignoreCase = false)
-                val cardDurationSecs = extractCardDurationSeconds(fullCardText)
-                val expectedDurationSecs = targetVideoDurationSeconds
+                val cardDurationSecs = if (isTargetLiveStream) 0 else extractCardDurationSeconds(fullCardText)
+                val expectedDurationSecs = if (isTargetLiveStream) 0 else targetVideoDurationSeconds
 
-                val isRejectedDuplicateDuration = cardDurationSecs > 0 && rejectedSameTitleDurations.contains(cardDurationSecs)
-                val matchesAdminVideoIdDuration = cardHasExplicitVideoId ||
+                val isRejectedDuplicateDuration = !isTargetLiveStream && cardDurationSecs > 0 && rejectedSameTitleDurations.contains(cardDurationSecs)
+                val matchesAdminVideoIdDuration = isTargetLiveStream ||
+                        hasLiveStreamSignals ||
+                        cardHasExplicitVideoId ||
                         (!isRejectedDuplicateDuration && (
                             expectedDurationSecs <= 0 ||
                             cardDurationSecs <= 0 ||
@@ -1771,6 +1814,125 @@ class YouTubeLiveSearchService : AccessibilityService() {
             }
         }
 
+        return false
+    }
+
+    /**
+     * Taps "Live" / "लाइव" filter chip on the YouTube search results page when the task is a Live Stream.
+     */
+    private fun findAndClickLiveFilterChip(node: AccessibilityNodeInfo?): Boolean {
+        if (node == null) return false
+        if (node.isVisibleToUser) {
+            val text = node.text?.toString()?.trim() ?: ""
+            val desc = node.contentDescription?.toString()?.trim() ?: ""
+            val label = text.ifBlank { desc }.lowercase()
+            if (label.isNotEmpty()) {
+                val screenHeight = resources.displayMetrics.heightPixels.coerceAtLeast(800)
+                val rect = android.graphics.Rect()
+                node.getBoundsInScreen(rect)
+                val inChipRegion = rect.top in (screenHeight * 0.06f).toInt()..(screenHeight * 0.28f).toInt()
+                val isLiveChip = label == "live" ||
+                        label == "लाइव" ||
+                        label.startsWith("live,") ||
+                        label.startsWith("लाइव,")
+                if (inChipRegion && isLiveChip) {
+                    val clicked = node.performAction(AccessibilityNodeInfo.ACTION_CLICK) ||
+                            (node.parent?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true) ||
+                            (rect.centerX() > 0 && rect.centerY() > 0 && dispatchTapGesture(rect.centerX(), rect.centerY()))
+                    if (clicked) return true
+                }
+            }
+        }
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            if (findAndClickLiveFilterChip(child)) return true
+        }
+        return false
+    }
+
+    /**
+     * Once inside a Creator's Channel Page for a Live Stream task, finds and taps the "Live" ("लाइव") tab
+     * instead of the "Videos" tab! If the horizontal channel tab strip hasn't revealed "Live" yet, scrolls the tab strip horizontally.
+     */
+    private fun findAndClickChannelLiveTab(node: AccessibilityNodeInfo?): Boolean {
+        if (node == null) return false
+        if (clickChannelLiveTabRecursive(node)) return true
+        // If "Live" tab is slightly to the right of "Videos"/"Shorts" in the horizontal channel tab bar, scroll the tab bar horizontally
+        if (scrollChannelTabStripRight(node)) {
+            return false // Next tick will see and click the "Live" tab
+        }
+        return false
+    }
+
+    private fun clickChannelLiveTabRecursive(node: AccessibilityNodeInfo?): Boolean {
+        if (node == null) return false
+        if (node.isVisibleToUser) {
+            val text = node.text?.toString()?.trim() ?: ""
+            val desc = node.contentDescription?.toString()?.trim() ?: ""
+            val label = text.ifBlank { desc }.lowercase()
+            if (label == "live" ||
+                label == "लाइव" ||
+                label.startsWith("live,") ||
+                label.startsWith("live ") ||
+                label.startsWith("लाइव,")
+            ) {
+                val screenHeight = resources.displayMetrics.heightPixels.coerceAtLeast(800)
+                val density = resources.displayMetrics.density
+                val rect = android.graphics.Rect()
+                node.getBoundsInScreen(rect)
+                if (rect.top in (screenHeight * 0.08f).toInt()..(screenHeight * 0.65f).toInt() &&
+                    rect.height() <= (68 * density).toInt()
+                ) {
+                    val clicked = node.performAction(AccessibilityNodeInfo.ACTION_CLICK) ||
+                            (node.parent?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true) ||
+                            (rect.centerX() > 0 && rect.centerY() > 0 && dispatchTapGesture(rect.centerX(), rect.centerY()))
+                    if (clicked) return true
+                }
+            }
+        }
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            if (clickChannelLiveTabRecursive(child)) return true
+        }
+        return false
+    }
+
+    private fun scrollChannelTabStripRight(node: AccessibilityNodeInfo?): Boolean {
+        if (node == null) return false
+        if (node.isVisibleToUser) {
+            val text = node.text?.toString()?.trim()?.lowercase() ?: ""
+            val desc = node.contentDescription?.toString()?.trim()?.lowercase() ?: ""
+            val label = text.ifBlank { desc }
+            if (label == "videos" || label == "shorts" || label == "वीडियो" || label.startsWith("videos,") || label.startsWith("shorts,")) {
+                val screenHeight = resources.displayMetrics.heightPixels.coerceAtLeast(800)
+                val screenWidth = resources.displayMetrics.widthPixels.coerceAtLeast(400)
+                val rect = android.graphics.Rect()
+                node.getBoundsInScreen(rect)
+                if (rect.top in (screenHeight * 0.08f).toInt()..(screenHeight * 0.65f).toInt()) {
+                    var p = node.parent
+                    while (p != null) {
+                        if (p.isScrollable && p.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) {
+                            return true
+                        }
+                        p = p.parent
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                        val y = rect.centerY().toFloat()
+                        val path = android.graphics.Path().apply {
+                            moveTo(screenWidth * 0.82f, y)
+                            lineTo(screenWidth * 0.22f, y)
+                        }
+                        val stroke = android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 220)
+                        val gesture = android.accessibilityservice.GestureDescription.Builder().addStroke(stroke).build()
+                        return dispatchGesture(gesture, null, null)
+                    }
+                }
+            }
+        }
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            if (scrollChannelTabStripRight(child)) return true
+        }
         return false
     }
 
@@ -2069,16 +2231,22 @@ class YouTubeLiveSearchService : AccessibilityService() {
             if (total > 0) return total
         }
 
-        // 2. Check spoken accessibility duration (English & Hindi: "X hours, Y minutes, Z seconds")
-        val lower = cardText.lowercase()
-        val hoursMatch = Regex("\\b(\\d+)\\s*(?:hours?|hrs?|घंटे|घंटा)\\b").find(lower)
-        val minsMatch = Regex("\\b(\\d+)\\s*(?:minutes?|mins?|मिनट)\\b").find(lower)
-        val secsMatch = Regex("\\b(\\d+)\\s*(?:seconds?|secs?|सेकंड)\\b").find(lower)
-        // Avoid matching "X minutes ago" / "X seconds ago" upload timestamps
-        val isAgoTimestampOnly = (minsMatch != null || secsMatch != null) &&
-                Regex("\\b\\d+\\s*(?:minutes?|mins?|seconds?|secs?)\\s+ago\\b").containsMatchIn(lower) &&
-                !Regex("\\b\\d+\\s*(?:minutes?|mins?|मिनट)\\s*,?\\s*\\d+\\s*(?:seconds?|secs?|सेकंड)\\b").containsMatchIn(lower)
-        if (!isAgoTimestampOnly && (hoursMatch != null || minsMatch != null || secsMatch != null)) {
+        // 2. Cut everything from "Go to channel" onwards and strip relative "X hours/minutes/seconds ago" / "X पहले" upload timestamps
+        // so upload times like "2 hours ago" or "10 minutes ago" are NEVER mistaken for the video's duration!
+        var cleanedForSpokenDuration = cardText.lowercase()
+        val goToChannelIdx = Regex("\\b(?:go to channel|चैनल पर जाएं)\\b").find(cleanedForSpokenDuration)?.range?.first
+        if (goToChannelIdx != null && goToChannelIdx > 0) {
+            cleanedForSpokenDuration = cleanedForSpokenDuration.substring(0, goToChannelIdx)
+        }
+        cleanedForSpokenDuration = cleanedForSpokenDuration
+            .replace(Regex("\\b(?:streamed|started\\s+streaming|premiered|scheduled)\\b.*$"), " ")
+            .replace(Regex("\\b\\d+\\s*(?:hours?|hrs?|minutes?|mins?|seconds?|secs?|days?|weeks?|months?|years?)\\s+ago\\b"), " ")
+            .replace(Regex("\\b\\d+\\s*(?:घंटे|घंटा|मिनट|सेकंड|दिन|हफ़्ते|महीने|साल)\\s+पहले\\b"), " ")
+
+        val hoursMatch = Regex("\\b(\\d+)\\s*(?:hours?|hrs?|घंटे|घंटा)\\b").find(cleanedForSpokenDuration)
+        val minsMatch = Regex("\\b(\\d+)\\s*(?:minutes?|mins?|मिनट)\\b").find(cleanedForSpokenDuration)
+        val secsMatch = Regex("\\b(\\d+)\\s*(?:seconds?|secs?|सेकंड)\\b").find(cleanedForSpokenDuration)
+        if (hoursMatch != null || minsMatch != null || secsMatch != null) {
             val h = hoursMatch?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
             val m = minsMatch?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
             val s = secsMatch?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
@@ -2118,7 +2286,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
     private fun confirmWatchPlayerOpened() {
         if (isWatchPlayerConfirmedOpen) return
         val root = getYouTubeRootNode() ?: try { rootInActiveWindow } catch (_: Exception) { null }
-        if (root != null && targetVideoDurationSeconds > 0) {
+        if (root != null && !isTargetLiveStream && targetVideoDurationSeconds > 0) {
             val entries = mutableListOf<UiNodeEntry>()
             collectScreenNodes(root, entries)
             val playerTotalSecs = extractWatchPlayerTotalDurationSeconds(entries)

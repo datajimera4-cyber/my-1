@@ -1429,6 +1429,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
 
             val extractedHandle = com.example.util.TitleMatcher.extractChannelHandle(oEmbedSuccess?.authorUrl)
+            val isLiveStreamTask = (currentTask?.isLive == true) || effectiveUrl.contains("/live/", ignoreCase = true)
 
             YouTubeLiveSearchService.armSearchTrigger(
                 title = title,
@@ -1436,7 +1437,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 videoUrl = effectiveUrl,
                 videoId = extractedVideoId,
                 channelHandle = extractedHandle,
-                videoDurationSeconds = exactVideoDurationSecs
+                videoDurationSeconds = if (isLiveStreamTask) 0 else exactVideoDurationSecs,
+                isLiveStream = isLiveStreamTask
             )
 
             WatchSessionRepository.startTask(

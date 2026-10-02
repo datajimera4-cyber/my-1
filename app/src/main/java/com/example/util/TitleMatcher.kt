@@ -118,9 +118,9 @@ object TitleMatcher {
         if (rawCardText.isNullOrBlank()) return ""
         var text = rawCardText.replace("\n", " ").replace(Regex("\\s+"), " ").trim()
 
-        // 0. Strip leading duration badges or playback prefixes (e.g. "10:25 " or "3 minutes, 12 seconds " or "Play video ")
+        // 0. Strip leading duration badges or playback/live prefixes (e.g. "10:25 " or "LIVE " or "Play video ")
         text = text.replace(
-            Regex("^(?:(?:\\d{1,2}:\\d{2}(?::\\d{2})?|now\\s+playing|play\\s+video|shorts)\\s*[,\\-•·|]?\\s*)+", RegexOption.IGNORE_CASE),
+            Regex("^(?:(?:\\d{1,2}:\\d{2}(?::\\d{2})?|now\\s+playing|play\\s+video|shorts|live\\s+now|live|लाइव)\\s*[,\\-•·|]?\\s*)+", RegexOption.IGNORE_CASE),
             ""
         ).trim()
 
@@ -130,9 +130,9 @@ object TitleMatcher {
             text = text.substring(0, goToChannelIdx).trim()
         }
 
-        // 2. Strip trailing duration before "Go to channel", e.g. " - 3 minutes, 45 seconds -" or " - 12:34 -"
+        // 2. Strip trailing duration before "Go to channel", e.g. " - 3 minutes, 45 seconds -" or " - 12:34 -" or " - LIVE -"
         text = text.replace(
-            Regex("(?:[,\\-•·|]|\\s)+(?:\\d+\\s*(?:hours?|hr|hrs|minutes?|mins?|min|seconds?|secs?|sec|घंटे|मिनट|सेकंड)(?:[,\\s]+\\d+\\s*(?:minutes?|mins?|min|seconds?|secs?|sec|मिनट|सेकंड))*)(?:\\s*[,\\-•·|])?\\s*$", RegexOption.IGNORE_CASE),
+            Regex("(?:[,\\-•·|]|\\s)+(?:live\\s+now|live|लाइव|(?:\\d+\\s*(?:hours?|hr|hrs|minutes?|mins?|min|seconds?|secs?|sec|घंटे|घंटा|मिनट|सेकंड)(?:[,\\s]+\\d+\\s*(?:minutes?|mins?|min|seconds?|secs?|sec|मिनट|सेकंड))*))(?:\\s*[,\\-•·|])?\\s*$", RegexOption.IGNORE_CASE),
             ""
         ).trim()
 
@@ -142,9 +142,9 @@ object TitleMatcher {
             ""
         ).trim()
 
-        // 4. Strip trailing relative time ("2 hours ago", "Just now", etc.) and "play video"
+        // 4. Strip trailing relative time ("2 hours ago", "Streamed 3 hours ago", "Started streaming...", "Just now", etc.) and "play video"
         text = text.replace(
-            Regex("(?:[,\\-•·|]|\\s)+(?:streamed\\s+|premiered\\s+)?(?:\\d+\\s+(?:second|minute|hour|day|week|month|year)s?\\s+ago|just\\s+now|play\\s+video|वीडियो\\s+चलाएं)\\b.*$", RegexOption.IGNORE_CASE),
+            Regex("(?:[,\\-•·|]|\\s)+(?:streamed\\s+live\\s+|streamed\\s+|started\\s+streaming\\s+|premiered\\s+|scheduled\\s+for\\s+)?(?:\\d+\\s+(?:second|minute|hour|day|week|month|year)s?\\s+ago|\\d+\\s+(?:सेकंड|मिनट|घंटे|घंटा|दिन|हफ़्ते|महीने|साल)\\s+पहले|just\\s+now|live\\s+now|live|लाइव|play\\s+video|वीडियो\\s+चलाएं)\\b.*$", RegexOption.IGNORE_CASE),
             ""
         ).trim()
 
