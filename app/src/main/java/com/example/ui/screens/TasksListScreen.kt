@@ -134,105 +134,145 @@ fun TasksListScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Clean Header (Real-time mode toggle removed as requested)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            // Professional Status-Bar-Safe Header
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 3.dp,
+                shadowElevation = 2.dp,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Video Tasks",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.ExtraBold
-                    )
-                    Text(
-                        text = "Watch target videos & earn instant coins",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = AmberPrimary.copy(alpha = 0.15f)
-                ) {
-                    Text(
-                        text = "${tasks.count { !it.isLocked }} Active",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = AmberDark,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                    )
-                }
-            }
-
-            // Admin Banners / Posts targeted at TASKS tab
-            AdminPostsBannerSection(
-                posts = adminPosts,
-                dismissedIds = dismissedPostIds,
-                targetTab = "TASKS",
-                onDismiss = { viewModel.dismissAdminPost(it) }
-            )
-
-            // Active Watch Session Banner
-            if (sessionState == SessionState.ACTIVE || sessionState == SessionState.WAITING) {
-                ActiveWatchTimerBanner(viewModel = viewModel)
-            }
-
-            if (tasks.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .weight(1f),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            imageVector = Icons.Default.VideoLibrary,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(48.dp)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "No video tasks available right now",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .testTag("tasks_lazy_column"),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    contentPadding = PaddingValues(bottom = 80.dp)
-                ) {
-                    items(tasks, key = { it.id }) { task ->
-                        VideoTaskCardItem(
-                            task = task,
-                            isSelected = task.id == selectedTaskId,
-                            isLiked = likedTasks.contains(task.id),
-                            commentCount = commentCounts[task.id] ?: 0,
-                            onWatchClick = {
-                                val accOk = YouTubeLiveSearchService.isServiceConnected ||
-                                        PermissionHelper.isAccessibilityServiceEnabled(context)
-                                val overOk = PermissionHelper.canDrawOverlays(context)
-                                isAccessibilityReady = accOk
-                                isOverlayReady = overOk
-                                if (!accOk || !overOk) {
-                                    showPermissionGateDialog = true
-                                } else {
-                                    taskForTierDialog = task
-                                }
+                Column(modifier = Modifier.fillMaxWidth().statusBarsPadding()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            com.example.ui.components.KingoLogoBadge(
+                                isAdmin = false,
+                                size = 38.dp
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Video Tasks",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Watch target videos & earn instant coins",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
-                        )
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(50),
+                                color = AmberPrimary.copy(alpha = 0.16f),
+                                modifier = Modifier.border(1.dp, AmberPrimary.copy(alpha = 0.35f), RoundedCornerShape(50))
+                            ) {
+                                Text(
+                                    text = "${tasks.count { !it.isLocked }} Active",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = AmberDark,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                )
+                            }
+                        }
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .weight(1f)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Admin Banners / Posts targeted at TASKS tab
+                AdminPostsBannerSection(
+                    posts = adminPosts,
+                    dismissedIds = dismissedPostIds,
+                    targetTab = "TASKS",
+                    onDismiss = { viewModel.dismissAdminPost(it) }
+                )
+
+                // Active Watch Session Banner
+                if (sessionState == SessionState.ACTIVE || sessionState == SessionState.WAITING) {
+                    ActiveWatchTimerBanner(viewModel = viewModel)
+                }
+
+                if (tasks.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                imageVector = Icons.Default.VideoLibrary,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(48.dp)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "No video tasks available right now",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .testTag("tasks_lazy_column"),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(top = 2.dp, bottom = 80.dp)
+                    ) {
+                        items(tasks, key = { it.id }) { task ->
+                            VideoTaskCardItem(
+                                task = task,
+                                isSelected = task.id == selectedTaskId,
+                                isLiked = likedTasks.contains(task.id),
+                                commentCount = commentCounts[task.id] ?: 0,
+                                onWatchClick = {
+                                    val accOk = YouTubeLiveSearchService.isServiceConnected ||
+                                            PermissionHelper.isAccessibilityServiceEnabled(context)
+                                    val overOk = PermissionHelper.canDrawOverlays(context)
+                                    isAccessibilityReady = accOk
+                                    isOverlayReady = overOk
+                                    if (!accOk || !overOk) {
+                                        showPermissionGateDialog = true
+                                    } else {
+                                        taskForTierDialog = task
+                                    }
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -384,23 +424,30 @@ private fun VideoTaskCardItem(
         modifier = Modifier
             .fillMaxWidth()
             .border(
-                width = if (isSelected) 1.5.dp else 0.dp,
-                color = if (isSelected) AmberPrimary else Color.Transparent,
-                shape = RoundedCornerShape(18.dp)
+                width = if (isSelected) 1.5.dp else 1.dp,
+                color = if (isSelected) AmberPrimary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                shape = RoundedCornerShape(14.dp)
             )
             .testTag("task_item_card_${task.id}"),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp)
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            // Thumbnail Banner
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Left Compact 16:9 Thumbnail (102dp x 62dp)
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(148.dp)
+                    .width(102.dp)
+                    .height(62.dp)
+                    .clip(RoundedCornerShape(10.dp))
                     .background(Slate900)
             ) {
                 if (task.thumbnailUrl.isNotBlank()) {
@@ -422,16 +469,16 @@ private fun VideoTaskCardItem(
                         )
                 )
 
-                // Top-left Live or Duration Badge
+                // Bottom-left Live or Duration Mini Badge
                 Box(
                     modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(10.dp)
+                        .align(Alignment.BottomStart)
+                        .padding(4.dp)
                         .background(
-                            if (task.isLive) AlertRed else Color.Black.copy(alpha = 0.78f),
-                            RoundedCornerShape(8.dp)
+                            if (task.isLive) AlertRed else Color.Black.copy(alpha = 0.82f),
+                            RoundedCornerShape(5.dp)
                         )
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                        .padding(horizontal = 5.dp, vertical = 2.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (task.isLive) {
@@ -439,160 +486,164 @@ private fun VideoTaskCardItem(
                                 imageVector = Icons.Default.LiveTv,
                                 contentDescription = null,
                                 tint = Color.White,
-                                modifier = Modifier.size(12.dp)
+                                modifier = Modifier.size(9.dp)
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(2.dp))
                         }
                         Text(
                             text = if (task.isLive) "LIVE" else TimeFormatter.formatSecondsToMmSs(task.durationSeconds),
                             color = Color.White,
-                            fontSize = 11.sp,
+                            fontSize = 9.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
                 }
-
-                // Top-right Coin Reward Range
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(10.dp)
-                        .background(AmberPrimary, RoundedCornerShape(10.dp))
-                        .padding(horizontal = 10.dp, vertical = 5.dp)
-                ) {
-                    Text(
-                        text = "+10 to +110 Coins",
-                        color = Color.Black,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.ExtraBold
-                    )
-                }
             }
 
-            // Content & Action
+            // Middle Compact Title, Channel & Reward/Bonus Chips
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        text = task.title,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = task.channelName,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
+                Text(
+                    text = task.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontSize = 13.sp,
+                    lineHeight = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
 
-                // Like & Comment Bonus Badges
+                Text(
+                    text = task.channelName,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                // Compact Coin Reward + Like/Comment Mini Badges Row
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
                     Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = if (isLiked) SuccessGreen.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                        shape = RoundedCornerShape(6.dp),
+                        color = AmberPrimary.copy(alpha = 0.18f)
+                    ) {
+                        Text(
+                            text = "+10~110c",
+                            color = AmberDark,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (isLiked) SuccessGreen.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
                                 imageVector = Icons.Default.ThumbUp,
                                 contentDescription = null,
                                 tint = if (isLiked) SuccessGreen else AmberDark,
-                                modifier = Modifier.size(12.dp)
+                                modifier = Modifier.size(10.dp)
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(3.dp))
                             Text(
-                                text = if (isLiked) "Liked (+5c ✓)" else "Like +5 Coins",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
+                                text = if (isLiked) "+5c ✓" else "+5c",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
                                 color = if (isLiked) SuccessGreen else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
 
                     Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = if (commentCount >= 2) SuccessGreen.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (commentCount >= 2) SuccessGreen.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Comment,
                                 contentDescription = null,
                                 tint = if (commentCount > 0) SuccessGreen else AmberDark,
-                                modifier = Modifier.size(12.dp)
+                                modifier = Modifier.size(10.dp)
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(3.dp))
                             Text(
-                                text = "Comment ($commentCount/2) +5 Coins",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
+                                text = "$commentCount/2",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
                                 color = if (commentCount > 0) SuccessGreen else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
                 }
+            }
 
-                // Watch Task Button
-                Button(
-                    onClick = onWatchClick,
-                    enabled = !taskLocked,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(46.dp)
-                        .testTag("watch_task_button_${task.id}"),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = AmberPrimary,
-                        contentColor = Color.Black,
-                        disabledContainerColor = if (task.isCompleted) SuccessGreen.copy(alpha = 0.15f) else AlertRed.copy(alpha = 0.14f),
-                        disabledContentColor = if (task.isCompleted) SuccessGreen else AlertRed
-                    )
-                ) {
-                    if (taskLocked) {
-                        Icon(
-                            imageVector = if (task.isCompleted) Icons.Default.CheckCircle else Icons.Default.Lock,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = if (task.isCompleted) {
-                                "Completed (4h Lock) • $lockCountdown left"
-                            } else {
-                                "Locked (6h) • $lockCountdown left"
-                            },
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Watch Task",
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 14.sp
-                        )
+            // Right Compact Action Button
+            Button(
+                onClick = onWatchClick,
+                enabled = !taskLocked,
+                modifier = Modifier
+                    .height(40.dp)
+                    .widthIn(min = 82.dp)
+                    .testTag("watch_task_button_${task.id}"),
+                shape = RoundedCornerShape(10.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = AmberPrimary,
+                    contentColor = Color.Black,
+                    disabledContainerColor = if (task.isCompleted) SuccessGreen.copy(alpha = 0.15f) else AlertRed.copy(alpha = 0.14f),
+                    disabledContentColor = if (task.isCompleted) SuccessGreen else AlertRed
+                )
+            ) {
+                if (taskLocked) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = if (task.isCompleted) Icons.Default.CheckCircle else Icons.Default.Lock,
+                                contentDescription = null,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                text = if (task.isCompleted) "Done" else "Locked",
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 10.sp
+                            )
+                        }
+                        if (lockCountdown.isNotBlank()) {
+                            Text(
+                                text = lockCountdown,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 9.sp
+                            )
+                        }
                     }
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "Watch",
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 12.sp
+                    )
                 }
             }
         }

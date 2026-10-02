@@ -139,6 +139,9 @@ class YouTubeLiveSearchService : AccessibilityService() {
         @Volatile
         private var hasTappedChannelVideosTab: Boolean = false
 
+        @Volatile
+        private var lastSearchActionTimestamp: Long = 0L
+
         private val searchDriverHandler = android.os.Handler(android.os.Looper.getMainLooper())
         private val searchDriverRunnable = object : Runnable {
             override fun run() {
@@ -214,6 +217,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
             hasSearchedWithHandleOrQuotes = false
             hasOpenedChannelPage = false
             hasTappedChannelVideosTab = false
+            lastSearchActionTimestamp = 0L
             isVideoExplicitlyPaused = false
             resetMonitoringCounters()
             currentPhase = LiveSearchPhase.OPEN_SEARCH_BAR
@@ -241,6 +245,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
             hasSearchedWithHandleOrQuotes = false
             hasOpenedChannelPage = false
             hasTappedChannelVideosTab = false
+            lastSearchActionTimestamp = 0L
             isVideoExplicitlyPaused = false
             resetMonitoringCounters()
             currentPhase = LiveSearchPhase.IDLE
@@ -704,23 +709,25 @@ class YouTubeLiveSearchService : AccessibilityService() {
         driveLiveSearchStep(rootNode, titleToFind)
     }
 
-    private fun buildSearchQuery(title: String, channel: String?, includeHandle: Boolean = false): String {
+    private fun buildSearchQuery(title: String, channel: String?, exactQuotedTitle: Boolean = false): String {
         val cleanTitle = title.trim()
         val cleanChannel = channel?.trim().orEmpty()
-        val cleanHandle = targetChannelHandle?.trim().orEmpty()
-        if (includeHandle && cleanHandle.isNotBlank()) {
-            return "$cleanHandle $cleanTitle".trim()
-        }
-        return if (cleanChannel.isNotBlank() &&
-            !cleanChannel.equals("YouTube Creator", ignoreCase = true) &&
-            !cleanChannel.equals("YouTube Channel", ignoreCase = true) &&
-            !cleanTitle.contains(cleanChannel, ignoreCase = true)
-        ) {
-            "$cleanTitle $cleanChannel"
-        } else if (cleanHandle.isNotBlank() && !cleanTitle.contains(cleanHandle, ignoreCase = true)) {
-            "$cleanTitle $cleanHandle"
+        val hasRealChannel = cleanChannel.isNotBlank() &&
+                !cleanChannel.equals("YouTube Creator", ignoreCase = true) &&
+                !cleanChannel.equals("YouTube Channel", ignoreCase = true)
+
+        return if (exactQuotedTitle) {
+            if (hasRealChannel && !cleanTitle.contains(cleanChannel, ignoreCase = true)) {
+                "\"$cleanTitle\" $cleanChannel"
+            } else {
+                "\"$cleanTitle\""
+            }
         } else {
-            cleanTitle
+            if (hasRealChannel && !cleanTitle.contains(cleanChannel, ignoreCase = true)) {
+                "$cleanTitle $cleanChannel"
+            } else {
+                cleanTitle
+            }
         }
     }
 
@@ -728,6 +735,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
         try {
             val searchIntent = com.example.util.PermissionHelper.openYouTubeSearchResultsIntent(this, queryText)
             startActivity(searchIntent)
+            lastSearchActionTimestamp = System.currentTimeMillis()
             currentPhase = LiveSearchPhase.FIND_AND_CLICK_VIDEO
             WatchSessionRepository.addLog(reasonLog, LogType.INFO)
         } catch (_: Exception) {}
@@ -736,7 +744,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
     private fun launchOrganicYouTubeSearchFallback(titleToFind: String) {
         if (hasLaunchedSearchIntentFallback) return
         hasLaunchedSearchIntentFallback = true
-        val fullQuery = buildSearchQuery(titleToFind, targetSearchChannel, includeHandle = false)
+        val fullQuery = buildSearchQuery(titleToFind, targetSearchChannel, exactQuotedTitle = false)
         launchOrganicYouTubeSearchQuery(
             queryText = fullQuery,
             reasonLog = "YouTube Search: Opened YouTube search results for \"$fullQuery\""
@@ -852,6 +860,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
                         if (findAndClickChannelVideosTab(rootNode)) {
                             hasTappedChannelVideosTab = true
                             scrollAttempts = 0
+                            lastSearchActionTimestamp = System.currentTimeMillis()
                             WatchSessionRepository.addLog(
                                 "Channel Browse: Switched to channel 'Videos' tab for newest uploads",
                                 LogType.INFO
@@ -862,6 +871,12 @@ class YouTubeLiveSearchService : AccessibilityService() {
 
                     val found = findAndClickVideoNode(rootNode, titleToFind, targetSearchChannel, requireFeedCardMetadata = false)
                     if (!found) {
+                        // Give YouTube search results / channel tab enough time (1600ms) to load over network before scrolling or refining
+                        val sinceLastAction = System.currentTimeMillis() - lastSearchActionTimestamp
+                        if (lastSearchActionTimestamp > 0L && sinceLastAction < 1550L) {
+                            return
+                        }
+
                         if (scrollAttempts == 1 && !hasLaunchedSearchIntentFallback) {
                             // Ensure YouTube search results page for exact query is open if not found on first screen
                             launchOrganicYouTubeSearchFallback(titleToFind)
@@ -869,52 +884,39 @@ class YouTubeLiveSearchService : AccessibilityService() {
                             return
                         }
 
-                        // Stage A (Scroll 2): For newly uploaded videos, tap "Recently uploaded" / "Unwatched" filter chip if present,
-                        // OR tap the creator's Channel Card if it's visible in the search results!
-                        if (scrollAttempts == 2 && !hasOpenedChannelPage) {
-                            if (!hasTappedRecentFilterChip && findAndClickRecentlyUploadedChip(rootNode)) {
+                        // Stage A (Scroll 3): For newly uploaded videos, tap "Recently uploaded" / "Unwatched" filter chip if present
+                        if (scrollAttempts == 3 && !hasOpenedChannelPage && !hasTappedRecentFilterChip) {
+                            if (findAndClickRecentlyUploadedChip(rootNode)) {
                                 hasTappedRecentFilterChip = true
+                                lastSearchActionTimestamp = System.currentTimeMillis()
                                 WatchSessionRepository.addLog(
                                     "YouTube Search: Applied 'Recently uploaded' filter chip for new video discovery",
                                     LogType.INFO
                                 )
                                 return
                             }
-                            if (findAndClickChannelCard(rootNode, targetSearchChannel, targetChannelHandle)) {
-                                hasOpenedChannelPage = true
-                                scrollAttempts = 0
-                                WatchSessionRepository.addLog(
-                                    "YouTube Search -> Channel Browse: Opened creator channel to find newly uploaded video",
-                                    LogType.INFO
-                                )
-                                return
-                            }
                         }
 
-                        // Stage B (Scroll 3): Search with unique @channelHandle + Title (or exact quoted Title + Channel)
-                        // so brand-new channels with 0-view videos surface immediately!
-                        if (scrollAttempts == 3 && !hasSearchedWithHandleOrQuotes && !hasOpenedChannelPage) {
+                        // Stage B (Scroll 5): Search with exact quoted video title ("Title" Channel) so YouTube strictly returns
+                        // videos matching the exact title, even if just uploaded with 0 views!
+                        if (scrollAttempts == 5 && !hasSearchedWithHandleOrQuotes && !hasOpenedChannelPage) {
                             hasSearchedWithHandleOrQuotes = true
-                            val handle = targetChannelHandle?.trim().orEmpty()
-                            val refinedQuery = if (handle.isNotBlank()) {
-                                "$handle $titleToFind"
-                            } else {
-                                "\"$titleToFind\" ${targetSearchChannel.orEmpty()}".trim()
-                            }
+                            val quotedQuery = buildSearchQuery(titleToFind, targetSearchChannel, exactQuotedTitle = true)
                             launchOrganicYouTubeSearchQuery(
-                                queryText = refinedQuery,
-                                reasonLog = "YouTube Search: Refining search for new video/channel \"$refinedQuery\""
+                                queryText = quotedQuery,
+                                reasonLog = "YouTube Search: Refining with exact title query $quotedQuery"
                             )
                             scrollAttempts++
                             return
                         }
 
-                        // Stage C (Scroll 4..6): Check if the creator's Channel Card is on screen in the refined results;
-                        // if so, open the Channel Page -> Videos tab where new uploads are 100% listed at the top!
-                        if (scrollAttempts in 4..6 && !hasOpenedChannelPage) {
+                        // Stage C (Scroll 7..9): If the creator's Channel Card is visible in the search results,
+                        // open the Channel Page -> Videos tab where new uploads are listed at the top (still strictly matching targetTitle!)
+                        if (scrollAttempts in 7..9 && !hasOpenedChannelPage) {
                             if (findAndClickChannelCard(rootNode, targetSearchChannel, targetChannelHandle)) {
                                 hasOpenedChannelPage = true
                                 scrollAttempts = 0
+                                lastSearchActionTimestamp = System.currentTimeMillis()
                                 WatchSessionRepository.addLog(
                                     "YouTube Search -> Channel Browse: Opened creator channel card to locate new upload",
                                     LogType.INFO
@@ -923,39 +925,9 @@ class YouTubeLiveSearchService : AccessibilityService() {
                             }
                         }
 
-                        // Stage D (Scroll 7): If the new video isn't indexed by title yet, search the creator's @handle or Channel Name
-                        // directly via YouTube Search so their Channel Card appears at #1, then open Videos tab!
-                        if (scrollAttempts == 7 && !hasOpenedChannelPage) {
-                            val channelQuery = targetChannelHandle?.takeIf { it.isNotBlank() }
-                                ?: targetSearchChannel?.takeIf {
-                                    it.isNotBlank() &&
-                                            !it.equals("YouTube Creator", ignoreCase = true) &&
-                                            !it.equals("YouTube Channel", ignoreCase = true)
-                                }
-                            if (!channelQuery.isNullOrBlank()) {
-                                launchOrganicYouTubeSearchQuery(
-                                    queryText = channelQuery,
-                                    reasonLog = "YouTube Search: Searching creator channel \"$channelQuery\" to open Videos tab"
-                                )
-                                scrollAttempts++
-                                return
-                            }
-                        }
-
-                        if (scrollAttempts in 8..10 && !hasOpenedChannelPage) {
-                            if (findAndClickChannelCard(rootNode, targetSearchChannel, targetChannelHandle)) {
-                                hasOpenedChannelPage = true
-                                scrollAttempts = 0
-                                WatchSessionRepository.addLog(
-                                    "YouTube Search -> Channel Browse: Opened creator channel page",
-                                    LogType.INFO
-                                )
-                                return
-                            }
-                        }
-
-                        if (scrollAttempts < 16) {
+                        if (scrollAttempts < 18) {
                             scrollAttempts++
+                            lastSearchActionTimestamp = System.currentTimeMillis() - 650L // ~900ms between scrolls
                             if (!scrollForward(rootNode)) {
                                 dispatchSwipeUpGesture()
                             }
@@ -1004,6 +976,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
                 }
 
                 if (submitted) {
+                    lastSearchActionTimestamp = System.currentTimeMillis()
                     WatchSessionRepository.addLog("YouTube Search: Submitted search query via IME Enter", LogType.INFO)
                 }
                 currentPhase = LiveSearchPhase.SUBMIT_QUERY
@@ -1028,6 +1001,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
         // If the search EditText is no longer focused (meaning IME Enter already submitted the search!),
         // move immediately to FIND_AND_CLICK_VIDEO!
         if (activeEdit == null || (!activeEdit.isFocused && !isSoftKeyboardVisible())) {
+            lastSearchActionTimestamp = System.currentTimeMillis()
             currentPhase = LiveSearchPhase.FIND_AND_CLICK_VIDEO
             return
         }
@@ -1035,13 +1009,16 @@ class YouTubeLiveSearchService : AccessibilityService() {
         // 1. Try ACTION_IME_ENTER on the focused EditText
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             if (activeEdit.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)) {
+                lastSearchActionTimestamp = System.currentTimeMillis()
                 currentPhase = LiveSearchPhase.FIND_AND_CLICK_VIDEO
                 return
             }
         }
 
-        // 2. Click the first search suggestion row in YouTube's autocomplete list (left/center area, NOT the right Refine arrow)
-        val suggestion = findFirstSearchSuggestion(rootNode, query)
+        val fullQuery = buildSearchQuery(query, targetSearchChannel)
+
+        // 2. Click the first search suggestion row in YouTube's autocomplete list ONLY if it matches our exact query
+        val suggestion = findFirstSearchSuggestion(rootNode, fullQuery) ?: findFirstSearchSuggestion(rootNode, query)
         if (suggestion != null) {
             val sugRect = android.graphics.Rect()
             suggestion.getBoundsInScreen(sugRect)
@@ -1052,7 +1029,8 @@ class YouTubeLiveSearchService : AccessibilityService() {
                     (suggestion.parent?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true) ||
                     (safeTapY > 0 && dispatchTapGesture(safeTapX, safeTapY))
             if (clicked) {
-                WatchSessionRepository.addLog("YouTube Search: Tapped search suggestion for \"$query\"", LogType.INFO)
+                lastSearchActionTimestamp = System.currentTimeMillis()
+                WatchSessionRepository.addLog("YouTube Search: Tapped exact search suggestion for \"$query\"", LogType.INFO)
                 currentPhase = LiveSearchPhase.FIND_AND_CLICK_VIDEO
                 return
             }
@@ -1064,6 +1042,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
             val clicked = submitBtn.performAction(AccessibilityNodeInfo.ACTION_CLICK) ||
                     (submitBtn.parent?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true)
             if (clicked) {
+                lastSearchActionTimestamp = System.currentTimeMillis()
                 WatchSessionRepository.addLog("YouTube Search: Clicked search submit button", LogType.INFO)
                 currentPhase = LiveSearchPhase.FIND_AND_CLICK_VIDEO
                 return
@@ -1075,6 +1054,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
             val screenWidth = resources.displayMetrics.widthPixels.coerceAtLeast(400)
             val screenHeight = resources.displayMetrics.heightPixels.coerceAtLeast(800)
             dispatchTapGesture((screenWidth * 0.90f).toInt(), (screenHeight * 0.91f).toInt())
+            lastSearchActionTimestamp = System.currentTimeMillis()
         } else {
             launchOrganicYouTubeSearchFallback(query)
         }
@@ -1201,12 +1181,10 @@ class YouTubeLiveSearchService : AccessibilityService() {
                 val normText = TitleMatcher.normalize(text.ifBlank { desc })
                 val normQuery = TitleMatcher.normalize(query)
 
-                val isSuggestion = viewId.contains("suggestion", ignoreCase = true) ||
-                        viewId.contains("search_typeahead", ignoreCase = true) ||
-                        (normText.length >= 3 && normQuery.length >= 3 &&
-                                (normText.contains(normQuery.take(6)) || normQuery.contains(normText.take(6))))
+                // Strictly only click an autocomplete suggestion if it is an EXACT match for our typed query!
+                val isExactSuggestion = normText.length >= 4 && normQuery.length >= 4 && normText == normQuery
 
-                if (isSuggestion) {
+                if (isExactSuggestion) {
                     var target: AccessibilityNodeInfo? = node
                     while (target != null && !target.isClickable) {
                         target = target.parent
@@ -1300,26 +1278,14 @@ class YouTubeLiveSearchService : AccessibilityService() {
                 nodeRect.bottom > (screenHeight * 0.18f).toInt() &&
                 nodeRect.height() > 8
             ) {
-                val normText = TitleMatcher.normalize(combinedText)
-                val normTarget = TitleMatcher.normalize(targetTitle)
+                val strictNodeTitleMatch = TitleMatcher.isStrictTargetVideoMatch(
+                    rawCandidateText = combinedText,
+                    targetTitle = targetTitle,
+                    targetChannel = targetChannel,
+                    targetHandle = targetChannelHandle
+                )
 
-                val stopWords = setOf("the", "and", "official", "video", "audio", "with", "from", "feat", "music", "song", "lyrics", "full", "hd")
-                val targetWords = normTarget.split(" ").map { it.trim() }.filter { it.length >= 2 && !stopWords.contains(it) }
-
-                val directSubstringMatch = (normTarget.length >= 3 && normText.contains(normTarget)) ||
-                        (normTarget.length >= 7 && normText.contains(normTarget.take(10))) ||
-                        (normText.length >= 6 && normTarget.contains(normText.take(12)))
-                val matchingWordCount = targetWords.count { word -> normText.contains(word) }
-                val keywordMatch = targetWords.isNotEmpty() && matchingWordCount >= 1 &&
-                        (matchingWordCount.toFloat() / targetWords.size.coerceAtLeast(1)) >= 0.35f
-                val titleMatcherMatch = TitleMatcher.evaluateMatch(
-                    playingTitle = combinedText,
-                    taskTitle = targetTitle,
-                    playingArtist = null,
-                    taskAuthor = targetChannel
-                ) == com.example.data.MatchResult.MATCH
-
-                if (directSubstringMatch || keywordMatch || titleMatcherMatch) {
+                if (strictNodeTitleMatch) {
                     // Climb up to nearest clickable video card container (avoiding full-screen RecyclerView)
                     var clickTarget: AccessibilityNodeInfo? = node
                     var climbDepth = 0
@@ -1388,6 +1354,8 @@ class YouTubeLiveSearchService : AccessibilityService() {
                     )
 
                     if (!isLikelyChannelProfileRow && (!requireFeedCardMetadata || hasVideoCardIndicators)) {
+                        val normTarget = TitleMatcher.normalize(targetTitle)
+                        val normText = TitleMatcher.normalize(TitleMatcher.extractCardVideoTitleOnly(combinedText, targetChannel, targetChannelHandle))
                         var channelMatches = true
                         if (!hasOpenedChannelPage &&
                             !targetChannel.isNullOrBlank() &&
@@ -1404,21 +1372,17 @@ class YouTubeLiveSearchService : AccessibilityService() {
                             val handleMatch = cleanHandle.length >= 3 && (
                                     lowerCard.contains(cleanHandle) || compactCard.contains(cleanHandle)
                             )
-                            val exactLongTitleMatch = normTarget.length >= 16 && normText.contains(normTarget)
+                            val exactFullTitleMatch = normTarget.length >= 8 && (normText == normTarget || normText.contains(normTarget))
 
                             channelMatches = compactCard.contains(compactChannel) ||
                                     normCard.contains(normChannel) ||
                                     anyChannelWordMatch ||
                                     handleMatch ||
-                                    exactLongTitleMatch ||
-                                    (scrollAttempts >= 5 && (directSubstringMatch || matchingWordCount >= 2))
+                                    exactFullTitleMatch
                         }
 
                         if (channelMatches) {
-                            // Calculate safe coordinates on the video card (center-left of card, away from 3-dot menu)
                             val tapX = (screenWidth * 0.46f).toInt()
-                            // If node is a tall full-card container (thumbnail + title), aim for the title row (bottom ~25% of card)
-                            // so tapping never gets intercepted by an inline muted thumbnail preview!
                             val rawTapY = if (nodeRect.height() <= (110 * density).toInt() && nodeRect.centerY() > (screenHeight * 0.16f).toInt()) {
                                 nodeRect.centerY()
                             } else if (cardRect.height() > (140 * density).toInt()) {
@@ -1428,7 +1392,6 @@ class YouTubeLiveSearchService : AccessibilityService() {
                             }
                             val tapY = rawTapY.coerceIn((screenHeight * 0.18f).toInt(), (screenHeight * 0.88f).toInt())
 
-                            // Perform both Accessibility click AND physical tap gesture so Litho / Elements cards always open!
                             val clickedContainer = toClick.performAction(AccessibilityNodeInfo.ACTION_CLICK)
                             val clickedNode = if (!clickedContainer && toClick !== node) {
                                 node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
@@ -1437,30 +1400,24 @@ class YouTubeLiveSearchService : AccessibilityService() {
                             }
                             if (!clickedContainer && !clickedNode) {
                                 dispatchTapGesture(tapX, tapY)
-                            } else {
-                                // Even if ACTION_CLICK returned true on a Litho container, verify after 550ms and tap if still in list
-                                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                                    ensureWatchPlayerExpandedAfterClick(tapX, tapY, 1)
-                                }, 550L)
                             }
 
                             hasClickedTarget = true
                             lastClickTime = System.currentTimeMillis()
+                            lockedWatchPageTitle = targetTitle
+                            WatchSessionRepository.onMediaMetadataChanged(targetTitle, targetChannel)
                             currentPhase = LiveSearchPhase.COMPLETED
                             searchDriverHandler.removeCallbacks(searchDriverRunnable)
                             WatchSessionRepository.addLog(
-                                "🎉 Organic YouTube Search/Browse: Clicked target video card inside YouTube!",
+                                "🎉 Organic YouTube Search/Browse: Strictly matched & clicked target video \"$targetTitle\"!",
                                 LogType.SUCCESS
                             )
 
-                            // Follow-up checks at 1150ms and 2000ms to guarantee the full Watch Player opened and is playing!
+                            // Verify at 1400ms ONLY if YouTube is still stuck on the Search Results list
                             val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
                             mainHandler.postDelayed({
-                                ensureWatchPlayerExpandedAfterClick(tapX, tapY, 2)
-                            }, 1150L)
-                            mainHandler.postDelayed({
-                                ensureWatchPlayerExpandedAfterClick(tapX, tapY, 3)
-                            }, 2000L)
+                                ensureWatchPlayerExpandedAfterClick(tapX, tapY, 1)
+                            }, 1400L)
 
                             return true
                         }
@@ -1671,35 +1628,37 @@ class YouTubeLiveSearchService : AccessibilityService() {
                 )
             }
 
-            val hasWatchPageControls = entries.any { e ->
+            val hasAnyVideoPlayerOrWatchUi = entries.any { e ->
                 val v = e.viewId.lowercase()
                 val d = e.desc.lowercase()
                 val t = e.text.lowercase()
-                e.rect.top in (screenHeight * 0.18f).toInt()..(screenHeight * 0.68f).toInt() && (
+                v.contains("player_view") ||
+                        v.contains("player_fragment") ||
+                        v.contains("player_control") ||
                         v.contains("watch_metadata") ||
                         v.contains("like_button") ||
                         v.contains("share_button") ||
+                        v.contains("subscribe_button") ||
                         v.contains("comments_entry_point") ||
+                        d.equals("video player", ignoreCase = true) ||
+                        d.equals("pause video", ignoreCase = true) ||
+                        d.equals("play video", ignoreCase = true) ||
                         d.startsWith("like this video") ||
-                        d.startsWith("dislike this video") ||
                         d.equals("expand description", ignoreCase = true) ||
+                        t == "subscribe" ||
+                        t == "subscribed" ||
                         t == "...more" ||
                         t == "…more"
-                )
             }
 
-            val isWatchPlayerOpen = !hasTopSearchToolbar && hasWatchPageControls
-            if (!isWatchPlayerOpen) {
-                // Full Watch Player has not expanded yet (e.g., inline muted preview started on card thumbnail)
-                // Dispatch a clean tap on the video card to expand the full Watch Player!
-                dispatchTapGesture(tapX, tapY)
-                if (attempt >= 2) {
-                    val title = targetSearchTitle
-                    if (!title.isNullOrBlank()) {
-                        hasClickedTarget = false
-                        currentPhase = LiveSearchPhase.FIND_AND_CLICK_VIDEO
-                        findAndClickVideoNode(root, title, targetSearchChannel, requireFeedCardMetadata = false)
-                    }
+            // ONLY re-attempt if YouTube is 100% still on the Search Results list (top search bar visible AND no watch player UI)
+            // Never tap blind coordinates once the Watch Player has started opening!
+            if (hasTopSearchToolbar && !hasAnyVideoPlayerOrWatchUi) {
+                val title = targetSearchTitle
+                if (!title.isNullOrBlank()) {
+                    hasClickedTarget = false
+                    currentPhase = LiveSearchPhase.FIND_AND_CLICK_VIDEO
+                    findAndClickVideoNode(root, title, targetSearchChannel, requireFeedCardMetadata = false)
                 }
             }
         } catch (_: Exception) {}
@@ -1902,12 +1861,12 @@ class YouTubeLiveSearchService : AccessibilityService() {
 
     private fun isReadyForWatchVerification(): Boolean {
         val elapsedSinceLaunch = System.currentTimeMillis() - WatchSessionRepository.taskLaunchTimestampMillis
-        if (elapsedSinceLaunch > 25000L && currentPhase != LiveSearchPhase.IDLE && currentPhase != LiveSearchPhase.COMPLETED) {
+        if (elapsedSinceLaunch > 32000L && currentPhase != LiveSearchPhase.IDLE && currentPhase != LiveSearchPhase.COMPLETED) {
             currentPhase = LiveSearchPhase.COMPLETED
         }
         val isLiveSearching = currentPhase != LiveSearchPhase.IDLE && currentPhase != LiveSearchPhase.COMPLETED
         val elapsedSinceClick = if (lastClickTime > 0L) System.currentTimeMillis() - lastClickTime else elapsedSinceLaunch
-        return !isLiveSearching && elapsedSinceLaunch > 3200L && elapsedSinceClick > 2800L
+        return !isLiveSearching && elapsedSinceLaunch > 4200L && elapsedSinceClick > 4200L
     }
 
     fun inspectCurrentYouTubeState() {

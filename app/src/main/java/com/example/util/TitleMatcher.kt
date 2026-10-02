@@ -83,9 +83,8 @@ object TitleMatcher {
         }
 
         val keywordMatches = taskWords.isNotEmpty() && (
-                (taskWords.size >= 2 && matchingWords >= 2) ||
-                (taskWords.size >= 2 && matchingWords >= 1 && (matchingWords.toFloat() / taskWords.size) >= 0.4f) ||
-                (taskWords.size == 1 && matchingWords == 1)
+                (taskWords.size >= 2 && matchingWords >= 2 && (matchingWords.toFloat() / taskWords.size) >= 0.6f) ||
+                (taskWords.size == 1 && matchingWords == 1 && normPlayingTitle.contains(normTaskTitle))
         )
 
         if (!titleMatches && !keywordMatches) {
@@ -93,6 +92,154 @@ object TitleMatcher {
         }
 
         return MatchResult.MATCH
+    }
+
+    /**
+     * Extracts ONLY the video title portion from a YouTube Accessibility video card label.
+     * YouTube formats video card contentDescriptions as:
+     * "<Video Title> - <Duration> - Go to channel - <Channel Name> - <Views> - <Time ago> - play video"
+     * or "<Video Title> • <Channel Name> • <Views> • <Time ago>"
+     */
+    fun extractCardVideoTitleOnly(rawCardText: String?, channelName: String?, channelHandle: String? = null): String {
+        if (rawCardText.isNullOrBlank()) return ""
+        var text = rawCardText.replace("\n", " ").replace(Regex("\\s+"), " ").trim()
+
+        // 1. Cut everything from "Go to channel" / "चैनल पर जाएं" onwards
+        val goToChannelIdx = Regex("\\b(?:go to channel|चैनल पर जाएं)\\b", RegexOption.IGNORE_CASE).find(text)?.range?.first
+        if (goToChannelIdx != null && goToChannelIdx > 0) {
+            text = text.substring(0, goToChannelIdx).trim()
+        }
+
+        // 2. Strip trailing duration before "Go to channel", e.g. " - 3 minutes, 45 seconds -" or " - 12:34 -"
+        text = text.replace(
+            Regex("(?:[,\\-•·|]|\\s)+(?:\\d+\\s*(?:hours?|hr|hrs|minutes?|mins?|min|seconds?|secs?|sec|घंटे|मिनट|सेकंड)(?:[,\\s]+\\d+\\s*(?:minutes?|mins?|min|seconds?|secs?|sec|मिनट|सेकंड))*)(?:\\s*[,\\-•·|])?\\s*$", RegexOption.IGNORE_CASE),
+            ""
+        ).trim()
+
+        // 3. Strip trailing "<number> views / No views / watching / ago" metadata
+        text = text.replace(
+            Regex("(?:[,\\-•·|]|\\s)+(?:no\\s+views|कोई\\s+व्यू\\s+नहीं|\\d[0-9.,]*\\s*(?:k|m|b|lakh|lakhs|crore|crores|हज़ार|लाख|करोड़)?\\s*(?:views|view|watching|subscribers|बार देखा गया|लोग देख रहे हैं))\\b.*$", RegexOption.IGNORE_CASE),
+            ""
+        ).trim()
+
+        // 4. Strip trailing relative time ("2 hours ago", "Just now", etc.) and "play video"
+        text = text.replace(
+            Regex("(?:[,\\-•·|]|\\s)+(?:streamed\\s+|premiered\\s+)?(?:\\d+\\s+(?:second|minute|hour|day|week|month|year)s?\\s+ago|just\\s+now|play\\s+video|वीडियो\\s+चलाएं)\\b.*$", RegexOption.IGNORE_CASE),
+            ""
+        ).trim()
+
+        // 5. Strip trailing MM:SS duration badge
+        text = text.replace(
+            Regex("(?:[,\\-•·|]|\\s)+\\d{1,2}:\\d{2}(?::\\d{2})?\\s*$"),
+            ""
+        ).trim()
+
+        // 6. If channelName is appended after a separator (" - ChannelName" or " • ChannelName"), strip it
+        val cleanChannel = channelName?.trim().orEmpty()
+        if (cleanChannel.length >= 2 &&
+            !cleanChannel.equals("YouTube Creator", ignoreCase = true) &&
+            !cleanChannel.equals("YouTube Channel", ignoreCase = true)
+        ) {
+            val escapedChannel = Regex.escape(cleanChannel)
+            text = text.replace(
+                Regex("(?:[,\\-•·|])\\s*$escapedChannel\\b.*$", RegexOption.IGNORE_CASE),
+                ""
+            ).trim()
+        }
+
+        // 7. Strip any @handle token
+        val cleanHandle = channelHandle?.removePrefix("@")?.trim().orEmpty()
+        if (cleanHandle.length >= 2) {
+            text = text.replace(Regex("@?${Regex.escape(cleanHandle)}\\b", RegexOption.IGNORE_CASE), "").trim()
+        }
+
+        return text.trim(' ', '-', '•', '·', '|', ',')
+    }
+
+    /**
+     * Strictly verifies that a candidate video card title in YouTube Search / Channel Videos
+     * is the EXACT target video, preventing clicking other videos from the same channel.
+     */
+    fun isStrictTargetVideoMatch(
+        rawCandidateText: String?,
+        targetTitle: String?,
+        targetChannel: String?,
+        targetHandle: String? = null
+    ): Boolean {
+        val cleanTarget = targetTitle?.trim().orEmpty()
+        if (cleanTarget.isEmpty()) return false
+
+        val extractedCardTitle = extractCardVideoTitleOnly(rawCandidateText, targetChannel, targetHandle)
+        val normCard = normalize(extractedCardTitle)
+        val normTarget = normalize(cleanTarget)
+        if (normCard.isEmpty() || normTarget.isEmpty()) return false
+
+        val normChannel = normalize(targetChannel)
+        val normHandle = normalize(targetHandle?.removePrefix("@"))
+
+        // Reject if the candidate node text is ONLY the channel name or @handle
+        if (normChannel.isNotEmpty() && (normCard == normChannel || normCard.replace(" ", "") == normChannel.replace(" ", ""))) {
+            return false
+        }
+        if (normHandle.isNotEmpty() && (normCard == normHandle || normCard.replace(" ", "") == normHandle.replace(" ", ""))) {
+            return false
+        }
+
+        val compactCard = normCard.replace(" ", "")
+        val compactTarget = normTarget.replace(" ", "")
+
+        // 1. Exact or full-title containment match
+        if (normCard == normTarget || compactCard == compactTarget) {
+            return true
+        }
+        if (normTarget.length >= 5 && (normCard.contains(normTarget) || compactCard.contains(compactTarget))) {
+            return true
+        }
+
+        // 2. Truncated long title prefix match (when YouTube truncates a long 2-line title with "...")
+        if (normTarget.length >= 16 && normCard.length >= 14) {
+            if (normCard.startsWith(normTarget.take(16)) || normTarget.startsWith(normCard.take(16))) {
+                return true
+            }
+            if (compactCard.length >= 14 && compactTarget.length >= 14 &&
+                (compactCard.startsWith(compactTarget.take(14)) || compactTarget.startsWith(compactCard.take(14)))
+            ) {
+                return true
+            }
+        }
+
+        // 3. Strict distinctive word matching on the extracted video title ONLY (excluding channel words)
+        val stopWords = setOf(
+            "the", "and", "official", "video", "music", "audio", "with",
+            "from", "feat", "song", "lyrics", "full", "remaster", "remastered",
+            "hd", "4k", "hq", "youtube", "task"
+        )
+        val channelWords = if (normChannel.isNotEmpty()) {
+            normChannel.split(" ").map { it.trim() }.filter { it.length >= 2 }.toSet()
+        } else {
+            emptySet()
+        }
+
+        val allTargetWords = normTarget.split(" ").map { it.trim() }.filter { it.length >= 2 && !stopWords.contains(it) }
+        val nonChannelTargetWords = allTargetWords.filter { !channelWords.contains(it) && it != normHandle }
+        val distinctiveWords = nonChannelTargetWords.ifEmpty { allTargetWords }
+
+        if (distinctiveWords.isEmpty()) return false
+
+        val cardWords = normCard.split(" ").map { it.trim() }.filter { it.isNotEmpty() }
+        val cardWordSet = cardWords.toSet()
+
+        val matchedCount = distinctiveWords.count { targetWord ->
+            cardWordSet.contains(targetWord) ||
+                    (targetWord.length >= 5 && cardWords.any { cw -> cw.startsWith(targetWord) || (cw.length >= 5 && targetWord.startsWith(cw)) })
+        }
+
+        return when (distinctiveWords.size) {
+            1 -> matchedCount == 1 && (normCard == normTarget || normCard.startsWith(distinctiveWords[0]))
+            2 -> matchedCount == 2 // BOTH words must match (100%)
+            3 -> matchedCount == 3 || (matchedCount == 2 && normCard.startsWith(normTarget.take(6)))
+            else -> matchedCount >= 3 && (matchedCount.toFloat() / distinctiveWords.size.toFloat()) >= 0.75f
+        }
     }
 
     /**

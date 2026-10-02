@@ -126,77 +126,139 @@ fun HomeScreen(
         thumbnailUrl = activeSearchTask?.thumbnailUrl
     )
 
-    Box(modifier = modifier.fillMaxSize()) {
+    Column(modifier = modifier.fillMaxSize()) {
+        // Professional Anchored Top Header Bar (Edge-to-Edge Status Bar Safe)
+        Surface(
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 3.dp,
+            shadowElevation = 2.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.fillMaxWidth().statusBarsPadding()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        com.example.ui.components.KingoLogoBadge(
+                            isAdmin = false,
+                            size = 40.dp
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = stringResource(R.string.app_name),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Icon(
+                                    imageVector = Icons.Default.Verified,
+                                    contentDescription = "Verified",
+                                    tint = AmberPrimary,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                            }
+                            Text(
+                                text = if (currentUser != null) {
+                                    "Welcome, ${currentUser?.name?.ifBlank { currentUser?.email?.substringBefore("@") }}"
+                                } else {
+                                    "Watch YouTube Videos & Earn Coins"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Quick Coin Pill in Header
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = Slate900,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .border(1.dp, AmberPrimary.copy(alpha = 0.45f), RoundedCornerShape(50))
+                                .clickable { viewModel.switchTab(AppScreen.WALLET) }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.MonetizationOn,
+                                    contentDescription = null,
+                                    tint = AmberPrimary,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "$walletBalance",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color.White
+                                )
+                            }
+                        }
+
+                        // Live Support Button in Top Bar
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = AmberPrimary.copy(alpha = 0.16f),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .border(1.dp, AmberPrimary.copy(alpha = 0.35f), RoundedCornerShape(50))
+                                .clickable { showSupportChatDialog = true }
+                                .testTag("home_support_chat_button")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.SupportAgent,
+                                    contentDescription = "Chat Support",
+                                    tint = AmberPrimary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text(
+                                    text = "Support",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = AmberDark
+                                )
+                            }
+                        }
+                    }
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+            }
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .weight(1f)
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Top App Brand & Support Bar
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = stringResource(R.string.app_name),
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = MaterialTheme.colorScheme.onBackground
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Icon(
-                            imageVector = Icons.Default.Verified,
-                            contentDescription = "Verified",
-                            tint = AmberPrimary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                    Text(
-                        text = if (currentUser != null) {
-                            "Welcome, ${currentUser?.name?.ifBlank { currentUser?.email?.substringBefore("@") }}"
-                        } else {
-                            "Watch YouTube Videos & Earn Coins"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                // Live Support Button in Top Bar
-                Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = AmberPrimary.copy(alpha = 0.15f),
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .clickable { showSupportChatDialog = true }
-                        .testTag("home_support_chat_button")
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.SupportAgent,
-                            contentDescription = "Chat Support",
-                            tint = AmberPrimary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Support",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = AmberPrimary
-                        )
-                    }
-                }
-            }
-
             // Admin Banners / Posts (Clean without extra Admin/Pinned badges)
             AdminPostsBannerSection(
                 posts = adminPosts,
