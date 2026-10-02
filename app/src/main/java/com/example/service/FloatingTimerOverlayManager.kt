@@ -72,6 +72,11 @@ class FloatingTimerOverlayManager(private val context: Context) {
     private var celebrationText: TextView? = null
     private var lastCelebratedTier: WatchDurationTier? = null
     private var incompletePopupView: FrameLayout? = null
+    private var searchLoadingOverlayView: FrameLayout? = null
+    private var searchLoadingStatusTextView: TextView? = null
+    private var searchLoadingTitleTextView: TextView? = null
+    private var searchLoadingChannelTextView: TextView? = null
+    private var searchLoadingOverlayWm: WindowManager? = null
 
     private var isAttached = false
     private var currentCommentCount = 0
@@ -872,8 +877,216 @@ class FloatingTimerOverlayManager(private val context: Context) {
         }
     }
 
+    @SuppressLint("SetTextI18n")
+    fun showOrUpdateSearchLoadingOverlay(
+        title: String,
+        channel: String,
+        statusText: String = "Searching & opening video..."
+    ) {
+        runOnMain {
+            val existingView = searchLoadingOverlayView
+            if (existingView != null) {
+                searchLoadingTitleTextView?.text = title.ifBlank { "Loading Video..." }
+                searchLoadingChannelTextView?.text = if (channel.isNotBlank()) channel else "YouTube"
+                searchLoadingStatusTextView?.text = statusText
+                return@runOnMain
+            }
+
+            val a11yService = YouTubeLiveSearchService.instance
+            val targetWm = (a11yService?.getSystemService(Context.WINDOW_SERVICE) as? WindowManager) ?: windowManager
+            val canUseA11yOverlay = a11yService != null
+            if (!canUseA11yOverlay && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
+                return@runOnMain
+            }
+
+            val overlayType = if (canUseA11yOverlay) {
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            } else {
+                @Suppress("DEPRECATION")
+                WindowManager.LayoutParams.TYPE_PHONE
+            }
+
+            val params = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+                overlayType,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.CENTER
+                if (!canUseA11yOverlay && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    alpha = 0.79f
+                }
+            }
+
+            val root = FrameLayout(context).apply {
+                setBackgroundColor(Color.parseColor("#FA0F172A"))
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+            }
+
+            val card = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(
+                    (28 * density).toInt(),
+                    (32 * density).toInt(),
+                    (28 * density).toInt(),
+                    (32 * density).toInt()
+                )
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = 24 * density
+                    setColor(Color.parseColor("#1E293B"))
+                    setStroke((1.5f * density).toInt(), Color.parseColor("#33F59E0B"))
+                }
+                layoutParams = FrameLayout.LayoutParams(
+                    (310 * density).toInt(),
+                    FrameLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    gravity = Gravity.CENTER
+                }
+            }
+
+            val progressBar = android.widget.ProgressBar(context).apply {
+                isIndeterminate = true
+                indeterminateTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#F59E0B"))
+                layoutParams = LinearLayout.LayoutParams(
+                    (48 * density).toInt(),
+                    (48 * density).toInt()
+                ).apply {
+                    bottomMargin = (18 * density).toInt()
+                }
+            }
+            card.addView(progressBar)
+
+            val headerTv = TextView(context).apply {
+                text = "Opening Video..."
+                setTextColor(Color.WHITE)
+                textSize = 18f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                gravity = Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    bottomMargin = (8 * density).toInt()
+                }
+            }
+            card.addView(headerTv)
+
+            val titleTv = TextView(context).apply {
+                text = title.ifBlank { "Loading Video..." }
+                setTextColor(Color.parseColor("#E2E8F0"))
+                textSize = 13.5f
+                maxLines = 2
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                gravity = Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    bottomMargin = (4 * density).toInt()
+                }
+            }
+            searchLoadingTitleTextView = titleTv
+            card.addView(titleTv)
+
+            val channelTv = TextView(context).apply {
+                text = if (channel.isNotBlank()) channel else "YouTube"
+                setTextColor(Color.parseColor("#F59E0B"))
+                textSize = 12f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                gravity = Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    bottomMargin = (16 * density).toInt()
+                }
+            }
+            searchLoadingChannelTextView = channelTv
+            card.addView(channelTv)
+
+            val statusTv = TextView(context).apply {
+                text = statusText
+                setTextColor(Color.parseColor("#94A3B8"))
+                textSize = 12f
+                gravity = Gravity.CENTER
+                setPadding(
+                    (14 * density).toInt(),
+                    (8 * density).toInt(),
+                    (14 * density).toInt(),
+                    (8 * density).toInt()
+                )
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = 50 * density
+                    setColor(Color.parseColor("#0F172A"))
+                }
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+            }
+            searchLoadingStatusTextView = statusTv
+            card.addView(statusTv)
+
+            root.addView(card)
+
+            try {
+                targetWm.addView(root, params)
+                searchLoadingOverlayView = root
+                searchLoadingOverlayWm = targetWm
+            } catch (_: Exception) {
+                if (canUseA11yOverlay && (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(context))) {
+                    try {
+                        params.type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                        } else {
+                            @Suppress("DEPRECATION")
+                            WindowManager.LayoutParams.TYPE_PHONE
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            params.alpha = 0.79f
+                        }
+                        windowManager.addView(root, params)
+                        searchLoadingOverlayView = root
+                        searchLoadingOverlayWm = windowManager
+                    } catch (_: Exception) {}
+                }
+            }
+        }
+    }
+
+    fun hideSearchLoadingOverlay() {
+        runOnMain {
+            searchLoadingOverlayView?.let { v ->
+                val wm = searchLoadingOverlayWm ?: windowManager
+                try {
+                    wm.removeViewImmediate(v)
+                } catch (_: Exception) {
+                    try {
+                        wm.removeView(v)
+                    } catch (_: Exception) {}
+                }
+            }
+            searchLoadingOverlayView = null
+            searchLoadingStatusTextView = null
+            searchLoadingTitleTextView = null
+            searchLoadingChannelTextView = null
+            searchLoadingOverlayWm = null
+        }
+    }
+
     fun hideOverlay() {
         runOnMain {
+            hideSearchLoadingOverlay()
             removeAllGlobalViews(windowManager)
             overlayRootView?.let { root ->
                 try {

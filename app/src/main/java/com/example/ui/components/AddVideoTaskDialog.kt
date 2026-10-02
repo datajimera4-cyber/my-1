@@ -39,6 +39,7 @@ import coil.compose.AsyncImage
 import com.example.data.OEmbedResult
 import com.example.data.VideoTaskItem
 import com.example.data.WATCH_DURATION_TIERS
+import com.example.data.calculateCoinsForDuration
 import com.example.ui.theme.AlertRed
 import com.example.ui.theme.AmberDark
 import com.example.ui.theme.AmberPrimary
@@ -51,6 +52,49 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import org.json.JSONObject
+
+private fun fetchYouTubeVideoDurationSeconds(videoUrl: String): Int {
+    val videoId = TitleMatcher.extractVideoId(videoUrl) ?: return 0
+    try {
+        val watchUrl = "https://www.youtube.com/watch?v=$videoId&hl=en"
+        val conn = (URL(watchUrl).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 7000
+            readTimeout = 7000
+            setRequestProperty(
+                "User-Agent",
+                "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+            )
+            setRequestProperty("Cookie", "CONSENT=YES+1")
+        }
+        if (conn.responseCode in 200..299) {
+            val html = conn.inputStream.bufferedReader().use { it.readText() }
+            // 1. Check "lengthSeconds":"1234"
+            val lenMatch = Regex("\"lengthSeconds\"\\s*:\\s*\"(\\d+)\"").find(html)
+            if (lenMatch != null) {
+                val secs = lenMatch.groupValues[1].toIntOrNull() ?: 0
+                if (secs > 0) return secs
+            }
+            // 2. Check "approxDurationMs":"1234000"
+            val approxMatch = Regex("\"approxDurationMs\"\\s*:\\s*\"(\\d+)\"").find(html)
+            if (approxMatch != null) {
+                val ms = approxMatch.groupValues[1].toLongOrNull() ?: 0L
+                val secs = (ms / 1000L).toInt()
+                if (secs > 0) return secs
+            }
+            // 3. Check <meta itemprop="duration" content="PT...M...S">
+            val isoMatch = Regex("itemprop=\"duration\"\\s+content=\"PT(?:(\\d+)H)?(?:(\\d+)M)?(?:(\\d+)S)?\"").find(html)
+            if (isoMatch != null) {
+                val h = isoMatch.groupValues[1].toIntOrNull() ?: 0
+                val m = isoMatch.groupValues[2].toIntOrNull() ?: 0
+                val s = isoMatch.groupValues[3].toIntOrNull() ?: 0
+                val total = h * 3600 + m * 60 + s
+                if (total > 0) return total
+            }
+        }
+    } catch (_: Exception) {}
+    return 0
+}
 
 private suspend fun fetchYouTubeOEmbed(cleanUrl: String): OEmbedResult = withContext(Dispatchers.IO) {
     try {
@@ -65,10 +109,12 @@ private suspend fun fetchYouTubeOEmbed(cleanUrl: String): OEmbedResult = withCon
         if (code in 200..299) {
             val body = conn.inputStream.bufferedReader().use { it.readText() }
             val json = JSONObject(body)
+            val durationSecs = fetchYouTubeVideoDurationSeconds(cleanUrl)
             OEmbedResult.Success(
                 title = json.optString("title", ""),
                 authorName = json.optString("author_name", "YouTube Creator"),
-                thumbnailUrl = json.optString("thumbnail_url", "")
+                thumbnailUrl = json.optString("thumbnail_url", ""),
+                durationSeconds = durationSecs
             )
         } else {
             OEmbedResult.Error("HTTP $code")
@@ -91,12 +137,14 @@ fun AddVideoTaskDialog(
     var titleInput by remember { mutableStateOf("") }
     var channelInput by remember { mutableStateOf("") }
     var thumbnailUrl by remember { mutableStateOf("") }
-    var durationMinutesInput by remember { mutableStateOf("10") }
+    var durationMinutesInput by remember { mutableStateOf("3") }
+    var detectedDurationSeconds by remember { mutableIntStateOf(0) }
     var isLiveStream by remember { mutableStateOf(false) }
     var isPinnedTask by remember { mutableStateOf(false) }
     var limitClicksEnabled by remember { mutableStateOf(false) }
     var maxClicksInput by remember { mutableStateOf("10") }
-    var selectedTierIndex by remember { mutableIntStateOf(0) }
+    // -1 means "Auto" (Default selected!). 0..N means specific fixed tier in WATCH_DURATION_TIERS.
+    var selectedTierIndex by remember { mutableIntStateOf(-1) }
     var isFetching by remember { mutableStateOf(false) }
     var fetchError by remember { mutableStateOf<String?>(null) }
 
@@ -118,6 +166,11 @@ fun AddVideoTaskDialog(
                     channelInput = res.authorName
                     thumbnailUrl = res.thumbnailUrl.ifBlank {
                         TitleMatcher.getThumbnailUrl(clean) ?: ""
+                    }
+                    if (res.durationSeconds > 0) {
+                        detectedDurationSeconds = res.durationSeconds
+                        val mins = ((res.durationSeconds + 29) / 60).coerceAtLeast(1)
+                        durationMinutesInput = mins.toString()
                     }
                     if (res.title.contains("live", ignoreCase = true) ||
                         res.title.contains("24/7", ignoreCase = true)
@@ -457,8 +510,8 @@ fun AddVideoTaskDialog(
                     OutlinedTextField(
                         value = durationMinutesInput,
                         onValueChange = { durationMinutesInput = it.filter { c -> c.isDigit() } },
-                        label = { Text("Video Length (in Minutes)") },
-                        placeholder = { Text("e.g. 10") },
+                        label = { Text("Video Length in Minutes (Auto-detected)") },
+                        placeholder = { Text("e.g. 3, 4, or 45") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier
                             .fillMaxWidth()
@@ -469,14 +522,46 @@ fun AddVideoTaskDialog(
                 }
 
                 Text(
-                    text = "Default Watch Goal Tier:",
+                    text = "Default Watch Goal:",
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold
                 )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
+                    val isAutoSelected = selectedTierIndex == -1
+                    val autoMins = (durationMinutesInput.toIntOrNull() ?: 3).coerceAtLeast(3)
+                    val autoCoins = calculateCoinsForDuration(autoMins * 60)
+                    Box(
+                        modifier = Modifier
+                            .weight(1.15f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(
+                                if (isAutoSelected) AmberPrimary
+                                else MaterialTheme.colorScheme.surfaceVariant
+                            )
+                            .clickable { selectedTierIndex = -1 }
+                            .padding(vertical = 8.dp)
+                            .testTag("watch_goal_auto_tab"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "Auto",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (isAutoSelected) Color.Black else MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = if (isLiveStream) "All Tiers" else "${autoMins}m • +${autoCoins}c",
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isAutoSelected) Color.Black else AmberDark
+                            )
+                        }
+                    }
+
                     WATCH_DURATION_TIERS.forEachIndexed { index, tier ->
                         val isSelected = selectedTierIndex == index
                         Box(
@@ -523,9 +608,22 @@ fun AddVideoTaskDialog(
                         val finalThumb = thumbnailUrl.ifBlank {
                             TitleMatcher.getThumbnailUrl(cleanUrl) ?: ""
                         }
-                        val durMins = durationMinutesInput.toIntOrNull() ?: 10
+                        val durMins = (durationMinutesInput.toIntOrNull() ?: 3).coerceAtLeast(3)
                         val durSeconds = if (isLiveStream) 0 else (durMins * 60).coerceAtLeast(180)
-                        val chosenTier = WATCH_DURATION_TIERS[selectedTierIndex]
+                        val isAutoGoal = selectedTierIndex < 0 || selectedTierIndex >= WATCH_DURATION_TIERS.size
+                        val chosenGoalSeconds = if (isAutoGoal) 0 else WATCH_DURATION_TIERS[selectedTierIndex].seconds
+                        val chosenRewardCoins = if (isAutoGoal) {
+                            if (isLiveStream) WATCH_DURATION_TIERS.last().coins else calculateCoinsForDuration(durSeconds)
+                        } else {
+                            WATCH_DURATION_TIERS[selectedTierIndex].coins
+                        }
+                        val finalDurationSeconds = if (isLiveStream) {
+                            0
+                        } else if (!isAutoGoal) {
+                            maxOf(durSeconds, chosenGoalSeconds)
+                        } else {
+                            durSeconds
+                        }
                         val maxCompletionsVal = if (limitClicksEnabled) {
                             (maxClicksInput.toIntOrNull() ?: 10).coerceAtLeast(1)
                         } else 0
@@ -537,11 +635,11 @@ fun AddVideoTaskDialog(
                             channelName = finalChannel,
                             videoUrl = cleanUrl,
                             thumbnailUrl = finalThumb,
-                            durationSeconds = durSeconds,
+                            durationSeconds = finalDurationSeconds,
                             isLive = isLiveStream,
                             isCompleted = false,
-                            selectedDurationSeconds = chosenTier.seconds,
-                            rewardCoins = chosenTier.coins,
+                            selectedDurationSeconds = chosenGoalSeconds,
+                            rewardCoins = chosenRewardCoins,
                             createdAt = nowMillis,
                             isPinned = isPinnedTask,
                             pinnedAt = if (isPinnedTask) nowMillis else 0L,

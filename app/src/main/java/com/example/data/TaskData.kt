@@ -41,7 +41,8 @@ sealed interface OEmbedResult {
         val title: String,
         val authorName: String,
         val authorUrl: String = "",
-        val thumbnailUrl: String = ""
+        val thumbnailUrl: String = "",
+        val durationSeconds: Int = 0
     ) : OEmbedResult
     data class Error(val message: String) : OEmbedResult
 }
@@ -119,19 +120,78 @@ val WATCH_DURATION_TIERS = listOf(
     WatchDurationTier(minutes = 30, seconds = 1800, coins = 110, label = "30 Min")
 )
 
+fun calculateCoinsForDuration(seconds: Int): Int {
+    val exact = WATCH_DURATION_TIERS.find { it.seconds == seconds }
+    if (exact != null) return exact.coins
+    val mins = (seconds / 60).coerceAtLeast(1)
+    return when {
+        mins <= 3 -> 10
+        mins == 4 -> 14
+        mins == 5 -> 17
+        mins < 10 -> 17 + ((mins - 5) * 3)
+        mins == 10 -> 35
+        mins < 20 -> 35 + ((mins - 10) * 37) / 10
+        mins == 20 -> 72
+        mins < 30 -> 72 + ((mins - 20) * 38) / 10
+        mins == 30 -> 110
+        else -> 110 + ((mins - 30) * 11) / 3
+    }
+}
+
+fun getEffectiveDurationTiers(task: VideoTaskItem): List<WatchDurationTier> {
+    if (task.isLive) return WATCH_DURATION_TIERS
+    // If selectedDurationSeconds <= 0, Admin selected "Auto" (use actual video length task.durationSeconds).
+    // If selectedDurationSeconds > 0, Admin set a specific watch goal cap.
+    val effectiveMaxSeconds = if (task.selectedDurationSeconds > 0) {
+        task.selectedDurationSeconds
+    } else {
+        task.durationSeconds.coerceAtLeast(180)
+    }
+    val totalMins = (effectiveMaxSeconds / 60).coerceAtLeast(3)
+    val baseTiers = WATCH_DURATION_TIERS.filter { it.seconds <= effectiveMaxSeconds }.toMutableList()
+    if (baseTiers.isEmpty()) {
+        baseTiers.add(WATCH_DURATION_TIERS.first())
+    }
+    if (baseTiers.none { it.minutes == totalMins }) {
+        val fullSeconds = totalMins * 60
+        baseTiers.add(
+            WatchDurationTier(
+                minutes = totalMins,
+                seconds = fullSeconds,
+                coins = calculateCoinsForDuration(fullSeconds),
+                label = "$totalMins Min (Full Video)"
+            )
+        )
+    }
+    return baseTiers.sortedBy { it.seconds }
+}
+
 /**
  * Calculates highest reached milestone during continuous watch.
  * If watched less than 3 minutes (180s), returns null (0 coins).
  */
 fun calculateContinuousWatchMilestone(watchedSeconds: Int, selectedGoalSeconds: Int = Int.MAX_VALUE): WatchDurationTier? {
     if (watchedSeconds < 180) return null
-    return WATCH_DURATION_TIERS
+    val candidates = WATCH_DURATION_TIERS.toMutableList()
+    if (selectedGoalSeconds in 180..14400 && candidates.none { it.seconds == selectedGoalSeconds }) {
+        val goalMins = (selectedGoalSeconds / 60).coerceAtLeast(3)
+        candidates.add(
+            WatchDurationTier(
+                minutes = goalMins,
+                seconds = selectedGoalSeconds,
+                coins = calculateCoinsForDuration(selectedGoalSeconds),
+                label = "$goalMins Min"
+            )
+        )
+    }
+    return candidates
         .filter { it.seconds <= watchedSeconds && it.seconds <= selectedGoalSeconds }
         .maxByOrNull { it.seconds }
 }
 
 /**
  * Multi-video Task Model representing a YouTube video task.
+ * selectedDurationSeconds == 0 means "Auto" (uses full video durationSeconds).
  */
 data class VideoTaskItem(
     val id: String,
@@ -143,7 +203,7 @@ data class VideoTaskItem(
     val isLive: Boolean = false,
     val isCompleted: Boolean = false,
     val watchedMillis: Long = 0L,
-    val selectedDurationSeconds: Int = 180,
+    val selectedDurationSeconds: Int = 0,
     val rewardCoins: Int = 10,
     val createdAt: Long = System.currentTimeMillis(),
     val lockedUntilMillis: Long = 0L,

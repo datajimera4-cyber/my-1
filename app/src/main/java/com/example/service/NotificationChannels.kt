@@ -186,39 +186,37 @@ object NotificationChannels {
                             newlyNotifiedKeys.add(updateKey)
                             sendAdminUpdateNotification(
                                 context = context,
-                                title = "🎬 New Watch Task Added! (+${t.rewardCoins} Coins)",
-                                body = "\"${t.title}\" by ${t.channelName} is now live. Watch & earn coins now!",
+                                title = "🎬 New Video Task (+${t.rewardCoins} Coins)",
+                                body = t.title,
                                 dedupKey = t.id
                             )
                         } else {
-                            // Check if Admin pinned this existing task
                             if (t.isPinned && t.pinnedAt > 0L) {
                                 val pinKey = "task_pin_${t.id}_${t.pinnedAt}"
                                 if (!notified.contains(pinKey) && !inMemoryDispatchedKeys.contains(pinKey)) {
                                     newlyNotifiedKeys.add(pinKey)
                                     sendAdminUpdateNotification(
                                         context = context,
-                                        title = "📌 Featured Task Pinned! (+${t.rewardCoins} Coins)",
-                                        body = "Admin pinned \"${t.title}\" to the top of your Tasks list!",
+                                        title = "⭐ Featured Task (+${t.rewardCoins} Coins)",
+                                        body = t.title,
                                         dedupKey = pinKey
                                     )
                                 }
                             }
-                            // Check if Admin updated reward coins or title of this task
                             val updateKey = "task_upd_${t.id}_${t.rewardCoins}_${t.title.hashCode()}"
                             if (!notified.contains(updateKey) && !inMemoryDispatchedKeys.contains(updateKey)) {
                                 newlyNotifiedKeys.add(updateKey)
                                 sendAdminUpdateNotification(
                                     context = context,
-                                    title = "🔄 Watch Task Updated (+${t.rewardCoins} Coins)",
-                                    body = "\"${t.title}\" (${t.channelName}) has been updated by Admin.",
+                                    title = "🎬 Task Available (+${t.rewardCoins} Coins)",
+                                    body = t.title,
                                     dedupKey = updateKey
                                 )
                             }
                         }
                     }
 
-                    // 2. Check Admin Posts / Banners / Urgent Alerts (New + Pinned/Updated)
+                    // 2. Check Posts / Banners / Push Notifications
                     val defaultPostIds = setOf("default_welcome_banner")
                     val posts = dataStoreManager.adminPostsFlow.first()
                     for (p in posts) {
@@ -228,15 +226,10 @@ object NotificationChannels {
                             if (p.isPinned && p.pinnedAt > 0L) {
                                 newlyNotifiedKeys.add("post_pin_${p.id}_${p.pinnedAt}")
                             }
-                            val prefix = when (p.postType.uppercase()) {
-                                "ALERT" -> "🚨 Urgent Admin Alert"
-                                "BANNER" -> "📢 New Offer Banner"
-                                else -> "📌 New Admin Post"
-                            }
                             sendAdminUpdateNotification(
                                 context = context,
-                                title = "$prefix: ${p.title}",
-                                body = p.message.ifBlank { "Tap to view the latest update in ${p.targetTab} tab!" },
+                                title = p.title.ifBlank { "🔔 New Update" },
+                                body = p.message.ifBlank { "Tap to open the app." },
                                 dedupKey = p.id
                             )
                         } else if (p.isPinned && p.pinnedAt > 1700000000000L) {
@@ -245,8 +238,8 @@ object NotificationChannels {
                                 newlyNotifiedKeys.add(pinKey)
                                 sendAdminUpdateNotification(
                                     context = context,
-                                    title = "📌 Pinned Announcement: ${p.title}",
-                                    body = p.message.ifBlank { "Check out the pinned announcement from Admin!" },
+                                    title = p.title.ifBlank { "📢 Featured Update" },
+                                    body = p.message.ifBlank { "Tap to view details." },
                                     dedupKey = pinKey
                                 )
                             }
@@ -270,24 +263,24 @@ object NotificationChannels {
                                     PayoutStatus.APPROVED -> {
                                         sendAdminUpdateNotification(
                                             context = context,
-                                            title = "✅ Withdrawal Approved ($safeCoins Coins = ₹$inrStr)",
-                                            body = "Admin approved your ₹$inrStr withdrawal via ${req.method}. Payment will be marked Done once transferred!",
+                                            title = "✅ Withdrawal Approved (₹$inrStr)",
+                                            body = "Your ₹$inrStr payout via ${req.method} is approved and processing.",
                                             dedupKey = statusNotifyKey
                                         )
                                     }
                                     PayoutStatus.COMPLETED -> {
                                         sendAdminUpdateNotification(
                                             context = context,
-                                            title = "🎉 Payment Done! ₹$inrStr Sent",
-                                            body = "Your withdrawal of $safeCoins Coins (₹$inrStr) has been paid to ${req.method} (${req.destination}).",
+                                            title = "🎉 Payment Sent! ₹$inrStr",
+                                            body = "₹$inrStr ($safeCoins Coins) has been sent to ${req.method} (${req.destination}).",
                                             dedupKey = statusNotifyKey
                                         )
                                     }
                                     PayoutStatus.REJECTED -> {
                                         sendAdminUpdateNotification(
                                             context = context,
-                                            title = "❌ Withdrawal Declined (+$safeCoins Coins Refunded)",
-                                            body = "${req.adminNote ?: "Declined by Admin"} • Coins returned to your wallet.",
+                                            title = "❌ Withdrawal Refunded (+$safeCoins Coins)",
+                                            body = "$safeCoins Coins have been returned to your wallet.",
                                             dedupKey = statusNotifyKey
                                         )
                                     }
@@ -297,10 +290,10 @@ object NotificationChannels {
                         }
                     }
 
-                    // 4. Check Wallet Transactions for Admin Coin Updates, Referral Bonuses & Payout Updates
+                    // 4. Check Wallet Transactions for Coin Updates & Referral Bonuses
                     val txList = dataStoreManager.transactionsFlow.first()
                     for (tx in txList) {
-                        val isAdminCoin = tx.id.startsWith("admin_coin_") || tx.title.contains("Admin Balance Update")
+                        val isAdminCoin = tx.id.startsWith("admin_coin_") || tx.title.contains("Balance Updated") || tx.title.contains("Admin Balance Update")
                         val isRefBonus = tx.id.startsWith("ref_withdraw_bonus_") || tx.title.contains("Referral Withdraw Bonus")
                         if ((isAdminCoin || isRefBonus) && !notified.contains(tx.id) && !inMemoryDispatchedKeys.contains(tx.id)) {
                             newlyNotifiedKeys.add(tx.id)
@@ -308,15 +301,15 @@ object NotificationChannels {
                             if (isRefBonus) {
                                 sendAdminUpdateNotification(
                                     context = context,
-                                    title = "🤝 Referral Bonus Earned ($sign Coins)!",
+                                    title = "🤝 Referral Bonus ($sign Coins)",
                                     body = tx.title,
                                     dedupKey = tx.id
                                 )
                             } else {
                                 sendAdminUpdateNotification(
                                     context = context,
-                                    title = "👑 Wallet Updated by Admin ($sign Coins)",
-                                    body = "Your Kingo King wallet balance has been updated by Admin!",
+                                    title = "🪙 Wallet Updated ($sign Coins)",
+                                    body = "Your wallet balance has been updated.",
                                     dedupKey = tx.id
                                 )
                             }
@@ -335,15 +328,15 @@ object NotificationChannels {
                             newlyNotifiedKeys.add(updKey)
                             sendAdminUpdateNotification(
                                 context = context,
-                                title = "🚀 New App Update Available!",
-                                body = "A new version (${appUpdate.fileName}) is ready. Tap to download & update Kingo King now!",
+                                title = "🚀 App Update Available",
+                                body = "Tap to download the latest update.",
                                 dedupKey = updKey
                             )
                         }
                     }
                 }
 
-                // 6. Check Support Chat Messages (Admin replies to User, or User queries to Admin)
+                // 6. Check Support Chat Messages
                 val msgs = dataStoreManager.supportMessagesFlow.first()
                 if (isAdminApp) {
                     val newIncoming = msgs.filter { m ->
@@ -373,7 +366,7 @@ object NotificationChannels {
                         val latest = newReplies.last()
                         sendAdminUpdateNotification(
                             context = context,
-                            title = "💬 Admin Support Reply",
+                            title = "💬 Support Reply",
                             body = latest.message,
                             dedupKey = latest.id
                         )

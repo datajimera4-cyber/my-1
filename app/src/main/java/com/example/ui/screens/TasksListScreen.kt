@@ -39,6 +39,9 @@ import coil.compose.AsyncImage
 import com.example.BuildConfig
 import com.example.data.SessionState
 import com.example.data.VideoTaskItem
+import com.example.data.WATCH_DURATION_TIERS
+import com.example.data.calculateCoinsForDuration
+import com.example.data.getEffectiveDurationTiers
 import com.example.service.YouTubeLiveSearchService
 import com.example.ui.components.ActiveWatchTimerBanner
 import com.example.ui.components.AddVideoTaskDialog
@@ -267,7 +270,13 @@ fun TasksListScreen(
                                     isOverlayReady = overOk
                                     if (!accOk || !overOk) {
                                         showPermissionGateDialog = true
+                                    } else if (!task.isLive && task.selectedDurationSeconds > 0) {
+                                        // Admin explicitly set a fixed watch goal for this video -> start with that goal directly
+                                        val tiers = getEffectiveDurationTiers(task)
+                                        val goalTier = tiers.find { it.seconds == task.selectedDurationSeconds } ?: tiers.last()
+                                        viewModel.startTaskWithTier(task, goalTier, context)
                                     } else {
+                                        // Auto mode (or Live stream) -> let user pick watch duration up to video's full length
                                         taskForTierDialog = task
                                     }
                                 }
@@ -419,6 +428,27 @@ private fun VideoTaskCardItem(
 ) {
     val taskLocked = task.isLocked
     val lockCountdown = if (taskLocked) task.getLockRemainingFormatted() else ""
+    val availableTiers = remember(task.durationSeconds, task.selectedDurationSeconds, task.isLive) {
+        getEffectiveDurationTiers(task)
+    }
+    val maxTier = availableTiers.lastOrNull() ?: WATCH_DURATION_TIERS.first()
+    val isAutoGoal = task.selectedDurationSeconds <= 0
+    val durationText = when {
+        task.isLive -> "LIVE"
+        isAutoGoal -> "${(task.durationSeconds / 60).coerceAtLeast(3)} min"
+        else -> "Goal: ${(task.selectedDurationSeconds / 60).coerceAtLeast(3)}m"
+    }
+    val coinPillText = when {
+        task.isLive -> "+10~110c"
+        isAutoGoal && availableTiers.size > 1 -> "+10~${maxTier.coins}c"
+        isAutoGoal -> "+${maxTier.coins}c"
+        else -> "+${calculateCoinsForDuration(task.selectedDurationSeconds)}c"
+    }
+    val thumbTimeText = when {
+        task.isLive -> "LIVE"
+        isAutoGoal -> TimeFormatter.formatSecondsToMmSs(task.durationSeconds.coerceAtLeast(180))
+        else -> TimeFormatter.formatSecondsToMmSs(task.selectedDurationSeconds.coerceAtLeast(180))
+    }
 
     Card(
         modifier = Modifier
@@ -438,16 +468,16 @@ private fun VideoTaskCardItem(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 9.dp),
+                .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Left Compact 16:9 Thumbnail (102dp x 62dp)
+            // Left Compact 16:9 Thumbnail (90dp x 56dp)
             Box(
                 modifier = Modifier
-                    .width(102.dp)
-                    .height(62.dp)
-                    .clip(RoundedCornerShape(10.dp))
+                    .width(90.dp)
+                    .height(56.dp)
+                    .clip(RoundedCornerShape(9.dp))
                     .background(Slate900)
             ) {
                 if (task.thumbnailUrl.isNotBlank()) {
@@ -476,9 +506,9 @@ private fun VideoTaskCardItem(
                         .padding(4.dp)
                         .background(
                             if (task.isLive) AlertRed else Color.Black.copy(alpha = 0.82f),
-                            RoundedCornerShape(5.dp)
+                            RoundedCornerShape(4.dp)
                         )
-                        .padding(horizontal = 5.dp, vertical = 2.dp)
+                        .padding(horizontal = 5.dp, vertical = 1.5.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (task.isLive) {
@@ -491,19 +521,21 @@ private fun VideoTaskCardItem(
                             Spacer(modifier = Modifier.width(2.dp))
                         }
                         Text(
-                            text = if (task.isLive) "LIVE" else TimeFormatter.formatSecondsToMmSs(task.durationSeconds),
+                            text = thumbTimeText,
                             color = Color.White,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold
+                            fontSize = 8.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
                 }
             }
 
-            // Middle Compact Title, Channel & Reward/Bonus Chips
+            // Middle Perfectly Aligned Single-Line Column
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(3.dp)
+                verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 Text(
                     text = task.title,
@@ -516,7 +548,7 @@ private fun VideoTaskCardItem(
                 )
 
                 Text(
-                    text = task.channelName,
+                    text = "${task.channelName} • $durationText",
                     style = MaterialTheme.typography.bodySmall,
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -524,67 +556,74 @@ private fun VideoTaskCardItem(
                     overflow = TextOverflow.Ellipsis
                 )
 
-                // Compact Coin Reward + Like/Comment Mini Badges Row
+                // Single-line Non-Wrapping Coin + Like + Comment Badges Row
                 Row(
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Surface(
-                        shape = RoundedCornerShape(6.dp),
+                        shape = RoundedCornerShape(5.dp),
                         color = AmberPrimary.copy(alpha = 0.18f)
                     ) {
                         Text(
-                            text = "+10~110c",
+                            text = coinPillText,
                             color = AmberDark,
-                            fontSize = 10.sp,
+                            fontSize = 9.5.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            maxLines = 1,
+                            softWrap = false,
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
                         )
                     }
 
                     Surface(
-                        shape = RoundedCornerShape(6.dp),
+                        shape = RoundedCornerShape(5.dp),
                         color = if (isLiked) SuccessGreen.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
                                 imageVector = Icons.Default.ThumbUp,
                                 contentDescription = null,
                                 tint = if (isLiked) SuccessGreen else AmberDark,
-                                modifier = Modifier.size(10.dp)
+                                modifier = Modifier.size(9.dp)
                             )
-                            Spacer(modifier = Modifier.width(3.dp))
+                            Spacer(modifier = Modifier.width(2.dp))
                             Text(
-                                text = if (isLiked) "+5c ✓" else "+5c",
+                                text = if (isLiked) "+5c✓" else "+5c",
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false,
                                 color = if (isLiked) SuccessGreen else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
 
                     Surface(
-                        shape = RoundedCornerShape(6.dp),
+                        shape = RoundedCornerShape(5.dp),
                         color = if (commentCount >= 2) SuccessGreen.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Comment,
                                 contentDescription = null,
                                 tint = if (commentCount > 0) SuccessGreen else AmberDark,
-                                modifier = Modifier.size(10.dp)
+                                modifier = Modifier.size(9.dp)
                             )
-                            Spacer(modifier = Modifier.width(3.dp))
+                            Spacer(modifier = Modifier.width(2.dp))
                             Text(
                                 text = "$commentCount/2",
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false,
                                 color = if (commentCount > 0) SuccessGreen else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -597,8 +636,8 @@ private fun VideoTaskCardItem(
                 onClick = onWatchClick,
                 enabled = !taskLocked,
                 modifier = Modifier
-                    .height(40.dp)
-                    .widthIn(min = 82.dp)
+                    .height(38.dp)
+                    .widthIn(min = 76.dp)
                     .testTag("watch_task_button_${task.id}"),
                 shape = RoundedCornerShape(10.dp),
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
@@ -615,20 +654,24 @@ private fun VideoTaskCardItem(
                             Icon(
                                 imageVector = if (task.isCompleted) Icons.Default.CheckCircle else Icons.Default.Lock,
                                 contentDescription = null,
-                                modifier = Modifier.size(12.dp)
+                                modifier = Modifier.size(11.dp)
                             )
                             Spacer(modifier = Modifier.width(3.dp))
                             Text(
                                 text = if (task.isCompleted) "Done" else "Locked",
                                 fontWeight = FontWeight.ExtraBold,
-                                fontSize = 10.sp
+                                fontSize = 10.sp,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                         if (lockCountdown.isNotBlank()) {
                             Text(
                                 text = lockCountdown,
                                 fontWeight = FontWeight.SemiBold,
-                                fontSize = 9.sp
+                                fontSize = 8.5.sp,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                     }
@@ -636,13 +679,15 @@ private fun VideoTaskCardItem(
                     Icon(
                         imageVector = Icons.Default.PlayArrow,
                         contentDescription = null,
-                        modifier = Modifier.size(15.dp)
+                        modifier = Modifier.size(14.dp)
                     )
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Spacer(modifier = Modifier.width(3.dp))
                     Text(
                         text = "Watch",
                         fontWeight = FontWeight.ExtraBold,
-                        fontSize = 12.sp
+                        fontSize = 11.5.sp,
+                        maxLines = 1,
+                        softWrap = false
                     )
                 }
             }

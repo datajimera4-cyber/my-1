@@ -1928,6 +1928,10 @@ private fun AdminPostsTabContent(
     onTogglePinPost: (String) -> Unit,
     onDeletePost: (String) -> Unit
 ) {
+    var pushTitleInput by remember { mutableStateOf("") }
+    var pushMessageInput by remember { mutableStateOf("") }
+    var pushSuccessStatus by remember { mutableStateOf<String?>(null) }
+
     var titleInput by remember { mutableStateOf("") }
     var messageInput by remember { mutableStateOf("") }
     var selectedTargetTab by remember { mutableStateOf("HOME") }
@@ -1955,6 +1959,115 @@ private fun AdminPostsTabContent(
         contentPadding = PaddingValues(vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        // Dedicated Push Notification Only Card (No Banner / No Post in App)
+        item {
+            Card(
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = Slate800),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.5.dp, AmberPrimary.copy(alpha = 0.55f), RoundedCornerShape(18.dp))
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Notifications,
+                            contentDescription = null,
+                            tint = AmberPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Send User Push Notification Only",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White
+                        )
+                    }
+                    Text(
+                        text = "Send a direct push notification to users without adding any banner or post inside the app.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White.copy(alpha = 0.72f)
+                    )
+
+                    OutlinedTextField(
+                        value = pushTitleInput,
+                        onValueChange = {
+                            pushTitleInput = it
+                            pushSuccessStatus = null
+                        },
+                        label = { Text("Notification Title *") },
+                        placeholder = { Text("e.g. 🎉 Bonus Tasks Are Live Now!") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("admin_push_only_title_input")
+                    )
+
+                    OutlinedTextField(
+                        value = pushMessageInput,
+                        onValueChange = {
+                            pushMessageInput = it
+                            pushSuccessStatus = null
+                        },
+                        label = { Text("Notification Message *") },
+                        placeholder = { Text("Enter message for user push notification...") },
+                        minLines = 2,
+                        maxLines = 3,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("admin_push_only_message_input")
+                    )
+
+                    if (!pushSuccessStatus.isNullOrBlank()) {
+                        Text(
+                            text = pushSuccessStatus!!,
+                            color = SuccessGreen,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Button(
+                        onClick = {
+                            if (pushTitleInput.isNotBlank()) {
+                                onPublishPost(
+                                    pushTitleInput.trim(),
+                                    pushMessageInput.trim(),
+                                    "NONE",
+                                    "PUSH_ONLY",
+                                    "",
+                                    "",
+                                    false
+                                )
+                                pushTitleInput = ""
+                                pushMessageInput = ""
+                                pushSuccessStatus = "✅ Push notification sent to all users!"
+                            }
+                        },
+                        enabled = pushTitleInput.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(46.dp)
+                            .testTag("admin_send_push_only_button")
+                    ) {
+                        Icon(Icons.Default.Notifications, contentDescription = null, tint = Color.Black)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Send Push Notification Only",
+                            color = Color.Black,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                }
+            }
+        }
+
         item {
             Card(
                 shape = RoundedCornerShape(18.dp),

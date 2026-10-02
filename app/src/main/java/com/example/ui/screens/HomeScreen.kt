@@ -44,6 +44,8 @@ import coil.compose.AsyncImage
 import com.example.R
 import com.example.data.SessionState
 import com.example.data.VideoTaskItem
+import com.example.data.calculateCoinsForDuration
+import com.example.data.getEffectiveDurationTiers
 import com.example.service.YouTubeLiveSearchService
 import com.example.ui.components.ActiveWatchTimerBanner
 import com.example.ui.components.AdminPostsBannerSection
@@ -513,7 +515,12 @@ fun HomeScreen(
                                 if (!accOk || !overOk) {
                                     showPermissionGateDialog = true
                                 } else {
-                                    taskForTierDialog = task
+                                    val effectiveTiers = getEffectiveDurationTiers(task)
+                                    if (!task.isLive && task.selectedDurationSeconds > 0 && effectiveTiers.size == 1) {
+                                        viewModel.startTaskWithTier(task, effectiveTiers.first(), context)
+                                    } else {
+                                        taskForTierDialog = task
+                                    }
                                 }
                             }
                         )
@@ -758,7 +765,11 @@ private fun FeaturedHomeTaskCard(
                             Spacer(modifier = Modifier.width(4.dp))
                         }
                         Text(
-                            text = if (task.isLive) "LIVE" else TimeFormatter.formatSecondsToMmSs(task.durationSeconds),
+                            text = when {
+                                task.isLive -> "LIVE"
+                                task.selectedDurationSeconds > 0 -> TimeFormatter.formatSecondsToMmSs(task.selectedDurationSeconds)
+                                else -> TimeFormatter.formatSecondsToMmSs(task.durationSeconds)
+                            },
                             color = Color.White,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
@@ -767,6 +778,12 @@ private fun FeaturedHomeTaskCard(
                 }
 
                 // Top-right Coin Reward Badge (Coins only)
+                val coinBadgeLabel = remember(task.isLive, task.durationSeconds, task.selectedDurationSeconds) {
+                    val tiers = getEffectiveDurationTiers(task)
+                    val minC = tiers.firstOrNull()?.coins ?: 10
+                    val maxC = tiers.lastOrNull()?.coins ?: calculateCoinsForDuration(task.durationSeconds)
+                    if (minC == maxC) "+$maxC Coins" else "+$minC to +$maxC Coins"
+                }
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
@@ -775,7 +792,7 @@ private fun FeaturedHomeTaskCard(
                         .padding(horizontal = 10.dp, vertical = 5.dp)
                 ) {
                     Text(
-                        text = "+10 to +110 Coins",
+                        text = coinBadgeLabel,
                         color = Color.Black,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.ExtraBold

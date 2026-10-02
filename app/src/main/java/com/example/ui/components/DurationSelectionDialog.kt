@@ -59,6 +59,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.data.WATCH_DURATION_TIERS
 import com.example.data.WatchDurationTier
+import com.example.data.calculateCoinsForDuration
 import com.example.ui.theme.AmberDark
 import com.example.ui.theme.AmberPrimary
 import com.example.ui.theme.SuccessGreen
@@ -71,25 +72,45 @@ fun DurationSelectionDialog(
     thumbnailUrl: String,
     durationSeconds: Int,
     isLive: Boolean,
-    initialTierSeconds: Int = 180,
+    initialTierSeconds: Int = 0,
     onDismiss: () -> Unit,
     onConfirmSelection: (tier: WatchDurationTier) -> Unit
 ) {
     val context = LocalContext.current
 
-    // Compute available tiers based on video duration
-    val availableTiers = remember(durationSeconds, isLive) {
-        if (isLive || durationSeconds <= 0) {
+    // Compute available tiers based on Auto (initialTierSeconds <= 0 -> full video length) or Admin Goal
+    val availableTiers = remember(durationSeconds, isLive, initialTierSeconds) {
+        if (isLive || (durationSeconds <= 0 && initialTierSeconds <= 0)) {
             WATCH_DURATION_TIERS
         } else {
-            val filtered = WATCH_DURATION_TIERS.filter { it.seconds <= durationSeconds }
-            if (filtered.isEmpty()) listOf(WATCH_DURATION_TIERS.first()) else filtered
+            val effectiveMax = if (initialTierSeconds > 0) initialTierSeconds else durationSeconds.coerceAtLeast(180)
+            val totalMins = (effectiveMax / 60).coerceAtLeast(3)
+            val filtered = WATCH_DURATION_TIERS.filter { it.seconds <= effectiveMax }.toMutableList()
+            if (filtered.isEmpty()) {
+                filtered.add(WATCH_DURATION_TIERS.first())
+            }
+            if (filtered.none { it.minutes == totalMins }) {
+                val fullSecs = totalMins * 60
+                filtered.add(
+                    WatchDurationTier(
+                        minutes = totalMins,
+                        seconds = fullSecs,
+                        coins = calculateCoinsForDuration(fullSecs),
+                        label = "$totalMins Min (Full Video)"
+                    )
+                )
+            }
+            filtered.sortedBy { it.seconds }
         }
     }
 
-    var selectedTier by remember {
+    var selectedTier by remember(availableTiers, initialTierSeconds) {
         mutableStateOf(
-            availableTiers.firstOrNull { it.seconds == initialTierSeconds } ?: availableTiers.first()
+            if (initialTierSeconds > 0) {
+                availableTiers.firstOrNull { it.seconds == initialTierSeconds } ?: availableTiers.last()
+            } else {
+                availableTiers.last()
+            }
         )
     }
 

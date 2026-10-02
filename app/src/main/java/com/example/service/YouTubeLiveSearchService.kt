@@ -142,6 +142,21 @@ class YouTubeLiveSearchService : AccessibilityService() {
         @Volatile
         private var lastSearchActionTimestamp: Long = 0L
 
+        @Volatile
+        var isSearchOverlayActive: Boolean = false
+            private set
+
+        @Volatile
+        var searchOverlayStatusText: String = "Searching & opening video..."
+            private set
+
+        @Volatile
+        private var searchOverlayStartedAtMillis: Long = 0L
+
+        fun dismissSearchOverlay() {
+            isSearchOverlayActive = false
+        }
+
         private val searchDriverHandler = android.os.Handler(android.os.Looper.getMainLooper())
         private val searchDriverRunnable = object : Runnable {
             override fun run() {
@@ -221,6 +236,9 @@ class YouTubeLiveSearchService : AccessibilityService() {
             isVideoExplicitlyPaused = false
             resetMonitoringCounters()
             currentPhase = LiveSearchPhase.OPEN_SEARCH_BAR
+            isSearchOverlayActive = true
+            searchOverlayStatusText = "Searching for video on YouTube..."
+            searchOverlayStartedAtMillis = System.currentTimeMillis()
             searchDriverHandler.removeCallbacks(searchDriverRunnable)
             searchDriverHandler.postDelayed(searchDriverRunnable, 500L)
             WatchSessionRepository.addLog("Organic YouTube Search/Browse armed for: \"$title\"", LogType.INFO)
@@ -228,6 +246,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
 
         fun disarm() {
             searchDriverHandler.removeCallbacks(searchDriverRunnable)
+            isSearchOverlayActive = false
             targetSearchTitle = null
             targetSearchChannel = null
             targetChannelHandle = null
@@ -1405,6 +1424,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
                             hasClickedTarget = true
                             lastClickTime = System.currentTimeMillis()
                             lockedWatchPageTitle = targetTitle
+                            searchOverlayStatusText = "Video found! Starting playback..."
                             WatchSessionRepository.onMediaMetadataChanged(targetTitle, targetChannel)
                             currentPhase = LiveSearchPhase.COMPLETED
                             searchDriverHandler.removeCallbacks(searchDriverRunnable)
@@ -1413,11 +1433,16 @@ class YouTubeLiveSearchService : AccessibilityService() {
                                 LogType.SUCCESS
                             )
 
-                            // Verify at 1400ms ONLY if YouTube is still stuck on the Search Results list
+                            // Verify at 1100ms ONLY if YouTube is still stuck on the Search Results list, and hide loading overlay once playing
                             val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
                             mainHandler.postDelayed({
                                 ensureWatchPlayerExpandedAfterClick(tapX, tapY, 1)
-                            }, 1400L)
+                            }, 1100L)
+                            mainHandler.postDelayed({
+                                if (hasClickedTarget) {
+                                    isSearchOverlayActive = false
+                                }
+                            }, 1900L)
 
                             return true
                         }
@@ -1658,10 +1683,15 @@ class YouTubeLiveSearchService : AccessibilityService() {
                 if (!title.isNullOrBlank()) {
                     hasClickedTarget = false
                     currentPhase = LiveSearchPhase.FIND_AND_CLICK_VIDEO
+                    searchOverlayStatusText = "Opening target video..."
                     findAndClickVideoNode(root, title, targetSearchChannel, requireFeedCardMetadata = false)
                 }
+            } else {
+                isSearchOverlayActive = false
             }
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+            isSearchOverlayActive = false
+        }
     }
 
     private fun getStatusBarHeight(): Int {

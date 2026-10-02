@@ -835,7 +835,7 @@ class DataStoreManager(private val context: Context) {
         return found
     }
 
-    suspend fun rejectPayout(requestId: String, reason: String = "Declined by Admin"): Boolean {
+    suspend fun rejectPayout(requestId: String, reason: String = "Declined"): Boolean {
         val now = System.currentTimeMillis()
         lastLocalMutationMillis = now
         var found = false
@@ -844,14 +844,15 @@ class DataStoreManager(private val context: Context) {
             val index = payoutList.indexOfFirst { it.id == requestId }
             if (index != -1) {
                 val req = payoutList[index]
+                val cleanReason = reason.replace("by Admin", "", ignoreCase = true).trim().ifBlank { "Declined" }
                 payoutList[index] = req.copy(
                     status = PayoutStatus.REJECTED,
                     processedAtMillis = now,
-                    adminNote = reason
+                    adminNote = cleanReason
                 )
                 prefs[KEY_PAYOUT_REQUESTS] = serializePayoutRequestsJson(payoutList)
 
-                val refundTitle = "❌ Payout REJECTED (Refunded +${req.amountCoins} Coins): $reason"
+                val refundTitle = "❌ Payout Declined (Refunded +${req.amountCoins} Coins)"
 
                 // Refund coins to the user in KEY_USERS
                 val users = parseUsersJson(prefs[KEY_USERS] ?: "[]").toMutableList()
@@ -1135,7 +1136,7 @@ class DataStoreManager(private val context: Context) {
                         0,
                         WalletTransaction(
                             id = "admin_coin_${now}",
-                            title = "👑 Admin Balance Update ($sign Coins)",
+                            title = "🪙 Wallet Balance Updated ($sign Coins)",
                             coins = diff,
                             timestampMillis = now
                         )
@@ -1376,7 +1377,7 @@ class DataStoreManager(private val context: Context) {
                 isLive = false,
                 isCompleted = false,
                 rewardCoins = 10,
-                selectedDurationSeconds = 180
+                selectedDurationSeconds = 0
             ),
             VideoTaskItem(
                 id = "default_android15",
@@ -1388,7 +1389,7 @@ class DataStoreManager(private val context: Context) {
                 isLive = false,
                 isCompleted = false,
                 rewardCoins = 35,
-                selectedDurationSeconds = 600
+                selectedDurationSeconds = 0
             ),
             VideoTaskItem(
                 id = "default_kotlin_course",
@@ -1400,7 +1401,7 @@ class DataStoreManager(private val context: Context) {
                 isLive = false,
                 isCompleted = false,
                 rewardCoins = 110,
-                selectedDurationSeconds = 1800
+                selectedDurationSeconds = 0
             ),
             VideoTaskItem(
                 id = "default_lofi_live",
@@ -1412,7 +1413,7 @@ class DataStoreManager(private val context: Context) {
                 isLive = true,
                 isCompleted = false,
                 rewardCoins = 110,
-                selectedDurationSeconds = 1800
+                selectedDurationSeconds = 0
             )
         )
     }
@@ -1430,15 +1431,13 @@ class DataStoreManager(private val context: Context) {
                 val rawCompleted = obj.optBoolean("isCompleted", false)
                 val effectiveCompleted = if (lockExpired || effectiveLockedUntil == 0L) false else rawCompleted
                 val effectiveWatched = if (lockExpired) 0L else obj.optLong("watchedMillis", 0L)
-                val selSec = obj.optInt("selectedDurationSeconds", 180)
+                val selSec = obj.optInt("selectedDurationSeconds", 0)
+                val durSec = obj.optInt("durationSeconds", 600)
                 val rawCoins = obj.optInt("rewardCoins", 10)
-                val tierCoins = WATCH_DURATION_TIERS.find { it.seconds == selSec }?.coins ?: when (rawCoins) {
-                    5, 50 -> 10
-                    10, 85 -> if (selSec == 300) 17 else 10
-                    20, 175 -> 35
-                    45, 360 -> 72
-                    80, 550 -> 110
-                    else -> rawCoins
+                val tierCoins = if (selSec > 0) {
+                    WATCH_DURATION_TIERS.find { it.seconds == selSec }?.coins ?: calculateCoinsForDuration(selSec)
+                } else {
+                    if (rawCoins > 0) rawCoins else calculateCoinsForDuration(durSec)
                 }
 
                 list.add(
@@ -1745,7 +1744,7 @@ class DataStoreManager(private val context: Context) {
                         isCompleted = local.isCompleted,
                         watchedMillis = local.watchedMillis,
                         lockedUntilMillis = local.lockedUntilMillis,
-                        selectedDurationSeconds = local.selectedDurationSeconds,
+                        selectedDurationSeconds = remote.selectedDurationSeconds,
                         maxCompletions = if (remote.maxCompletions > 0) remote.maxCompletions else local.maxCompletions,
                         completedCount = maxOf(remote.completedCount, local.completedCount)
                     )

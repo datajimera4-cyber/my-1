@@ -312,14 +312,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         if (newest.id.startsWith("ref_withdraw_bonus_") || newest.title.contains("Referral Withdraw Bonus")) {
                             com.example.service.NotificationChannels.sendAdminUpdateNotification(
                                 context = getApplication(),
-                                title = "🤝 Referral Bonus Earned ($sign Coins)!",
+                                title = "🤝 Referral Bonus ($sign Coins)",
                                 body = newest.title
                             )
                         } else {
                             com.example.service.NotificationChannels.sendAdminUpdateNotification(
                                 context = getApplication(),
-                                title = "👑 Wallet Updated by Admin ($sign Coins)",
-                                body = "Your Kingo King wallet balance has been updated in real time!"
+                                title = "🪙 Wallet Updated ($sign Coins)",
+                                body = "Your wallet balance has been updated."
                             )
                         }
                     }
@@ -345,22 +345,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                     com.example.data.PayoutStatus.APPROVED -> {
                                         com.example.service.NotificationChannels.sendAdminUpdateNotification(
                                             context = getApplication(),
-                                            title = "✅ Withdrawal Approved ($safeCoins Coins = ₹$inrStr)",
-                                            body = "Admin approved your ₹$inrStr withdrawal via ${req.method}. Payment will be marked Done once transferred!"
+                                            title = "✅ Withdrawal Approved (₹$inrStr)",
+                                            body = "Your ₹$inrStr payout via ${req.method} is approved and processing."
                                         )
                                     }
                                     com.example.data.PayoutStatus.COMPLETED -> {
                                         com.example.service.NotificationChannels.sendAdminUpdateNotification(
                                             context = getApplication(),
-                                            title = "🎉 Payment Done! ₹$inrStr Sent",
-                                            body = "Your withdrawal of $safeCoins Coins (₹$inrStr) has been paid to ${req.method} (${req.destination})."
+                                            title = "🎉 Payment Sent! ₹$inrStr",
+                                            body = "₹$inrStr ($safeCoins Coins) has been sent to ${req.method} (${req.destination})."
                                         )
                                     }
                                     com.example.data.PayoutStatus.REJECTED -> {
                                         com.example.service.NotificationChannels.sendAdminUpdateNotification(
                                             context = getApplication(),
-                                            title = "❌ Withdrawal Declined (+$safeCoins Coins Refunded)",
-                                            body = "${req.adminNote ?: "Declined by Admin"} • Coins returned to your wallet."
+                                            title = "❌ Withdrawal Refunded (+$safeCoins Coins)",
+                                            body = "$safeCoins Coins have been returned to your wallet."
                                         )
                                     }
                                     else -> {}
@@ -386,8 +386,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         val newest = newlyAdded.first()
                         com.example.service.NotificationChannels.sendAdminUpdateNotification(
                             context = getApplication(),
-                            title = "🎬 New Watch Task Added! (+${newest.rewardCoins} Coins)",
-                            body = "\"${newest.title}\" by ${newest.channelName} is now live. Watch & earn coins now!"
+                            title = "🎬 New Video Task (+${newest.rewardCoins} Coins)",
+                            body = newest.title
                         )
                     }
                 }
@@ -406,15 +406,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (newlyAdded.isNotEmpty()) {
                         dataStoreManager.markItemsNotified(newlyAdded.map { it.id }.toSet())
                         val newest = newlyAdded.first()
-                        val prefix = when (newest.postType.uppercase()) {
-                            "ALERT" -> "🚨 Urgent Admin Alert"
-                            "BANNER" -> "📢 New Offer Banner"
-                            else -> "📌 New Admin Post"
-                        }
                         com.example.service.NotificationChannels.sendAdminUpdateNotification(
                             context = getApplication(),
-                            title = "$prefix: ${newest.title}",
-                            body = newest.message.ifBlank { "Tap to view the latest update in ${newest.targetTab} tab!" }
+                            title = newest.title.ifBlank { "🔔 New Update" },
+                            body = newest.message.ifBlank { "Tap to open the app." }
                         )
                     }
                 }
@@ -449,7 +444,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         val latest = newReplies.last()
                         com.example.service.NotificationChannels.sendAdminUpdateNotification(
                             context = getApplication(),
-                            title = "💬 Admin Support Reply",
+                            title = "💬 Support Reply",
                             body = latest.message
                         )
                     }
@@ -1497,9 +1492,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 com.example.service.NotificationChannels.sendAdminUpdateNotification(
                     context = getApplication(),
                     title = "⏳ Withdrawal Request Submitted (₹$formatted)",
-                    body = "Your payout request of $coins Coins (₹$formatted INR) via $method has been sent to Admin for approval."
+                    body = "Your payout request of $coins Coins (₹$formatted INR) via $method is being processed."
                 )
-                onComplete(true, "Payout request for $coins Coins (₹$formatted INR) via $method submitted! Your balance has been deducted and sent to the Admin Panel for approval.")
+                onComplete(true, "Payout request for $coins Coins (₹$formatted INR) via $method submitted successfully!")
                 val url = cloudServerUrl.value
                 if (url.isNotBlank()) {
                     launch {

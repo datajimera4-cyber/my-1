@@ -44,7 +44,8 @@ fun AdminPostsBannerSection(
     val context = LocalContext.current
     val effectiveTab = if (currentTab.isNotBlank()) currentTab else targetTab
     val visiblePosts = posts.filter { post ->
-        !dismissedIds.contains(post.id) &&
+        !post.postType.equals("PUSH_ONLY", ignoreCase = true) &&
+                !post.targetTab.equals("NONE", ignoreCase = true) &&
                 (post.targetTab.equals(effectiveTab, ignoreCase = true) || post.targetTab.equals("ALL", ignoreCase = true))
     }
 
@@ -100,54 +101,29 @@ fun AdminPostsBannerSection(
                                     .fillMaxWidth()
                                     .heightIn(min = 110.dp, max = 170.dp)
                                     .clip(RoundedCornerShape(12.dp)),
-                                contentScale = ContentScale.Crop
+                                    contentScale = ContentScale.Crop
                             )
                             Spacer(modifier = Modifier.height(10.dp))
                         }
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.Top,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                if (post.title.isNotBlank()) {
-                                    Text(
-                                        text = post.title,
-                                        style = MaterialTheme.typography.titleSmall,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = Color.White,
-                                        fontSize = 14.sp
-                                    )
-                                }
-                                if (post.message.isNotBlank()) {
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = post.message,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = Color.White.copy(alpha = 0.85f),
-                                        fontSize = 12.sp,
-                                        lineHeight = 17.sp
-                                    )
-                                }
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            if (post.title.isNotBlank()) {
+                                Text(
+                                    text = post.title,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color.White,
+                                    fontSize = 14.sp
+                                )
                             }
-
-                            Spacer(modifier = Modifier.width(8.dp))
-
-                            Box(
-                                modifier = Modifier
-                                    .size(26.dp)
-                                    .clip(CircleShape)
-                                    .background(Color.White.copy(alpha = 0.1f))
-                                    .clickable { onDismissPost(post.id) }
-                                    .testTag("dismiss_post_${post.id}"),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Dismiss",
-                                    tint = Color.White.copy(alpha = 0.75f),
-                                    modifier = Modifier.size(14.dp)
+                            if (post.message.isNotBlank()) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = post.message,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.White.copy(alpha = 0.85f),
+                                    fontSize = 12.sp,
+                                    lineHeight = 17.sp
                                 )
                             }
                         }

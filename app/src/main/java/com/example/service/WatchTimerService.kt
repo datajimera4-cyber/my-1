@@ -145,6 +145,13 @@ class WatchTimerService : Service() {
                 registerRepositoryCallbacks()
                 completionJob?.cancel()
                 startForegroundWithNotification()
+                if (YouTubeLiveSearchService.isSearchOverlayActive) {
+                    floatingOverlayManager.showOrUpdateSearchLoadingOverlay(
+                        title = WatchSessionRepository.targetTaskTitle.value ?: "Video Task",
+                        channel = WatchSessionRepository.targetTaskAuthor.value ?: "YouTube",
+                        statusText = YouTubeLiveSearchService.searchOverlayStatusText
+                    )
+                }
                 startTimerLoop()
                 observeSessionState()
             }
@@ -277,18 +284,33 @@ class WatchTimerService : Service() {
                 val shouldShowOverlay = sessionActive && isYtForeground && !isAppForeground
 
                 if (shouldShowOverlay) {
-                    if (!floatingOverlayManager.isOverlayAttached()) {
-                        floatingOverlayManager.showOverlay()
+                    val searchOverlayStillActive = YouTubeLiveSearchService.isSearchOverlayActive &&
+                            elapsedSinceLaunch < 20_000L
+                    if (searchOverlayStillActive) {
+                        floatingOverlayManager.showOrUpdateSearchLoadingOverlay(
+                            title = WatchSessionRepository.targetTaskTitle.value ?: "Video Task",
+                            channel = WatchSessionRepository.targetTaskAuthor.value ?: "YouTube",
+                            statusText = YouTubeLiveSearchService.searchOverlayStatusText
+                        )
+                    } else {
+                        YouTubeLiveSearchService.dismissSearchOverlay()
+                        floatingOverlayManager.hideSearchLoadingOverlay()
+                        if (!floatingOverlayManager.isOverlayAttached()) {
+                            floatingOverlayManager.showOverlay()
+                        }
+                        floatingOverlayManager.updateProgress(
+                            watchedMillis = watchedMillis,
+                            requiredMillis = requiredMillis,
+                            milestone = WatchSessionRepository.currentMilestoneTier.value,
+                            isPaused = !isPlaying
+                        )
                     }
-                    floatingOverlayManager.updateProgress(
-                        watchedMillis = watchedMillis,
-                        requiredMillis = requiredMillis,
-                        milestone = WatchSessionRepository.currentMilestoneTier.value,
-                        isPaused = !isPlaying
-                    )
                 } else {
                     // When user returns to our app, minimizes YouTube, or closes YouTube:
                     // Floating overlay disappears immediately!
+                    if (elapsedSinceLaunch > 2000L) {
+                        floatingOverlayManager.hideSearchLoadingOverlay()
+                    }
                     if (floatingOverlayManager.isOverlayAttached()) {
                         floatingOverlayManager.hideOverlay()
                     }
