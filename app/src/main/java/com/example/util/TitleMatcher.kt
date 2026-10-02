@@ -104,6 +104,12 @@ object TitleMatcher {
         if (rawCardText.isNullOrBlank()) return ""
         var text = rawCardText.replace("\n", " ").replace(Regex("\\s+"), " ").trim()
 
+        // 0. Strip leading duration badges or playback prefixes (e.g. "10:25 " or "3 minutes, 12 seconds " or "Play video ")
+        text = text.replace(
+            Regex("^(?:(?:\\d{1,2}:\\d{2}(?::\\d{2})?|now\\s+playing|play\\s+video|shorts)\\s*[,\\-•·|]?\\s*)+", RegexOption.IGNORE_CASE),
+            ""
+        ).trim()
+
         // 1. Cut everything from "Go to channel" / "चैनल पर जाएं" onwards
         val goToChannelIdx = Regex("\\b(?:go to channel|चैनल पर जाएं)\\b", RegexOption.IGNORE_CASE).find(text)?.range?.first
         if (goToChannelIdx != null && goToChannelIdx > 0) {
@@ -134,23 +140,29 @@ object TitleMatcher {
             ""
         ).trim()
 
-        // 6. If channelName is appended after a separator (" - ChannelName" or " • ChannelName"), strip it
+        // 6. If channelName is appended right at the end after a separator (" - ChannelName" or " • ChannelName"), strip only the trailing suffix
         val cleanChannel = channelName?.trim().orEmpty()
         if (cleanChannel.length >= 2 &&
             !cleanChannel.equals("YouTube Creator", ignoreCase = true) &&
             !cleanChannel.equals("YouTube Channel", ignoreCase = true)
         ) {
             val escapedChannel = Regex.escape(cleanChannel)
-            text = text.replace(
-                Regex("(?:[,\\-•·|])\\s*$escapedChannel\\b.*$", RegexOption.IGNORE_CASE),
+            val strippedSuffix = text.replace(
+                Regex("(?:[,\\-•·|])\\s*$escapedChannel\\s*$", RegexOption.IGNORE_CASE),
                 ""
             ).trim()
+            if (strippedSuffix.length >= 3) {
+                text = strippedSuffix
+            }
         }
 
         // 7. Strip any @handle token
         val cleanHandle = channelHandle?.removePrefix("@")?.trim().orEmpty()
         if (cleanHandle.length >= 2) {
-            text = text.replace(Regex("@?${Regex.escape(cleanHandle)}\\b", RegexOption.IGNORE_CASE), "").trim()
+            val strippedHandle = text.replace(Regex("@?${Regex.escape(cleanHandle)}\\b", RegexOption.IGNORE_CASE), "").trim()
+            if (strippedHandle.length >= 3) {
+                text = strippedHandle
+            }
         }
 
         return text.trim(' ', '-', '•', '·', '|', ',')
@@ -158,7 +170,8 @@ object TitleMatcher {
 
     /**
      * Strictly verifies that a candidate video card title in YouTube Search / Channel Videos
-     * is the EXACT target video, preventing clicking other videos from the same channel.
+     * matches the target video, while handling 2-line truncated YouTube card titles ("..."),
+     * emojis, pipes, hashtags, and multilingual (Hindi/English/Hinglish) titles.
      */
     fun isStrictTargetVideoMatch(
         rawCandidateText: String?,
@@ -170,8 +183,11 @@ object TitleMatcher {
         if (cleanTarget.isEmpty()) return false
 
         val extractedCardTitle = extractCardVideoTitleOnly(rawCandidateText, targetChannel, targetHandle)
+        val extractedTargetTitle = extractCardVideoTitleOnly(cleanTarget, targetChannel, targetHandle).ifBlank { cleanTarget }
+
         val normCard = normalize(extractedCardTitle)
-        val normTarget = normalize(cleanTarget)
+        val normTarget = normalize(extractedTargetTitle).ifBlank { normalize(cleanTarget) }
+        val normRawCandidate = normalize(rawCandidateText)
         if (normCard.isEmpty() || normTarget.isEmpty()) return false
 
         val normChannel = normalize(targetChannel)
@@ -185,30 +201,56 @@ object TitleMatcher {
             return false
         }
 
+        // Reject if candidate is purely view count / duration / subscriber metadata
+        if (Regex("^(?:\\d+\\s*(?:views|view|subscribers|subscriber|minutes|minute|seconds|second|hours|hour|days|day|ago)|no\\s+views)+$").matches(normCard)) {
+            return false
+        }
+
         val compactCard = normCard.replace(" ", "")
         val compactTarget = normTarget.replace(" ", "")
+        val compactRaw = normRawCandidate.replace(" ", "")
 
         // 1. Exact or full-title containment match
         if (normCard == normTarget || compactCard == compactTarget) {
             return true
         }
-        if (normTarget.length >= 5 && (normCard.contains(normTarget) || compactCard.contains(compactTarget))) {
+        if (normTarget.length >= 4 && (
+                normCard.contains(normTarget) ||
+                compactCard.contains(compactTarget) ||
+                normRawCandidate.contains(normTarget) ||
+                compactRaw.contains(compactTarget)
+            )
+        ) {
+            return true
+        }
+        // When YouTube truncates the card title with "...", normCard is a prefix/substring of normTarget
+        if (normCard.length >= 10 && (normTarget.contains(normCard) || compactTarget.contains(compactCard))) {
             return true
         }
 
-        // 2. Truncated long title prefix match (when YouTube truncates a long 2-line title with "...")
-        if (normTarget.length >= 16 && normCard.length >= 14) {
-            if (normCard.startsWith(normTarget.take(16)) || normTarget.startsWith(normCard.take(16))) {
+        // 2. Truncated long title prefix / core phrase match (when YouTube truncates a 2-line title with "...")
+        if (normTarget.length >= 12 && normCard.length >= 10) {
+            val prefixLen = minOf(14, normTarget.length, normCard.length)
+            if (prefixLen >= 10 && (
+                    normCard.contains(normTarget.take(prefixLen)) ||
+                    normTarget.contains(normCard.take(prefixLen)) ||
+                    normRawCandidate.contains(normTarget.take(prefixLen))
+                )
+            ) {
                 return true
             }
-            if (compactCard.length >= 14 && compactTarget.length >= 14 &&
-                (compactCard.startsWith(compactTarget.take(14)) || compactTarget.startsWith(compactCard.take(14)))
+            val compactPrefixLen = minOf(11, compactTarget.length, compactCard.length)
+            if (compactPrefixLen >= 9 && (
+                    compactCard.contains(compactTarget.take(compactPrefixLen)) ||
+                    compactTarget.contains(compactCard.take(compactPrefixLen)) ||
+                    compactRaw.contains(compactTarget.take(compactPrefixLen))
+                )
             ) {
                 return true
             }
         }
 
-        // 3. Strict distinctive word matching on the extracted video title ONLY (excluding channel words)
+        // 3. Distinctive word matching on the video title (supporting both full titles and 2-line truncated card titles)
         val stopWords = setOf(
             "the", "and", "official", "video", "music", "audio", "with",
             "from", "feat", "song", "lyrics", "full", "remaster", "remastered",
@@ -226,19 +268,37 @@ object TitleMatcher {
 
         if (distinctiveWords.isEmpty()) return false
 
-        val cardWords = normCard.split(" ").map { it.trim() }.filter { it.isNotEmpty() }
+        val cardWords = normCard.split(" ").map { it.trim() }.filter { it.length >= 2 && !stopWords.contains(it) }
+        val nonChannelCardWords = cardWords.filter { !channelWords.contains(it) && it != normHandle }.ifEmpty { cardWords }
         val cardWordSet = cardWords.toSet()
 
-        val matchedCount = distinctiveWords.count { targetWord ->
-            cardWordSet.contains(targetWord) ||
-                    (targetWord.length >= 5 && cardWords.any { cw -> cw.startsWith(targetWord) || (cw.length >= 5 && targetWord.startsWith(cw)) })
+        fun wordMatches(w1: String, w2: String): Boolean {
+            if (w1 == w2) return true
+            if (w1.length >= 4 && w2.length >= 4 && (w1.startsWith(w2) || w2.startsWith(w1))) return true
+            return false
         }
 
+        val matchedTargetCount = distinctiveWords.count { targetWord ->
+            cardWordSet.contains(targetWord) || cardWords.any { cw -> wordMatches(targetWord, cw) }
+        }
+
+        val matchedCardCount = nonChannelCardWords.count { cardWord ->
+            distinctiveWords.any { tw -> wordMatches(cardWord, tw) }
+        }
+
+        // Check if the card is a truncated prefix of the target title (where >= 75% of the visible card words match target words)
+        val isTruncatedCardMatch = nonChannelCardWords.size >= 2 &&
+                matchedTargetCount >= 2 &&
+                (matchedCardCount.toFloat() / nonChannelCardWords.size.toFloat()) >= 0.75f &&
+                nonChannelCardWords.first().let { firstCw -> distinctiveWords.take(2).any { tw -> wordMatches(firstCw, tw) } }
+
+        if (isTruncatedCardMatch) return true
+
         return when (distinctiveWords.size) {
-            1 -> matchedCount == 1 && (normCard == normTarget || normCard.startsWith(distinctiveWords[0]))
-            2 -> matchedCount == 2 // BOTH words must match (100%)
-            3 -> matchedCount == 3 || (matchedCount == 2 && normCard.startsWith(normTarget.take(6)))
-            else -> matchedCount >= 3 && (matchedCount.toFloat() / distinctiveWords.size.toFloat()) >= 0.75f
+            1 -> matchedTargetCount == 1
+            2 -> matchedTargetCount == 2 || (matchedTargetCount == 1 && distinctiveWords[0].length >= 6 && normCard.contains(distinctiveWords[0]))
+            3 -> matchedTargetCount >= 2 && (matchedTargetCount == 3 || (matchedTargetCount.toFloat() / 3f) >= 0.66f)
+            else -> matchedTargetCount >= 2 && (matchedTargetCount.toFloat() / distinctiveWords.size.toFloat()) >= 0.58f
         }
     }
 

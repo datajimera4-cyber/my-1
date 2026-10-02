@@ -1984,15 +1984,47 @@ private fun GoogleDriveServerTabContent(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                Button(
-                    onClick = { onSaveAppDownloadUrl(appDownloadInput.trim()) },
-                    colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Default.Check, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Save App Download Link", color = Color.Black, fontWeight = FontWeight.Bold)
+                    Button(
+                        onClick = {
+                            val cleanLink = com.example.data.DataStoreManager.normalizeAppDownloadUrl(appDownloadInput)
+                            appDownloadInput = cleanLink
+                            onSaveAppDownloadUrl(cleanLink)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Check, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Save App Link", color = Color.Black, fontWeight = FontWeight.Bold)
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            val cleanLink = com.example.data.DataStoreManager.normalizeAppDownloadUrl(appDownloadInput)
+                            appDownloadInput = cleanLink
+                            try {
+                                val intent = android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse(cleanLink)
+                                ).apply {
+                                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Could not open link: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.Sync, contentDescription = "Test App Link", modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Test Link", fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }

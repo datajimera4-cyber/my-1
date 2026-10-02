@@ -348,7 +348,7 @@ object CloudDriveServerManager {
                     }
 
                     var remoteConfiguredUpdateUrl: String? = null
-                    var remoteConfiguredAppDownloadUrl: String? = null
+                    var remoteConfiguredAppDownloadUrl: String? = adminStateObj?.optString("appDownloadUrl", "")?.trim()?.takeIf { it.isNotBlank() }
                     var remoteSharedReferralCode: String? = null
                     if (remotePayoutsArr != null) {
                         val parsedPayouts = mutableListOf<PayoutRequest>()
@@ -360,7 +360,10 @@ object CloudDriveServerManager {
                             } else if (id == "cfg_update_folder") {
                                 remoteConfiguredUpdateUrl = obj.optString("adminNote", "").trim()
                             } else if (id == "cfg_app_download_url") {
-                                remoteConfiguredAppDownloadUrl = obj.optString("adminNote", "").trim()
+                                val rawDl = obj.optString("adminNote", "").trim().ifBlank { obj.optString("destination", "").trim() }
+                                if (rawDl.isNotBlank()) {
+                                    remoteConfiguredAppDownloadUrl = rawDl
+                                }
                             } else if (id == "cfg_ref_share") {
                                 val ref = obj.optString("adminNote", "").trim().filter { it.isDigit() }.take(6)
                                 if (ref.length == 6) {
@@ -417,8 +420,13 @@ object CloudDriveServerManager {
                     if (remoteConfiguredUpdateUrl != null && !isAdminRole) {
                         dataStoreManager.setUpdateDriveFolderUrl(remoteConfiguredUpdateUrl)
                     }
-                    if (!remoteConfiguredAppDownloadUrl.isNullOrBlank() && !isAdminRole) {
-                        dataStoreManager.saveAppDownloadUrl(remoteConfiguredAppDownloadUrl!!)
+                    if (!remoteConfiguredAppDownloadUrl.isNullOrBlank() &&
+                        !isAdminRole &&
+                        (System.currentTimeMillis() - DataStoreManager.lastLocalMutationMillis > 30_000L)
+                    ) {
+                        dataStoreManager.saveAppDownloadUrl(
+                            DataStoreManager.normalizeAppDownloadUrl(remoteConfiguredAppDownloadUrl!!)
+                        )
                     }
                     if (!remoteSharedReferralCode.isNullOrBlank()) {
                         val existingPending = dataStoreManager.pendingReferralCodeFlow.first()
@@ -495,14 +503,15 @@ object CloudDriveServerManager {
                 }
 
                 // STEP 2: Push merged state back to Google Drive
+                val effectiveAdminPush = isAdminRole || pushAdminContent
                 val syncPayload = JSONObject().apply {
                     put("action", "sync_all")
-                    put("role", BuildConfig.APP_ROLE)
+                    put("role", if (effectiveAdminPush) "ADMIN" else BuildConfig.APP_ROLE)
 
-                    // Only ADMIN pushes tasks and posts so User App never overwrites Admin updates
+                    // Only ADMIN (or explicit Admin Dashboard action) pushes tasks and posts so User App never overwrites Admin updates
                     var pushedTasksArr: JSONArray? = null
                     var pushedPostsArr: JSONArray? = null
-                    if (isAdminRole && pushAdminContent) {
+                    if (effectiveAdminPush && pushAdminContent) {
                         val tasksArr = JSONArray()
                         for (t in updatedTasks) {
                             tasksArr.put(JSONObject().apply {
@@ -569,7 +578,7 @@ object CloudDriveServerManager {
                     put("users", usersArr)
 
                     val configuredUpdateUrl = dataStoreManager.updateDriveFolderUrlFlow.first()
-                    val configuredAppDownloadUrl = dataStoreManager.appDownloadUrlFlow.first()
+                    val configuredAppDownloadUrl = DataStoreManager.normalizeAppDownloadUrl(dataStoreManager.appDownloadUrlFlow.first())
                     val pendingRefShareCode = dataStoreManager.pendingReferralCodeFlow.first()
                     val payoutsArr = JSONArray()
                     for (p in updatedPayouts) {
@@ -587,9 +596,11 @@ object CloudDriveServerManager {
                             put("adminNote", p.adminNote ?: "")
                         })
                     }
-                    if (isAdminRole && pushAdminContent && pushedTasksArr != null && pushedPostsArr != null) {
+                    if (effectiveAdminPush && pushAdminContent && pushedTasksArr != null && pushedPostsArr != null) {
                         val adminStateJson = JSONObject().apply {
                             put("versionMillis", System.currentTimeMillis())
+                            put("appDownloadUrl", configuredAppDownloadUrl)
+                            put("updateFolderUrl", configuredUpdateUrl)
                             put("tasks", pushedTasksArr)
                             put("posts", pushedPostsArr)
                             put("deletedTaskIds", JSONArray(deletedTaskIds.toList()))
@@ -608,7 +619,7 @@ object CloudDriveServerManager {
                             put("adminNote", adminStateJson)
                         })
                     }
-                    if (configuredUpdateUrl.isNotBlank() || isAdminRole) {
+                    if (effectiveAdminPush && configuredUpdateUrl.isNotBlank()) {
                         payoutsArr.put(JSONObject().apply {
                             put("id", "cfg_update_folder")
                             put("userId", "system")
@@ -622,7 +633,7 @@ object CloudDriveServerManager {
                             put("adminNote", configuredUpdateUrl)
                         })
                     }
-                    if (configuredAppDownloadUrl.isNotBlank() || isAdminRole) {
+                    if (effectiveAdminPush && configuredAppDownloadUrl.isNotBlank()) {
                         payoutsArr.put(JSONObject().apply {
                             put("id", "cfg_app_download_url")
                             put("userId", "system")
@@ -630,7 +641,7 @@ object CloudDriveServerManager {
                             put("amountCoins", 0)
                             put("amountInr", 0.0)
                             put("method", "APP_DOWNLOAD_URL")
-                            put("destination", "DRIVE")
+                            put("destination", configuredAppDownloadUrl)
                             put("status", "PENDING")
                             put("requestedAtMillis", System.currentTimeMillis())
                             put("adminNote", configuredAppDownloadUrl)

@@ -745,12 +745,10 @@ fun MeScreen(
                                         Button(
                                             onClick = {
                                                 viewModel.recordSharedReferralCode(myReferralCode)
-                                                val downloadLine = if (appDownloadUrl.isNotBlank()) {
-                                                    "\n📲 Download Kingo King App:\n$appDownloadUrl\n"
-                                                } else ""
-                                                val shareMsg = "👑 Join Kingo King & earn real rewards!$downloadLine\n" +
-                                                    "🔑 My 6-Digit Refer Key: $myReferralCode\n" +
-                                                    "🔗 Auto-Apply Invite Link: kingoking://refer?code=$myReferralCode\n\n" +
+                                                val cleanDownloadUrl = com.example.data.DataStoreManager.normalizeAppDownloadUrl(appDownloadUrl)
+                                                val shareMsg = "👑 Join Kingo King & earn real rewards!\n\n" +
+                                                    "📲 Download Kingo King App:\n$cleanDownloadUrl\n\n" +
+                                                    "🔑 My 6-Digit Refer Key: $myReferralCode\n\n" +
                                                     "Sign up with my 6-Digit Refer Key ($myReferralCode) to get +50 Invite Coins + 50 First-Time Sign Up Bonus (+100 Coins instant start)!"
                                                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
                                                 clipboard?.setPrimaryClip(ClipData.newPlainText("Kingo Invite", shareMsg))
@@ -778,12 +776,51 @@ fun MeScreen(
                                             )
                                             Spacer(modifier = Modifier.width(6.dp))
                                             Text(
-                                                text = "Share Code",
+                                                text = "Share Code & Link",
                                                 color = Color.Black,
                                                 fontWeight = FontWeight.ExtraBold,
                                                 fontSize = 12.sp
                                             )
                                         }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(8.dp))
+
+                                    OutlinedButton(
+                                        onClick = {
+                                            val cleanDownloadUrl = com.example.data.DataStoreManager.normalizeAppDownloadUrl(appDownloadUrl)
+                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                            clipboard?.setPrimaryClip(ClipData.newPlainText("Kingo App Download Link", cleanDownloadUrl))
+                                            Toast.makeText(context, "App Download Link copied! Opening...", Toast.LENGTH_SHORT).show()
+                                            try {
+                                                val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(cleanDownloadUrl)).apply {
+                                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                }
+                                                context.startActivity(intent)
+                                            } catch (e: Exception) {
+                                                Toast.makeText(context, "Link copied: $cleanDownloadUrl", Toast.LENGTH_SHORT).show()
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(38.dp)
+                                            .testTag("me_open_app_download_link_btn"),
+                                        shape = RoundedCornerShape(10.dp),
+                                        border = BorderStroke(1.dp, AmberPrimary.copy(alpha = 0.6f))
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.ContentCopy,
+                                            contentDescription = "Open App Download Link",
+                                            tint = AmberPrimary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "App Download Link (Copy / Open)",
+                                            color = AmberPrimary,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 11.sp
+                                        )
                                     }
                                 }
 

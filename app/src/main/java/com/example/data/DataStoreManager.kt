@@ -73,6 +73,57 @@ class DataStoreManager(private val context: Context) {
         const val SYSTEM_CONFIG_APP_LINK_ID = "__system_config_app_download_url__"
         const val SYSTEM_CONFIG_REF_SHARE_ID = "__system_config_last_referral_share__"
 
+        const val DEFAULT_APP_DOWNLOAD_URL =
+            "https://drive.google.com/file/d/18AscXnESO7CMnRcEo8xKKKT-LJl7JkFK/view?usp=sharing"
+
+        /**
+         * Normalizes any raw or malformed app download link (such as "drive : //file/d/<ID>/view?usp=sharing%20%20ye%20link%20hai")
+         * into a clean, clickable https:// URL. Falls back to DEFAULT_APP_DOWNLOAD_URL when blank.
+         */
+        fun normalizeAppDownloadUrl(raw: String?): String {
+            if (raw.isNullOrBlank()) return DEFAULT_APP_DOWNLOAD_URL
+            var decoded = try {
+                java.net.URLDecoder.decode(raw.trim(), "UTF-8")
+            } catch (_: Exception) {
+                raw.trim()
+            }
+            decoded = decoded.replace("%20", " ").trim()
+
+            // 1. Check if a Google Drive file ID is present anywhere in the string (e.g., /file/d/<ID>, /d/<ID>, or id=<ID>)
+            val driveFileIdRegex = Regex("""(?:/file/d/|/d/|[?&]id=)([a-zA-Z0-9_-]{18,60})""")
+            val driveMatch = driveFileIdRegex.find(decoded)
+            if (driveMatch != null) {
+                val fileId = driveMatch.groupValues[1]
+                return "https://drive.google.com/file/d/$fileId/view?usp=sharing"
+            }
+
+            // 2. Check if the user pasted a bare Google Drive file ID
+            val firstToken = decoded.split(Regex("\\s+")).firstOrNull()?.trim() ?: ""
+            if (firstToken.matches(Regex("^[a-zA-Z0-9_-]{24,50}$")) && !firstToken.contains(".")) {
+                return "https://drive.google.com/file/d/$firstToken/view?usp=sharing"
+            }
+
+            // 3. Check if an explicit https:// or http:// URL is inside the string
+            val httpMatch = Regex("""https?://[^\s"<>]+""", RegexOption.IGNORE_CASE).find(decoded)
+            if (httpMatch != null) {
+                return httpMatch.value.trimEnd('.', ',', ';', ')')
+            }
+
+            // 4. Fix broken scheme like "drive : //..." or "drive://..."
+            val collapsed = decoded.replace(Regex("""^[a-zA-Z]+\s*:\s*//\s*"""), "")
+                .split(Regex("\\s+"))
+                .firstOrNull()
+                ?.trim() ?: ""
+            if (collapsed.startsWith("file/d/")) {
+                return "https://drive.google.com/$collapsed"
+            }
+            if (collapsed.contains(".") && !collapsed.startsWith("http", ignoreCase = true)) {
+                return "https://$collapsed"
+            }
+
+            return DEFAULT_APP_DOWNLOAD_URL
+        }
+
         @Volatile
         var lastLocalMutationMillis: Long = 0L
 
@@ -102,7 +153,7 @@ class DataStoreManager(private val context: Context) {
             parseAdminPostsJson(json)
         }.filter { !it.postType.startsWith("CONFIG_") && !it.id.startsWith("__system_config_") }.toMutableList()
 
-        val appDownloadUrl = prefs[KEY_APP_DOWNLOAD_URL]?.trim() ?: ""
+        val appDownloadUrl = normalizeAppDownloadUrl(prefs[KEY_APP_DOWNLOAD_URL])
         if (appDownloadUrl.isNotBlank()) {
             baseList.add(
                 AdminPostItem(
@@ -182,7 +233,7 @@ class DataStoreManager(private val context: Context) {
     }
 
     val appDownloadUrlFlow: Flow<String> = context.dataStore.data.map { prefs ->
-        prefs[KEY_APP_DOWNLOAD_URL] ?: ""
+        normalizeAppDownloadUrl(prefs[KEY_APP_DOWNLOAD_URL])
     }
 
     val pendingReferralCodeFlow: Flow<String> = context.dataStore.data.map { prefs ->
@@ -520,8 +571,9 @@ class DataStoreManager(private val context: Context) {
 
     suspend fun saveAppDownloadUrl(url: String) {
         lastLocalMutationMillis = System.currentTimeMillis()
+        val normalized = normalizeAppDownloadUrl(url)
         context.dataStore.edit { prefs ->
-            prefs[KEY_APP_DOWNLOAD_URL] = url.trim()
+            prefs[KEY_APP_DOWNLOAD_URL] = normalized
         }
     }
 
@@ -1471,7 +1523,10 @@ class DataStoreManager(private val context: Context) {
             posts.firstOrNull { it.id == SYSTEM_CONFIG_APP_LINK_ID || it.postType == "CONFIG_APP_LINK" }?.let { cfg ->
                 val link = cfg.actionUrl.ifBlank { cfg.message }.trim()
                 if (link.isNotBlank()) {
-                    prefs[KEY_APP_DOWNLOAD_URL] = link
+                    val normalized = normalizeAppDownloadUrl(link)
+                    if (System.currentTimeMillis() - lastLocalMutationMillis > 30_000L || prefs[KEY_APP_DOWNLOAD_URL].isNullOrBlank()) {
+                        prefs[KEY_APP_DOWNLOAD_URL] = normalized
+                    }
                 }
             }
             posts.firstOrNull { it.id == SYSTEM_CONFIG_REF_SHARE_ID || it.postType == "CONFIG_REF_SHARE" }?.let { refCfg ->

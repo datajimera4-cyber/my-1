@@ -112,14 +112,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, SharingStarted.Eagerly, "")
 
     val appDownloadUrl: StateFlow<String> = dataStoreManager.appDownloadUrlFlow
-        .stateIn(viewModelScope, SharingStarted.Eagerly, "")
+        .stateIn(viewModelScope, SharingStarted.Eagerly, DataStoreManager.DEFAULT_APP_DOWNLOAD_URL)
 
     val pendingReferralCode: StateFlow<String> = dataStoreManager.pendingReferralCodeFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, "")
 
     fun saveAppDownloadUrl(url: String, onResult: ((Boolean, String) -> Unit)? = null) {
         viewModelScope.launch {
-            dataStoreManager.saveAppDownloadUrl(url.trim())
+            val cleanUrl = DataStoreManager.normalizeAppDownloadUrl(url)
+            dataStoreManager.saveAppDownloadUrl(cleanUrl)
             val srvUrl = cloudServerUrl.value.ifBlank { DataStoreManager.DEFAULT_CLOUD_SERVER_URL }
             if (srvUrl.isNotBlank()) {
                 val res = com.example.admin.CloudDriveServerManager.syncData(
@@ -129,9 +130,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     pushLocalChanges = true,
                     pullRemoteFirst = false
                 )
-                onResult?.invoke(res.first, if (res.first) "App Download Link saved & synced to all users!" else res.second)
+                onResult?.invoke(
+                    res.first,
+                    if (res.first) "App Download Link saved & synced: $cleanUrl" else "Saved locally: $cleanUrl (${res.second})"
+                )
             } else {
-                onResult?.invoke(true, "Saved App Download Link locally.")
+                onResult?.invoke(true, "Saved App Download Link: $cleanUrl")
             }
         }
     }
@@ -549,12 +553,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             var finalTitle = cleanedTask.title
             var finalChannel = cleanedTask.channelName
 
-            if (cleanedTask.title.isBlank() || cleanedTask.title == "YouTube Video" || cleanedTask.title.startsWith("YouTube Video (")) {
-                val result = OEmbedFetcher.fetchOEmbed(cleanUrl)
-                if (result is OEmbedResult.Success) {
-                    _oEmbedState.value = result
-                    finalTitle = result.title
-                    finalChannel = result.authorName.ifBlank { cleanedTask.channelName }
+            val result = kotlinx.coroutines.withTimeoutOrNull(2500L) {
+                OEmbedFetcher.fetchOEmbed(cleanUrl)
+            }
+            if (result is OEmbedResult.Success) {
+                _oEmbedState.value = result
+                val fetchedTitle = result.title.takeIf {
+                    it.isNotBlank() && it != "YouTube Video" && !it.startsWith("YouTube Video (")
+                }
+                val fetchedAuthor = result.authorName.takeIf {
+                    it.isNotBlank() && it != "YouTube Creator" && it != "YouTube Channel"
+                }
+                if (cleanedTask.title.isBlank() ||
+                    cleanedTask.title == "YouTube Video" ||
+                    cleanedTask.title.startsWith("YouTube Video (") ||
+                    fetchedTitle != null
+                ) {
+                    finalTitle = fetchedTitle ?: cleanedTask.title
+                    finalChannel = fetchedAuthor ?: cleanedTask.channelName
                     val updated = cleanedTask.copy(
                         title = finalTitle,
                         channelName = finalChannel,
@@ -1362,18 +1378,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 it.isNotBlank() && it != "YouTube Creator" && it != "YouTube Channel"
             }
 
-            // Only wait for oEmbed network fetch if the task does not already have a valid title
-            val fetchedOEmbed = if (taskTitleCandidate == null) {
-                OEmbedFetcher.fetchOEmbed(effectiveUrl).also {
-                    if (it is OEmbedResult.Success) {
-                        _oEmbedState.value = it
-                    }
-                }
-            } else {
-                _oEmbedState.value
+            // Fetch fresh oEmbed for this exact video URL (with fast 2200ms timeout) so we always have
+            // the exact YouTube title, channel name, and @handle for THIS video (never a stale oEmbed from another task)
+            val fetchedOEmbed = kotlinx.coroutines.withTimeoutOrNull(2200L) {
+                OEmbedFetcher.fetchOEmbed(effectiveUrl)
+            }
+            if (fetchedOEmbed is OEmbedResult.Success) {
+                _oEmbedState.value = fetchedOEmbed
             }
 
-            val oEmbedSuccess = (fetchedOEmbed as? OEmbedResult.Success) ?: (_oEmbedState.value as? OEmbedResult.Success)
+            val oEmbedSuccess = fetchedOEmbed as? OEmbedResult.Success
             val oEmbedTitleCandidate = oEmbedSuccess?.title?.takeIf {
                 it.isNotBlank() && it != "YouTube Video" && !it.startsWith("YouTube Video (")
             }
@@ -1381,10 +1395,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 it.isNotBlank() && it != "YouTube Creator" && it != "YouTube Channel"
             }
 
-            val title: String = taskTitleCandidate ?: oEmbedTitleCandidate ?: currentTask?.title ?: "YouTube Video Task"
-            val author: String = taskChannelCandidate ?: oEmbedAuthorCandidate ?: currentTask?.channelName ?: ""
+            val title: String = oEmbedTitleCandidate ?: taskTitleCandidate ?: currentTask?.title ?: "YouTube Video Task"
+            val author: String = oEmbedAuthorCandidate ?: taskChannelCandidate ?: currentTask?.channelName ?: ""
 
-            if (currentTask != null && oEmbedTitleCandidate != null && taskTitleCandidate == null) {
+            if (currentTask != null && oEmbedTitleCandidate != null &&
+                (taskTitleCandidate == null || currentTask.title != oEmbedTitleCandidate || currentTask.channelName != author)
+            ) {
                 dataStoreManager.updateVideoTask(
                     currentTask.copy(
                         title = oEmbedTitleCandidate,

@@ -906,39 +906,39 @@ class FloatingTimerOverlayManager(private val context: Context) {
             }
 
             val params = WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT,
-                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
                 overlayType,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                         WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                         WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT
             ).apply {
-                gravity = Gravity.CENTER
-                if (!canUseA11yOverlay && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    alpha = 0.79f
+                gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                y = (28 * density).toInt()
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    alpha = 0.78f
                 }
             }
 
             val root = FrameLayout(context).apply {
-                setBackgroundColor(Color.parseColor("#FA0F172A"))
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
             }
 
             val card = LinearLayout(context).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
                 setPadding(
-                    (32 * density).toInt(),
-                    (28 * density).toInt(),
-                    (32 * density).toInt(),
-                    (28 * density).toInt()
+                    (18 * density).toInt(),
+                    (10 * density).toInt(),
+                    (20 * density).toInt(),
+                    (10 * density).toInt()
                 )
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.RECTANGLE
-                    cornerRadius = 22 * density
-                    setColor(Color.parseColor("#1E293B"))
-                    setStroke((1.5f * density).toInt(), Color.parseColor("#33F59E0B"))
+                    cornerRadius = 24 * density
+                    setColor(Color.parseColor("#E60F172A"))
+                    setStroke((1.5f * density).toInt(), Color.parseColor("#F59E0B"))
                 }
                 layoutParams = FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.WRAP_CONTENT,
@@ -952,10 +952,10 @@ class FloatingTimerOverlayManager(private val context: Context) {
                 isIndeterminate = true
                 indeterminateTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#F59E0B"))
                 layoutParams = LinearLayout.LayoutParams(
-                    (44 * density).toInt(),
-                    (44 * density).toInt()
+                    (20 * density).toInt(),
+                    (20 * density).toInt()
                 ).apply {
-                    bottomMargin = (14 * density).toInt()
+                    rightMargin = (10 * density).toInt()
                 }
             }
             card.addView(progressBar)
@@ -963,9 +963,9 @@ class FloatingTimerOverlayManager(private val context: Context) {
             val headerTv = TextView(context).apply {
                 text = "Opening..."
                 setTextColor(Color.WHITE)
-                textSize = 16.5f
+                textSize = 13.5f
                 typeface = android.graphics.Typeface.DEFAULT_BOLD
-                gravity = Gravity.CENTER
+                gravity = Gravity.CENTER_VERTICAL
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
