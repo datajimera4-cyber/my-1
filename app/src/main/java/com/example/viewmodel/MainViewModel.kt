@@ -1378,9 +1378,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 it.isNotBlank() && it != "YouTube Creator" && it != "YouTube Channel"
             }
 
-            // Fetch fresh oEmbed for this exact video URL (with fast 2200ms timeout) so we always have
+            // Fetch fresh oEmbed for this exact video URL so we always have
             // the exact YouTube title, channel name, and @handle for THIS video (never a stale oEmbed from another task)
-            val fetchedOEmbed = kotlinx.coroutines.withTimeoutOrNull(2200L) {
+            val fetchTimeoutMs = if (taskTitleCandidate != null) 1800L else 4800L
+            val fetchedOEmbed = kotlinx.coroutines.withTimeoutOrNull(fetchTimeoutMs) {
                 OEmbedFetcher.fetchOEmbed(effectiveUrl)
             }
             if (fetchedOEmbed is OEmbedResult.Success) {
