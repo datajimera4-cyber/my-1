@@ -883,10 +883,101 @@ class FloatingTimerOverlayManager(private val context: Context) {
         @Suppress("UNUSED_PARAMETER") channel: String,
         @Suppress("UNUSED_PARAMETER") statusText: String = "Opening..."
     ) {
-        // Do not attach a floating overlay window over YouTube while YouTubeLiveSearchService
-        // is searching and clicking the target video, because overlay windows on Android 12+
-        // (especially Vivo/Oppo/Realme/Xiaomi) can block Accessibility dispatchGesture() and rootInActiveWindow.
-        hideSearchLoadingOverlay()
+        runOnMain {
+            val a11yService = YouTubeLiveSearchService.instance
+            val canDrawAppOverlay = Settings.canDrawOverlays(context)
+            if (a11yService == null && !canDrawAppOverlay) return@runOnMain
+
+            if (searchLoadingOverlayView != null) {
+                searchLoadingStatusTextView?.text = "Opening..."
+                return@runOnMain
+            }
+
+            val targetWm = if (canDrawAppOverlay) {
+                windowManager
+            } else {
+                (a11yService?.getSystemService(Context.WINDOW_SERVICE) as? WindowManager) ?: windowManager
+            }
+            val overlayType = if (canDrawAppOverlay && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            } else if (a11yService != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            } else {
+                @Suppress("DEPRECATION")
+                WindowManager.LayoutParams.TYPE_PHONE
+            }
+
+            val density = context.resources.displayMetrics.density
+            val params = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                overlayType,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                y = (48 * density).toInt()
+            }
+
+            val wrapper = FrameLayout(context)
+            val pillCard = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(
+                    (18 * density).toInt(),
+                    (10 * density).toInt(),
+                    (20 * density).toInt(),
+                    (10 * density).toInt()
+                )
+                background = GradientDrawable(
+                    GradientDrawable.Orientation.LEFT_RIGHT,
+                    intArrayOf(
+                        Color.parseColor("#F2141229"),
+                        Color.parseColor("#F21E1B3A")
+                    )
+                ).apply {
+                    cornerRadius = 28 * density
+                    setStroke((1 * density).toInt(), Color.parseColor("#80A78BFA"))
+                }
+                elevation = 10 * density
+            }
+
+            val spinner = android.widget.ProgressBar(context).apply {
+                isIndeterminate = true
+                indeterminateTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#38BDF8"))
+                layoutParams = LinearLayout.LayoutParams(
+                    (20 * density).toInt(),
+                    (20 * density).toInt()
+                ).apply {
+                    rightMargin = (10 * density).toInt()
+                }
+            }
+            pillCard.addView(spinner)
+
+            val statusTv = TextView(context).apply {
+                text = "Opening..."
+                setTextColor(Color.WHITE)
+                textSize = 13.5f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+            }
+            searchLoadingStatusTextView = statusTv
+            pillCard.addView(statusTv)
+            wrapper.addView(pillCard)
+
+            try {
+                targetWm.addView(wrapper, params)
+                searchLoadingOverlayView = wrapper
+                searchLoadingOverlayWm = targetWm
+            } catch (_: Exception) {
+                searchLoadingOverlayView = null
+                searchLoadingOverlayWm = null
+            }
+        }
     }
 
     fun hideSearchLoadingOverlay() {

@@ -206,14 +206,7 @@ class WatchTimerService : Service() {
             var hasSeenAudioPlaying = false
             var silentTicksCount = 0
             var wasAudioSilentWhileExplicitlyPaused = false
-            var hasTriggeredServiceSearchFallback = false
-            var lastTrackedLaunchTime = 0L
             while (isActive) {
-                val launchTimeNow = WatchSessionRepository.taskLaunchTimestampMillis
-                if (launchTimeNow != lastTrackedLaunchTime) {
-                    lastTrackedLaunchTime = launchTimeNow
-                    hasTriggeredServiceSearchFallback = false
-                }
                 pollActiveYouTubeMediaSession()
                 YouTubeLiveSearchService.instance?.inspectCurrentYouTubeState()
 
@@ -263,18 +256,6 @@ class WatchTimerService : Service() {
                 }
 
                 val elapsedSinceLaunch = System.currentTimeMillis() - WatchSessionRepository.taskLaunchTimestampMillis
-                if (!hasTriggeredServiceSearchFallback &&
-                    sessionActive &&
-                    !isAppForeground &&
-                    elapsedSinceLaunch in 1800L..6000L &&
-                    !YouTubeLiveSearchService.hasClickedTarget &&
-                    !YouTubeLiveSearchService.isWatchPlayerConfirmedOpen &&
-                    (YouTubeLiveSearchService.currentPhase == YouTubeLiveSearchService.LiveSearchPhase.OPEN_SEARCH_BAR ||
-                     !YouTubeLiveSearchService.isServiceConnected)
-                ) {
-                    hasTriggeredServiceSearchFallback = true
-                    YouTubeLiveSearchService.triggerSearchResultsIntentFromService(this@WatchTimerService)
-                }
                 val isPausedByAudioStop = hasSeenAudioPlaying && !isAudioPlaying && silentTicksCount >= 2
 
                 // Video is paused if user paused in YouTube player, media session signaled paused, or active audio stream stopped

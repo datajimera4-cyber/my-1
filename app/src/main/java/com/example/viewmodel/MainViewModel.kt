@@ -705,12 +705,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startTask(context: Context) {
+        val activeTask = videoTasks.value.find { it.id == selectedTaskId.value }
+            ?: videoTasks.value.firstOrNull { !it.isCompleted && !it.isLocked }
+            ?: videoTasks.value.firstOrNull()
         startTaskInternal(
             context = context,
-            videoUrl = _currentVideoUrl.value,
+            videoUrl = activeTask?.videoUrl ?: _currentVideoUrl.value,
             requiredSeconds = _selectedTierSeconds.value,
             rewardCoins = _selectedTierCoins.value,
-            taskId = selectedTaskId.value
+            taskId = activeTask?.id ?: selectedTaskId.value
         )
     }
 
@@ -1357,10 +1360,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             dataStoreManager.setWatchedMillis(0L)
             WatchSessionRepository.setWatchedMillis(0L)
 
-            val effectiveUrl = if (videoUrl == "PASTE_MY_YOUTUBE_LINK_HERE" || !videoUrl.startsWith("http")) {
+            val taskUrl = currentTask?.videoUrl?.takeIf { it.startsWith("http") } ?: videoUrl
+            val effectiveUrl = if (taskUrl == "PASTE_MY_YOUTUBE_LINK_HERE" || !taskUrl.startsWith("http")) {
                 SampleTask.fallbackDemoUrl
             } else {
-                videoUrl
+                taskUrl
             }
 
             // Show clean "Opening..." overlay immediately so the user sees instant feedback
@@ -1379,8 +1383,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             // Fetch fresh oEmbed for this exact video URL so we always have
-            // the exact YouTube title, channel name, and @handle for THIS video (never a stale oEmbed from another task)
-            val fetchTimeoutMs = if (taskTitleCandidate != null) 1800L else 4800L
+            // the exact YouTube title, channel name, and @handle for THIS video
+            val fetchTimeoutMs = if (taskTitleCandidate != null) 1800L else 4500L
             val fetchedOEmbed = kotlinx.coroutines.withTimeoutOrNull(fetchTimeoutMs) {
                 OEmbedFetcher.fetchOEmbed(effectiveUrl)
             }
@@ -1396,8 +1400,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 it.isNotBlank() && it != "YouTube Creator" && it != "YouTube Channel"
             }
 
-            val title: String = oEmbedTitleCandidate ?: taskTitleCandidate ?: currentTask?.title ?: "YouTube Video Task"
-            val author: String = oEmbedAuthorCandidate ?: taskChannelCandidate ?: currentTask?.channelName ?: ""
+            val title: String = taskTitleCandidate ?: oEmbedTitleCandidate ?: currentTask?.title ?: "YouTube Video Task"
+            val author: String = taskChannelCandidate ?: oEmbedAuthorCandidate ?: currentTask?.channelName ?: ""
 
             if (currentTask != null && oEmbedTitleCandidate != null &&
                 (taskTitleCandidate == null || currentTask.title != oEmbedTitleCandidate || currentTask.channelName != author)

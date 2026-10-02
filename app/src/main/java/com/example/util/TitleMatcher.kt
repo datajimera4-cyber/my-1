@@ -50,16 +50,8 @@ object TitleMatcher {
         val titleMatches = !isJustAuthorName && (
                 normPlayingTitle == normTaskTitle ||
                 compactPlaying == compactTask ||
-                (normTaskTitle.length >= 4 && normPlayingTitle.contains(normTaskTitle)) ||
-                (normPlayingTitle.length >= 6 && normTaskTitle.contains(normPlayingTitle)) ||
-                (normPlayingTitle.length >= 8 && normTaskTitle.length >= 8 && (
-                        normPlayingTitle.contains(normTaskTitle.take(8)) ||
-                        normTaskTitle.contains(normPlayingTitle.take(8))
-                )) ||
-                (compactPlaying.length >= 8 && compactTask.length >= 8 && (
-                        compactPlaying.contains(compactTask.take(8)) ||
-                        compactTask.contains(compactPlaying.take(8))
-                ))
+                (normTaskTitle.length >= 6 && (normPlayingTitle.contains(normTaskTitle) || compactPlaying.contains(compactTask))) ||
+                (normPlayingTitle.length >= 16 && normTaskTitle.startsWith(normPlayingTitle))
         )
 
         val stopWords = setOf(
@@ -79,16 +71,38 @@ object TitleMatcher {
 
         val playingWords = normPlayingTitle.split(" ").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
         val matchingWords = taskWords.count { word ->
-            playingWords.contains(word) || (word.length >= 4 && normPlayingTitle.contains(word))
+            playingWords.contains(word)
         }
 
-        val keywordMatches = taskWords.isNotEmpty() && (
-                (taskWords.size >= 2 && matchingWords >= 2 && (matchingWords.toFloat() / taskWords.size) >= 0.6f) ||
-                (taskWords.size == 1 && matchingWords == 1 && normPlayingTitle.contains(normTaskTitle))
+        val keywordMatches = !isJustAuthorName && taskWords.isNotEmpty() && (
+                (taskWords.size <= 3 && matchingWords == taskWords.size) ||
+                (taskWords.size >= 4 && matchingWords >= 3 && (matchingWords.toFloat() / taskWords.size) >= 0.80f)
         )
 
         if (!titleMatches && !keywordMatches) {
             return MatchResult.MISMATCH
+        }
+
+        // If both playingArtist and taskAuthor are present and non-generic, verify they are not a different channel
+        val isGenericAuthor = normTaskAuthor.isEmpty() ||
+                normTaskAuthor == "youtube creator" ||
+                normTaskAuthor == "youtube channel" ||
+                normTaskAuthor == "youtube"
+        val isGenericPlayingArtist = normPlayingArtist.isEmpty() ||
+                normPlayingArtist == "youtube creator" ||
+                normPlayingArtist == "youtube channel" ||
+                normPlayingArtist == "youtube"
+
+        if (!isGenericAuthor && !isGenericPlayingArtist && !titleMatches) {
+            val compactArtist = normPlayingArtist.replace(" ", "")
+            val compactAuthor = normTaskAuthor.replace(" ", "")
+            val artistMatches = normPlayingArtist.contains(normTaskAuthor) ||
+                    normTaskAuthor.contains(normPlayingArtist) ||
+                    compactArtist.contains(compactAuthor) ||
+                    compactAuthor.contains(compactArtist)
+            if (!artistMatches) {
+                return MatchResult.MISMATCH
+            }
         }
 
         return MatchResult.MATCH
@@ -208,49 +222,24 @@ object TitleMatcher {
 
         val compactCard = normCard.replace(" ", "")
         val compactTarget = normTarget.replace(" ", "")
-        val compactRaw = normRawCandidate.replace(" ", "")
 
         // 1. Exact or full-title containment match
         if (normCard == normTarget || compactCard == compactTarget) {
             return true
         }
-        if (normTarget.length >= 4 && (
-                normCard.contains(normTarget) ||
-                compactCard.contains(compactTarget) ||
-                normRawCandidate.contains(normTarget) ||
-                compactRaw.contains(compactTarget)
-            )
+        if (normTarget.length >= 6 && (normCard.contains(normTarget) || compactCard.contains(compactTarget))) {
+            return true
+        }
+
+        // 2. When YouTube truncates a long 2-line video title at the end with "...",
+        // normCard will be a strict prefix of normTarget (at least 20 chars long)
+        if (normCard.length >= 20 && normTarget.length >= 22 &&
+            (normTarget.startsWith(normCard) || compactTarget.startsWith(compactCard))
         ) {
             return true
         }
-        // When YouTube truncates the card title with "...", normCard is a prefix/substring of normTarget
-        if (normCard.length >= 10 && (normTarget.contains(normCard) || compactTarget.contains(compactCard))) {
-            return true
-        }
 
-        // 2. Truncated long title prefix / core phrase match (when YouTube truncates a 2-line title with "...")
-        if (normTarget.length >= 12 && normCard.length >= 10) {
-            val prefixLen = minOf(14, normTarget.length, normCard.length)
-            if (prefixLen >= 10 && (
-                    normCard.contains(normTarget.take(prefixLen)) ||
-                    normTarget.contains(normCard.take(prefixLen)) ||
-                    normRawCandidate.contains(normTarget.take(prefixLen))
-                )
-            ) {
-                return true
-            }
-            val compactPrefixLen = minOf(11, compactTarget.length, compactCard.length)
-            if (compactPrefixLen >= 9 && (
-                    compactCard.contains(compactTarget.take(compactPrefixLen)) ||
-                    compactTarget.contains(compactCard.take(compactPrefixLen)) ||
-                    compactRaw.contains(compactTarget.take(compactPrefixLen))
-                )
-            ) {
-                return true
-            }
-        }
-
-        // 3. Distinctive word matching on the video title (supporting both full titles and 2-line truncated card titles)
+        // 3. Strict distinctive word matching on the video title
         val stopWords = setOf(
             "the", "and", "official", "video", "music", "audio", "with",
             "from", "feat", "song", "lyrics", "full", "remaster", "remastered",
@@ -269,36 +258,17 @@ object TitleMatcher {
         if (distinctiveWords.isEmpty()) return false
 
         val cardWords = normCard.split(" ").map { it.trim() }.filter { it.length >= 2 && !stopWords.contains(it) }
-        val nonChannelCardWords = cardWords.filter { !channelWords.contains(it) && it != normHandle }.ifEmpty { cardWords }
         val cardWordSet = cardWords.toSet()
 
-        fun wordMatches(w1: String, w2: String): Boolean {
-            if (w1 == w2) return true
-            if (w1.length >= 4 && w2.length >= 4 && (w1.startsWith(w2) || w2.startsWith(w1))) return true
-            return false
-        }
-
         val matchedTargetCount = distinctiveWords.count { targetWord ->
-            cardWordSet.contains(targetWord) || cardWords.any { cw -> wordMatches(targetWord, cw) }
+            cardWordSet.contains(targetWord)
         }
-
-        val matchedCardCount = nonChannelCardWords.count { cardWord ->
-            distinctiveWords.any { tw -> wordMatches(cardWord, tw) }
-        }
-
-        // Check if the card is a truncated prefix of the target title (where >= 75% of the visible card words match target words)
-        val isTruncatedCardMatch = nonChannelCardWords.size >= 2 &&
-                matchedTargetCount >= 2 &&
-                (matchedCardCount.toFloat() / nonChannelCardWords.size.toFloat()) >= 0.75f &&
-                nonChannelCardWords.first().let { firstCw -> distinctiveWords.take(2).any { tw -> wordMatches(firstCw, tw) } }
-
-        if (isTruncatedCardMatch) return true
 
         return when (distinctiveWords.size) {
-            1 -> matchedTargetCount == 1
-            2 -> matchedTargetCount == 2 || (matchedTargetCount == 1 && distinctiveWords[0].length >= 6 && normCard.contains(distinctiveWords[0]))
-            3 -> matchedTargetCount >= 2 && (matchedTargetCount == 3 || (matchedTargetCount.toFloat() / 3f) >= 0.66f)
-            else -> matchedTargetCount >= 2 && (matchedTargetCount.toFloat() / distinctiveWords.size.toFloat()) >= 0.58f
+            1 -> matchedTargetCount == 1 && normCard == normTarget
+            2 -> matchedTargetCount == 2
+            3 -> matchedTargetCount == 3
+            else -> matchedTargetCount >= 3 && (matchedTargetCount.toFloat() / distinctiveWords.size.toFloat()) >= 0.80f
         }
     }
 
