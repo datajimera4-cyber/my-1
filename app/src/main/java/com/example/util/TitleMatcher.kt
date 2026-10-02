@@ -234,14 +234,19 @@ object TitleMatcher {
             return true
         }
 
-        // 2. Full-target containment match (card contains complete target title)
-        if (normTarget.length >= 6 && (normCard.contains(normTarget) || compactCard.contains(compactTarget))) {
+        // 2. Full-target containment match (card or raw candidate contains complete target title)
+        if (normTarget.length >= 6 && (
+                normCard.contains(normTarget) ||
+                compactCard.contains(compactTarget) ||
+                normRawCandidate.contains(normTarget) ||
+                normRawCandidate.replace(" ", "").contains(compactTarget)
+        )) {
             return true
         }
 
         // 3. When YouTube truncates a long 2-line video title at the end with "...",
-        // normCard will be a strict prefix of normTarget (at least 18 chars long)
-        if (normCard.length >= 18 && normTarget.length >= 20 &&
+        // normCard will be a strict prefix of normTarget (at least 14 chars long)
+        if (normCard.length >= 14 && normTarget.length >= 16 &&
             (normTarget.startsWith(normCard) || compactTarget.startsWith(compactCard))
         ) {
             return true
