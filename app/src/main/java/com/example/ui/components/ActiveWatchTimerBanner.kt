@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -267,7 +268,7 @@ fun ActiveWatchTimerBanner(
                             onClick = { viewModel.claimMilestoneReward(context) },
                             modifier = Modifier
                                 .weight(1f)
-                                .height(38.dp)
+                                .heightIn(min = 38.dp)
                                 .testTag("claim_milestone_button"),
                             colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen),
                             shape = RoundedCornerShape(10.dp)
@@ -283,7 +284,10 @@ fun ActiveWatchTimerBanner(
                                 text = "Claim +${currentMilestone?.coins ?: 10}c",
                                 color = Color.Black,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -292,7 +296,7 @@ fun ActiveWatchTimerBanner(
                         onClick = { viewModel.resumeVideoInYouTube(context) },
                         modifier = Modifier
                             .weight(1f)
-                            .height(38.dp)
+                            .heightIn(min = 38.dp)
                             .testTag("resume_youtube_button"),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = if (hasReachedMinimum3Min) AmberPrimary else AmberPrimary
@@ -310,7 +314,10 @@ fun ActiveWatchTimerBanner(
                             text = "Play in YouTube",
                             color = Color.Black,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }

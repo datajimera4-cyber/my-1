@@ -365,7 +365,7 @@ fun DurationSelectionDialog(
                     onClick = { onConfirmSelection(selectedTier) },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(46.dp)
+                        .heightIn(min = 46.dp)
                         .testTag("confirm_duration_button"),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
@@ -383,7 +383,10 @@ fun DurationSelectionDialog(
                     Text(
                         text = "Watch ${selectedTier.minutes} Min (+${selectedTier.coins} Coins)",
                         fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
+                        fontSize = 14.sp,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }

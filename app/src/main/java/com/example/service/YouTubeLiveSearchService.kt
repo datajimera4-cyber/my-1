@@ -1644,7 +1644,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
         val isValidCardPosition = nodeRect.bottom > (screenHeight * 0.15f).toInt() &&
                 nodeRect.centerY() > (screenHeight * 0.13f).toInt() &&
                 nodeRect.top < (screenHeight * 0.90f).toInt() &&
-                nodeRect.height() in 10..(screenHeight * 0.48f).toInt()
+                nodeRect.height() in 10..(screenHeight * 0.62f).toInt()
 
         if (!isMenuOrChannelAvatar && isValidCardPosition) {
             val matchedCandidate = candidateTexts.firstOrNull { candidate ->
@@ -1665,7 +1665,7 @@ class YouTubeLiveSearchService : AccessibilityService() {
                     if (p.isScrollable) break
                     val pRect = android.graphics.Rect()
                     p.getBoundsInScreen(pRect)
-                    if (pRect.height() > (screenHeight * 0.52f).toInt()) break
+                    if (pRect.height() > (screenHeight * 0.62f).toInt()) break
                     clickTarget = p
                     climbDepth++
                 }
@@ -1751,7 +1751,8 @@ class YouTubeLiveSearchService : AccessibilityService() {
                         (channelWords.isNotEmpty() && channelWords.all { w -> normFullCard.contains(w) }) ||
                         (!hasVideoDuration && !hasViewsOrTime && normExtracted == normTarget && normTarget.length >= 12)
 
-                val hasRequiredCardSignals = !requireFeedCardMetadata ||
+                val hasRequiredCardSignals = hasOpenedChannelPage ||
+                        !requireFeedCardMetadata ||
                         hasVideoDuration ||
                         hasViewsOrTime ||
                         hasLiveStreamSignals ||
@@ -1787,11 +1788,10 @@ class YouTubeLiveSearchService : AccessibilityService() {
                         ?: (screenWidth * 0.44f).toInt()
                     val tapY = nodeRect.centerY().coerceIn((screenHeight * 0.16f).toInt(), (screenHeight * 0.88f).toInt())
 
-                    val clickedNode = if (node.isClickable) node.performAction(AccessibilityNodeInfo.ACTION_CLICK) else false
-                    val clickedContainer = if (!clickedNode && toClick !== node) toClick.performAction(AccessibilityNodeInfo.ACTION_CLICK) else false
-                    if (!clickedNode && !clickedContainer) {
-                        dispatchTapGesture(tapX, tapY)
-                    }
+                    if (node.isClickable) node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    if (toClick !== node && toClick.isClickable) toClick.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    // Guarantee video playback trigger by dispatching physical tap gesture on video card coordinates!
+                    dispatchTapGesture(tapX, tapY)
 
                     hasClickedTarget = true
                     lastClickTime = System.currentTimeMillis()
@@ -1874,19 +1874,23 @@ class YouTubeLiveSearchService : AccessibilityService() {
                 label == "लाइव" ||
                 label.startsWith("live,") ||
                 label.startsWith("live ") ||
-                label.startsWith("लाइव,")
+                label.startsWith("लाइव,") ||
+                label.contains("live") ||
+                label.contains("लाइव")
             ) {
                 val screenHeight = resources.displayMetrics.heightPixels.coerceAtLeast(800)
                 val density = resources.displayMetrics.density
                 val rect = android.graphics.Rect()
                 node.getBoundsInScreen(rect)
                 if (rect.top in (screenHeight * 0.08f).toInt()..(screenHeight * 0.65f).toInt() &&
-                    rect.height() <= (68 * density).toInt()
+                    rect.height() <= (72 * density).toInt()
                 ) {
                     val clicked = node.performAction(AccessibilityNodeInfo.ACTION_CLICK) ||
-                            (node.parent?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true) ||
-                            (rect.centerX() > 0 && rect.centerY() > 0 && dispatchTapGesture(rect.centerX(), rect.centerY()))
-                    if (clicked) return true
+                            (node.parent?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true)
+                    if (rect.centerX() > 0 && rect.centerY() > 0) {
+                        dispatchTapGesture(rect.centerX(), rect.centerY())
+                    }
+                    return true
                 }
             }
         }

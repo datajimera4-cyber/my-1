@@ -782,9 +782,11 @@ private fun FeaturedHomeTaskCard(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = if (isLiked) "Liked (+5c ✓)" else "Like +5 Coins",
-                                fontSize = 11.sp,
+                                text = if (isLiked) "Liked (+5c ✓)" else "Like +5c",
+                                fontSize = 10.5.sp,
                                 fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                softWrap = false,
                                 color = if (isLiked) SuccessGreen else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -806,9 +808,11 @@ private fun FeaturedHomeTaskCard(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "Comment ($commentCount/2) +5 Coins",
-                                fontSize = 11.sp,
+                                text = "Comment ($commentCount/2) +5c",
+                                fontSize = 10.5.sp,
                                 fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                softWrap = false,
                                 color = if (commentCount > 0) SuccessGreen else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -821,7 +825,7 @@ private fun FeaturedHomeTaskCard(
                     enabled = !taskLocked,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(46.dp)
+                        .heightIn(min = 46.dp)
                         .testTag("home_watch_task_button_${task.id}"),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
@@ -845,7 +849,10 @@ private fun FeaturedHomeTaskCard(
                                 "Locked (6h) • Unlocks in $lockCountdown"
                             },
                             fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
                         )
                     } else {
                         Icon(
@@ -857,7 +864,10 @@ private fun FeaturedHomeTaskCard(
                         Text(
                             text = "Watch Task",
                             fontWeight = FontWeight.ExtraBold,
-                            fontSize = 14.sp
+                            fontSize = 14.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }

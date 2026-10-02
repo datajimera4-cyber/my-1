@@ -798,8 +798,12 @@ class FloatingTimerOverlayManager(private val context: Context) {
             }
             dialogCard.addView(iconBadge)
 
+            try {
+                android.widget.Toast.makeText(context, "⚠️ Task Incomplete!\n$message", android.widget.Toast.LENGTH_LONG).show()
+            } catch (_: Exception) {}
+
             val titleTv = TextView(context).apply {
-                text = "Watch Session Notice"
+                text = "⚠️ Task Incomplete"
                 setTextColor(Color.WHITE)
                 textSize = 18f
                 typeface = android.graphics.Typeface.DEFAULT_BOLD
@@ -858,6 +862,13 @@ class FloatingTimerOverlayManager(private val context: Context) {
                 windowManager.addView(scrimRoot, params)
                 globalAttachedViews.add(scrimRoot)
                 incompletePopupView = scrimRoot
+                dialogCard.postDelayed({
+                    if (incompletePopupView === scrimRoot) {
+                        dismissIncompletePopup()
+                        WatchSessionRepository.dismissTaskIncompleteMessage()
+                        onDismissed?.invoke()
+                    }
+                }, 7500L)
             } catch (_: Exception) {
                 incompletePopupView = null
                 onDismissed?.invoke()

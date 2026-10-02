@@ -428,10 +428,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         // Real-time watcher for newly added Admin Tasks -> trigger instant User App notification ONLY on User App
         viewModelScope.launch {
+            var isInitialTaskBaselineLoaded = false
             val defaultTaskIds = setOf("default_rick", "default_android15", "default_kotlin_course", "default_lofi_live")
             dataStoreManager.videoTasksFlow.collectLatest { tasks ->
                 if (com.example.BuildConfig.APP_ROLE != "ADMIN") {
                     val notified = dataStoreManager.notifiedItemIdsFlow.first()
+                    if (!isInitialTaskBaselineLoaded && notified.isEmpty()) {
+                        isInitialTaskBaselineLoaded = true
+                        dataStoreManager.markItemsNotified(tasks.map { it.id }.toSet())
+                        return@collectLatest
+                    }
+                    isInitialTaskBaselineLoaded = true
                     val newlyAdded = tasks.filter { t ->
                         !defaultTaskIds.contains(t.id) && !notified.contains(t.id)
                     }
@@ -450,10 +457,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         // Real-time watcher for newly added Admin Posts / Banners / Alerts -> trigger instant User App notification ONLY on User App
         viewModelScope.launch {
+            var isInitialPostBaselineLoaded = false
             val defaultPostIds = setOf("default_welcome_banner")
             dataStoreManager.adminPostsFlow.collectLatest { posts ->
                 if (com.example.BuildConfig.APP_ROLE != "ADMIN") {
                     val notified = dataStoreManager.notifiedItemIdsFlow.first()
+                    if (!isInitialPostBaselineLoaded && notified.isEmpty()) {
+                        isInitialPostBaselineLoaded = true
+                        dataStoreManager.markItemsNotified(posts.map { it.id }.toSet())
+                        return@collectLatest
+                    }
+                    isInitialPostBaselineLoaded = true
                     val newlyAdded = posts.filter { p ->
                         !defaultPostIds.contains(p.id) && !notified.contains(p.id)
                     }

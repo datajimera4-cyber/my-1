@@ -75,8 +75,11 @@ object TitleMatcher {
         }
 
         val keywordMatches = !isJustAuthorName && taskWords.isNotEmpty() && (
-                (taskWords.size <= 3 && matchingWords == taskWords.size) ||
-                (taskWords.size >= 4 && matchingWords >= 3 && (matchingWords.toFloat() / taskWords.size) >= 0.80f)
+                normPlayingTitle.contains(normTaskTitle) || normTaskTitle.contains(normPlayingTitle) ||
+                compactPlaying.contains(compactTask) || compactTask.contains(compactPlaying) ||
+                (taskWords.size <= 2 && matchingWords >= 1) ||
+                (taskWords.size == 3 && matchingWords >= 2) ||
+                (taskWords.size >= 4 && matchingWords >= 2 && (matchingWords.toFloat() / taskWords.size) >= 0.60f)
         )
 
         if (!titleMatches && !keywordMatches) {
@@ -264,11 +267,17 @@ object TitleMatcher {
             cardWordSet.contains(targetWord)
         }
 
+        if (normCard.contains(normTarget) || normTarget.contains(normCard) ||
+            compactCard.contains(compactTarget) || compactTarget.contains(compactCard)
+        ) {
+            return true
+        }
+
         return when (distinctiveWords.size) {
-            1 -> matchedTargetCount == 1 && normCard == normTarget
-            2 -> matchedTargetCount == 2
-            3 -> matchedTargetCount == 3
-            else -> matchedTargetCount >= 3 && (matchedTargetCount.toFloat() / distinctiveWords.size.toFloat()) >= 0.80f
+            1 -> matchedTargetCount == 1 && (normCard == normTarget || normCard.contains(distinctiveWords[0]) || normTarget.contains(normCard))
+            2 -> matchedTargetCount >= 1 && (matchedTargetCount == 2 || normCard.contains(distinctiveWords[0]) || normCard.contains(distinctiveWords[1]))
+            3 -> matchedTargetCount >= 2
+            else -> (matchedTargetCount.toFloat() / distinctiveWords.size.toFloat()) >= 0.60f || matchedTargetCount >= 2
         }
     }
 
