@@ -173,81 +173,63 @@ object NotificationChannels {
                 val newlyNotifiedKeys = mutableSetOf<String>()
 
                 if (!isAdminApp) {
-                    // 1. Check Video Tasks (New tasks + Pinned/Updated tasks)
+                    val currentEmail = dataStoreManager.currentUserEmailFlow.first()?.trim()?.lowercase()
+                    val currentUser = dataStoreManager.currentUserFlow.first()
+                    // If user has not logged in yet (fresh install / on auth screen), DO NOT send push notifications!
+                    // Baseline all current tasks & posts into notified set so they never fire later as pseudo-new items.
+                    if (currentUser == null || currentEmail.isNullOrBlank() || currentEmail == "guest@watchearn.com") {
+                        val tasks = dataStoreManager.videoTasksFlow.first()
+                        val posts = dataStoreManager.adminPostsFlow.first()
+                        val baselineKeys = tasks.map { it.id }.toSet() + posts.map { it.id }.toSet()
+                        val missingBaseline = baselineKeys.filter { !notified.contains(it) }.toSet()
+                        if (missingBaseline.isNotEmpty()) {
+                            dataStoreManager.markItemsNotified(missingBaseline)
+                            inMemoryDispatchedKeys.addAll(missingBaseline)
+                        }
+                        return
+                    }
+
+                    // 1. Check Video Tasks (Only 1 notification per newly added task)
                     val defaultTaskIds = setOf("default_rick", "default_android15", "default_kotlin_course", "default_lofi_live")
                     val tasks = dataStoreManager.videoTasksFlow.first()
                     for (t in tasks) {
                         if (defaultTaskIds.contains(t.id)) continue
-                        if (!notified.contains(t.id) && !inMemoryDispatchedKeys.contains(t.id)) {
+                        val taskKey = "task_${t.id}"
+                        if (!notified.contains(t.id) && !notified.contains(taskKey) &&
+                            !inMemoryDispatchedKeys.contains(t.id) && !inMemoryDispatchedKeys.contains(taskKey)
+                        ) {
                             newlyNotifiedKeys.add(t.id)
-                            val pinKey = "task_pin_${t.id}_${t.pinnedAt}"
-                            if (t.isPinned && t.pinnedAt > 0L) newlyNotifiedKeys.add(pinKey)
-                            val updateKey = "task_upd_${t.id}_${t.rewardCoins}_${t.title.hashCode()}"
-                            newlyNotifiedKeys.add(updateKey)
+                            newlyNotifiedKeys.add(taskKey)
                             sendAdminUpdateNotification(
                                 context = context,
                                 title = "🎬 New Video Task (+${t.rewardCoins} Coins)",
                                 body = t.title,
-                                dedupKey = t.id
+                                dedupKey = taskKey
                             )
-                        } else {
-                            if (t.isPinned && t.pinnedAt > 0L) {
-                                val pinKey = "task_pin_${t.id}_${t.pinnedAt}"
-                                if (!notified.contains(pinKey) && !inMemoryDispatchedKeys.contains(pinKey)) {
-                                    newlyNotifiedKeys.add(pinKey)
-                                    sendAdminUpdateNotification(
-                                        context = context,
-                                        title = "⭐ Featured Task (+${t.rewardCoins} Coins)",
-                                        body = t.title,
-                                        dedupKey = pinKey
-                                    )
-                                }
-                            }
-                            val updateKey = "task_upd_${t.id}_${t.rewardCoins}_${t.title.hashCode()}"
-                            if (!notified.contains(updateKey) && !inMemoryDispatchedKeys.contains(updateKey)) {
-                                newlyNotifiedKeys.add(updateKey)
-                                sendAdminUpdateNotification(
-                                    context = context,
-                                    title = "🎬 Task Available (+${t.rewardCoins} Coins)",
-                                    body = t.title,
-                                    dedupKey = updateKey
-                                )
-                            }
                         }
                     }
 
-                    // 2. Check Posts / Banners / Push Notifications
+                    // 2. Check Posts / Banners / Announcements (Only 1 notification per newly added post)
                     val defaultPostIds = setOf("default_welcome_banner")
                     val posts = dataStoreManager.adminPostsFlow.first()
                     for (p in posts) {
                         if (defaultPostIds.contains(p.id)) continue
-                        if (!notified.contains(p.id) && !inMemoryDispatchedKeys.contains(p.id)) {
+                        val postKey = "post_${p.id}"
+                        if (!notified.contains(p.id) && !notified.contains(postKey) &&
+                            !inMemoryDispatchedKeys.contains(p.id) && !inMemoryDispatchedKeys.contains(postKey)
+                        ) {
                             newlyNotifiedKeys.add(p.id)
-                            if (p.isPinned && p.pinnedAt > 0L) {
-                                newlyNotifiedKeys.add("post_pin_${p.id}_${p.pinnedAt}")
-                            }
+                            newlyNotifiedKeys.add(postKey)
                             sendAdminUpdateNotification(
                                 context = context,
-                                title = p.title.ifBlank { "🔔 New Update" },
-                                body = p.message.ifBlank { "Tap to open the app." },
-                                dedupKey = p.id
+                                title = p.title.ifBlank { "🔔 New Announcement" },
+                                body = p.message.ifBlank { "Tap to open Kingo King." },
+                                dedupKey = postKey
                             )
-                        } else if (p.isPinned && p.pinnedAt > 1700000000000L) {
-                            val pinKey = "post_pin_${p.id}_${p.pinnedAt}"
-                            if (!notified.contains(pinKey) && !inMemoryDispatchedKeys.contains(pinKey)) {
-                                newlyNotifiedKeys.add(pinKey)
-                                sendAdminUpdateNotification(
-                                    context = context,
-                                    title = p.title.ifBlank { "📢 Featured Update" },
-                                    body = p.message.ifBlank { "Tap to view details." },
-                                    dedupKey = pinKey
-                                )
-                            }
                         }
                     }
 
                     // 3. Check Payout / Withdrawal Requests (APPROVED / COMPLETED / REJECTED)
-                    val currentEmail = dataStoreManager.currentUserEmailFlow.first()?.trim()?.lowercase()
                     val payouts = dataStoreManager.payoutRequestsFlow.first()
                     for (req in payouts) {
                         if (!currentEmail.isNullOrBlank() && !req.userEmail.equals(currentEmail, ignoreCase = true)) {

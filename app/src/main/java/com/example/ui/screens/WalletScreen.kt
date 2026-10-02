@@ -1,6 +1,10 @@
 package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -17,6 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -30,10 +35,15 @@ import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CurrencyRupee
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MonetizationOn
-import androidx.compose.material.icons.filled.VerifiedUser
+import androidx.compose.material.icons.filled.Payment
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -44,7 +54,9 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -70,6 +82,7 @@ import com.example.ui.components.AdminPostsBannerSection
 import com.example.ui.components.KingoLogoBadge
 import com.example.ui.components.WithdrawDialog
 import com.example.ui.theme.AmberDark
+import com.example.ui.theme.AmberLight
 import com.example.ui.theme.AmberPrimary
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
@@ -77,6 +90,7 @@ import com.example.ui.theme.SuccessGreen
 import com.example.util.TimeFormatter
 import com.example.viewmodel.AppScreen
 import com.example.viewmodel.MainViewModel
+import java.text.NumberFormat
 import java.util.Locale
 
 private fun resolveEffectiveCoins(item: WalletTransaction): Int {
@@ -93,6 +107,10 @@ private fun resolveEffectiveCoins(item: WalletTransaction): Int {
     } else {
         0
     }
+}
+
+private fun formatCoins(number: Int): String {
+    return NumberFormat.getNumberInstance(Locale.US).format(number)
 }
 
 @Composable
@@ -127,6 +145,9 @@ fun WalletScreen(
         transactions.count { resolveEffectiveCoins(it) < 0 }
     }
 
+    val minWithdrawCoins = 1000
+    val progressToMinWithdraw = (walletBalance.toFloat() / minWithdrawCoins.toFloat()).coerceIn(0f, 1f)
+
     if (showHistoryPage) {
         WalletHistoryPage(
             transactions = transactions,
@@ -139,13 +160,14 @@ fun WalletScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
+            .background(Color(0xFF090D16))
             .testTag("wallet_screen")
     ) {
-        // Professional Anchored Top Header Bar (Edge-to-Edge Status Bar Safe)
+        // Ultra-High-Budget Top Glass Header Bar
         Surface(
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 3.dp,
-            shadowElevation = 2.dp,
+            color = Color(0xFF0F172A).copy(alpha = 0.95f),
+            tonalElevation = 4.dp,
+            shadowElevation = 4.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.fillMaxWidth().statusBarsPadding()) {
@@ -162,59 +184,81 @@ fun WalletScreen(
                     ) {
                         KingoLogoBadge(
                             isAdmin = false,
-                            size = 38.dp
+                            size = 40.dp
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "Kingo Vault",
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = Color.White
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .background(SuccessGreen.copy(alpha = 0.2f), RoundedCornerShape(50))
+                                        .border(1.dp, SuccessGreen.copy(alpha = 0.6f), RoundedCornerShape(50))
+                                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(6.dp)
+                                                .background(SuccessGreen, CircleShape)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "UPI LIVE",
+                                            color = SuccessGreen,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            fontSize = 9.sp
+                                        )
+                                    }
+                                }
+                            }
                             Text(
-                                text = "My Wallet & Payouts",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "1000 Coins = ₹10 INR • Instant UPI Payout",
+                                text = "Instant UPI Redemption • 1000 Coins = ₹10",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = Color.White.copy(alpha = 0.7f),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
 
-                    // Top-Right History Button
+                    // Top-Right Passbook / History Button
                     Surface(
-                        shape = RoundedCornerShape(50),
-                        color = AmberPrimary.copy(alpha = 0.16f),
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color.White.copy(alpha = 0.08f),
+                        border = BorderStroke(1.dp, AmberPrimary.copy(alpha = 0.45f)),
                         modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .border(1.dp, AmberPrimary.copy(alpha = 0.4f), RoundedCornerShape(50))
                             .clickable { showHistoryPage = true }
                             .testTag("wallet_history_button")
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
                                 imageVector = Icons.Default.History,
                                 contentDescription = "Open History",
-                                tint = AmberDark,
+                                tint = AmberPrimary,
                                 modifier = Modifier.size(16.dp)
                             )
-                            Spacer(modifier = Modifier.width(5.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "History",
+                                text = "Passbook",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.ExtraBold,
-                                color = AmberDark
+                                color = AmberPrimary
                             )
                         }
                     }
                 }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
             }
         }
 
@@ -224,7 +268,7 @@ fun WalletScreen(
                 .weight(1f)
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             AdminPostsBannerSection(
                 posts = adminPosts,
@@ -233,214 +277,409 @@ fun WalletScreen(
                 onDismissPost = { viewModel.dismissAdminPost(it) }
             )
 
-            // Balance Hero Card with INR Conversion & Payout Button
+            // Ultra-Luxury Hero Obsidian Card (Fintech Grade)
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("wallet_hero_card"),
-                shape = RoundedCornerShape(22.dp),
+                shape = RoundedCornerShape(26.dp),
                 colors = CardDefaults.cardColors(containerColor = Slate900),
-                elevation = CardDefaults.cardElevation(defaultElevation = 5.dp)
+                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
             ) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(
                             Brush.linearGradient(
-                                colors = listOf(Slate900, Slate800)
+                                colors = listOf(
+                                    Color(0xFF0F172A),
+                                    Color(0xFF1E293B),
+                                    Color(0xFF0B132B)
+                                )
                             )
                         )
-                        .border(1.dp, AmberPrimary.copy(alpha = 0.28f), RoundedCornerShape(22.dp))
-                        .padding(20.dp)
+                        .border(
+                            BorderStroke(
+                                1.5.dp,
+                                Brush.linearGradient(
+                                    listOf(
+                                        AmberPrimary.copy(alpha = 0.7f),
+                                        SuccessGreen.copy(alpha = 0.4f),
+                                        Color.Transparent
+                                    )
+                                )
+                            ),
+                            RoundedCornerShape(26.dp)
+                        )
+                        .padding(22.dp)
                 ) {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        Text(
-                            text = "TOTAL EARNINGS BALANCE",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White.copy(alpha = 0.7f),
-                            letterSpacing = 1.sp
-                        )
-
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.MonetizationOn,
-                                contentDescription = "Coin",
-                                tint = AmberPrimary,
-                                modifier = Modifier.size(38.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "$walletBalance",
-                                style = MaterialTheme.typography.displaySmall,
-                                fontWeight = FontWeight.Black,
-                                color = Color.White
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Coins",
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = AmberPrimary
-                            )
-                        }
-
-                        // INR Real Cash Value Strip
+                        // Badge Tag
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .background(Color.White.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
-                                .padding(horizontal = 14.dp, vertical = 6.dp)
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "≈ ₹$formattedInr INR",
-                                color = SuccessGreen,
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = 17.sp
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .background(AmberPrimary.copy(alpha = 0.15f), CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Security,
+                                        contentDescription = null,
+                                        tint = AmberPrimary,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "VERIFIED REWARDS VAULT",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Black,
+                                    letterSpacing = 1.2.sp,
+                                    color = Color.White.copy(alpha = 0.8f)
+                                )
+                            }
+
                             Box(
                                 modifier = Modifier
-                                    .background(AmberPrimary, RoundedCornerShape(6.dp))
-                                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                                    .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(50))
+                                    .padding(horizontal = 10.dp, vertical = 4.dp)
                             ) {
                                 Text(
-                                    text = "1000 Coins = 10 INR",
-                                    color = Color.Black,
-                                    fontWeight = FontWeight.ExtraBold,
+                                    text = "1000 = ₹10 INR",
+                                    color = AmberLight,
+                                    fontWeight = FontWeight.Bold,
                                     fontSize = 11.sp
                                 )
                             }
                         }
 
-                        // Withdraw / Payout Button
+                        // Massive Coins Balance Counter
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "CURRENT REWARD BALANCE",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.5.sp,
+                                color = Color.White.copy(alpha = 0.6f)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(46.dp)
+                                        .background(
+                                            Brush.radialGradient(
+                                                listOf(AmberPrimary, AmberDark)
+                                            ),
+                                            CircleShape
+                                        )
+                                        .border(1.5.dp, Color.White.copy(alpha = 0.4f), CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.MonetizationOn,
+                                        contentDescription = "Coin",
+                                        tint = Color.Black,
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = formatCoins(walletBalance),
+                                    fontSize = 42.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = Color.White,
+                                    letterSpacing = (-1).sp
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Coins",
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = AmberPrimary,
+                                    modifier = Modifier.align(Alignment.Bottom).padding(bottom = 6.dp)
+                                )
+                            }
+                        }
+
+                        // Real Cash Equivalent Chip with Emerald Glow
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = Color(0xFF042F2E).copy(alpha = 0.7f),
+                            border = BorderStroke(1.2.dp, SuccessGreen.copy(alpha = 0.5f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.CurrencyRupee,
+                                        contentDescription = null,
+                                        tint = SuccessGreen,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Cash Value:",
+                                        fontSize = 13.sp,
+                                        color = Color.White.copy(alpha = 0.85f),
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = "₹$formattedInr INR",
+                                        color = SuccessGreen,
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 18.sp
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .background(SuccessGreen, RoundedCornerShape(4.dp))
+                                            .padding(horizontal = 5.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = "DIRECT UPI",
+                                            color = Color.Black,
+                                            fontWeight = FontWeight.Black,
+                                            fontSize = 9.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Cashout Progress Bar
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = if (walletBalance >= minWithdrawCoins) "Ready for Withdrawal! 🎉" else "Minimum Payout: 1,000 Coins (₹10)",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (walletBalance >= minWithdrawCoins) SuccessGreen else Color.White.copy(alpha = 0.75f)
+                                )
+                                Text(
+                                    text = "${(progressToMinWithdraw * 100).toInt()}%",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = if (walletBalance >= minWithdrawCoins) SuccessGreen else AmberPrimary
+                                )
+                            }
+                            LinearProgressIndicator(
+                                progress = { progressToMinWithdraw },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(8.dp)
+                                    .clip(RoundedCornerShape(50)),
+                                color = if (walletBalance >= minWithdrawCoins) SuccessGreen else AmberPrimary,
+                                trackColor = Color.White.copy(alpha = 0.12f)
+                            )
+                        }
+
+                        // Primary High-Impact Withdraw CTA Button
                         Button(
                             onClick = { showWithdrawDialog = true },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(48.dp)
+                                .height(52.dp)
                                 .testTag("withdraw_action_button"),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary)
+                            shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = AmberPrimary,
+                                contentColor = Color.Black
+                            ),
+                            elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.AccountBalanceWallet,
+                                imageVector = Icons.Default.Bolt,
                                 contentDescription = null,
                                 tint = Color.Black,
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(22.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Withdraw via UPI",
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color.Black,
-                                fontSize = 15.sp
+                                text = "Withdraw to UPI (Instant Cashout)",
+                                fontWeight = FontWeight.Black,
+                                fontSize = 15.sp,
+                                letterSpacing = 0.2.sp
                             )
                         }
                     }
                 }
             }
 
-            // Dedicated Transaction & Payout History Button Card (opens separate full-screen History Page)
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .clickable { showHistoryPage = true }
-                    .border(
-                        1.2.dp,
-                        AmberPrimary.copy(alpha = 0.45f),
-                        RoundedCornerShape(18.dp)
+            // Quick Payout Milestone Tiers (Tap to Cash Out)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Quick Redeem Tiers",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    val quickTiers = listOf(
+                        Triple("₹10", 1000, walletBalance >= 1000),
+                        Triple("₹20", 2000, walletBalance >= 2000),
+                        Triple("₹50", 5000, walletBalance >= 5000),
+                        Triple("₹100", 10000, walletBalance >= 10000)
                     )
-                    .testTag("wallet_open_history_button"),
-                shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+
+                    quickTiers.forEach { (inrLabel, coinsReq, isReady) ->
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable { showWithdrawDialog = true },
+                            shape = RoundedCornerShape(14.dp),
+                            color = if (isReady) Slate800 else Color(0xFF131B2E),
+                            border = BorderStroke(
+                                1.dp,
+                                if (isReady) AmberPrimary.copy(alpha = 0.7f) else Color.White.copy(alpha = 0.08f)
+                            )
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = inrLabel,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = if (isReady) SuccessGreen else Color.White
+                                )
+                                Text(
+                                    text = "${coinsReq / 1000}k c",
+                                    fontSize = 11.sp,
+                                    color = if (isReady) AmberLight else Color.White.copy(alpha = 0.5f),
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Trust & Security Triple Guarantee Banner
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = Color(0xFF111827),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.06f)),
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                        .padding(14.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .background(AmberPrimary.copy(alpha = 0.16f), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ReceiptLong,
-                                contentDescription = null,
-                                tint = AmberDark,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = "Transaction & Payout History",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = 15.sp
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "${transactions.size} records • View all earnings & UPI withdrawals",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 11.sp
-                            )
-                        }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Verified,
+                            contentDescription = null,
+                            tint = SuccessGreen,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Instant Payout",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White.copy(alpha = 0.9f)
+                        )
                     }
 
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .width(1.dp)
+                            .height(18.dp)
+                            .background(Color.White.copy(alpha = 0.15f))
+                    )
 
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = AmberPrimary
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "View",
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = 12.sp,
-                                color = Color.Black
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                contentDescription = null,
-                                tint = Color.Black,
-                                modifier = Modifier.size(14.dp)
-                            )
-                        }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = null,
+                            tint = AmberPrimary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Zero Fees",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White.copy(alpha = 0.9f)
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .width(1.dp)
+                            .height(18.dp)
+                            .background(Color.White.copy(alpha = 0.15f))
+                    )
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Payment,
+                            contentDescription = null,
+                            tint = Color(0xFF38BDF8),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Any UPI ID",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White.copy(alpha = 0.9f)
+                        )
                     }
                 }
             }
 
-            // Quick Summary Stats Row
+            // Quick Stats 2-Card Row
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Card(
                     modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp)
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF131B2E)),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
                 ) {
                     Row(
                         modifier = Modifier
@@ -450,29 +689,29 @@ fun WalletScreen(
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(34.dp)
-                                .background(SuccessGreen.copy(alpha = 0.14f), CircleShape),
+                                .size(38.dp)
+                                .background(SuccessGreen.copy(alpha = 0.15f), CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.ArrowUpward,
                                 contentDescription = null,
                                 tint = SuccessGreen,
-                                modifier = Modifier.size(17.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
                             Text(
                                 text = "Total Earned",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 11.sp
+                                fontSize = 11.sp,
+                                color = Color.White.copy(alpha = 0.6f),
+                                fontWeight = FontWeight.Medium
                             )
                             Text(
-                                text = "+$totalEarnedCoins c",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.ExtraBold,
+                                text = "+${formatCoins(totalEarnedCoins)} c",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Black,
                                 color = SuccessGreen
                             )
                         }
@@ -481,9 +720,9 @@ fun WalletScreen(
 
                 Card(
                     modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp)
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF131B2E)),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
                 ) {
                     Row(
                         modifier = Modifier
@@ -493,71 +732,209 @@ fun WalletScreen(
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(34.dp)
-                                .background(AmberPrimary.copy(alpha = 0.16f), CircleShape),
+                                .size(38.dp)
+                                .background(AmberPrimary.copy(alpha = 0.15f), CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.ArrowDownward,
                                 contentDescription = null,
-                                tint = AmberDark,
-                                modifier = Modifier.size(17.dp)
+                                tint = AmberPrimary,
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
                             Text(
-                                text = "UPI Payouts",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 11.sp
+                                text = "UPI Cashouts",
+                                fontSize = 11.sp,
+                                color = Color.White.copy(alpha = 0.6f),
+                                fontWeight = FontWeight.Medium
                             )
                             Text(
-                                text = "$withdrawalCount Requests",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = MaterialTheme.colorScheme.onSurface
+                                text = "$withdrawalCount Done",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Black,
+                                color = Color.White
                             )
                         }
                     }
                 }
             }
 
-            // Clean UPI Payout Information Card
-            Card(
+            // Live Activity & Passbook Header
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-                )
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(
+                Text(
+                    text = "Recent Transactions",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = Color.Transparent,
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                        .clickable { showHistoryPage = true }
+                        .testTag("wallet_open_history_button")
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.VerifiedUser,
-                            contentDescription = null,
-                            tint = SuccessGreen,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
                         Text(
-                            text = "Safe & Fast UPI Withdrawals",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold
+                            text = "View All (${transactions.size})",
+                            color = AmberPrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            tint = AmberPrimary,
+                            modifier = Modifier.size(14.dp)
                         )
                     }
-                    Text(
-                        text = "• Minimum withdrawal is 1000 Coins (₹10 INR).\n• Enter any valid UPI ID (PhonePe, GPay, Paytm) to request payout.\n• Tap the 'History' button anytime to check live payout status.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 11.sp,
-                        lineHeight = 16.sp
-                    )
+                }
+            }
+
+            // Recent Transactions List (Top 4 preview)
+            if (transactions.isEmpty()) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF111827)),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.06f))
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ReceiptLong,
+                            contentDescription = null,
+                            tint = Color.White.copy(alpha = 0.3f),
+                            modifier = Modifier.size(36.dp)
+                        )
+                        Text(
+                            text = "No Transactions Yet",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = Color.White.copy(alpha = 0.8f)
+                        )
+                        Text(
+                            text = "Complete your first video task to earn reward coins!",
+                            fontSize = 11.sp,
+                            color = Color.White.copy(alpha = 0.5f)
+                        )
+                    }
+                }
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    transactions.take(4).forEach { item ->
+                        val effectiveCoins = remember(item.coins, item.title) { resolveEffectiveCoins(item) }
+                        val isWithdrawal = effectiveCoins < 0
+                        val statusBadge = remember(item.title) {
+                            when {
+                                item.title.contains("DONE", ignoreCase = true) || item.title.contains("Paid to", ignoreCase = true) ->
+                                    Triple("PAYMENT DONE ✓", SuccessGreen.copy(alpha = 0.16f), SuccessGreen)
+                                item.title.contains("APPROVED", ignoreCase = true) ->
+                                    Triple("APPROVED • PROCESSING", AmberPrimary.copy(alpha = 0.18f), AmberPrimary)
+                                item.title.contains("PENDING", ignoreCase = true) ->
+                                    Triple("PENDING REVIEW", AmberPrimary.copy(alpha = 0.15f), AmberPrimary)
+                                item.title.contains("REJECTED", ignoreCase = true) ->
+                                    Triple("REJECTED • REFUNDED", Color(0xFFEF4444).copy(alpha = 0.15f), Color(0xFFEF4444))
+                                else -> null
+                            }
+                        }
+
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("transaction_item_${item.id}"),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF131B2E)),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.06f))
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(38.dp)
+                                            .background(
+                                                if (isWithdrawal) Color(0xFFEF4444).copy(alpha = 0.16f) else SuccessGreen.copy(alpha = 0.16f),
+                                                CircleShape
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isWithdrawal) Icons.Default.ArrowDownward else Icons.Default.ArrowUpward,
+                                            contentDescription = null,
+                                            tint = if (isWithdrawal) Color(0xFFEF4444) else SuccessGreen,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column {
+                                        Text(
+                                            text = item.title,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp,
+                                            color = Color.White,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        if (statusBadge != null) {
+                                            Spacer(modifier = Modifier.height(3.dp))
+                                            Surface(
+                                                shape = RoundedCornerShape(6.dp),
+                                                color = statusBadge.second
+                                            ) {
+                                                Text(
+                                                    text = statusBadge.first,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                    fontWeight = FontWeight.Black,
+                                                    color = statusBadge.third,
+                                                    fontSize = 9.sp
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = TimeFormatter.formatTimestamp(item.timestampMillis),
+                                            color = Color.White.copy(alpha = 0.5f),
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = if (isWithdrawal) "$effectiveCoins Coins" else "+$effectiveCoins Coins",
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 14.sp,
+                                    color = if (isWithdrawal) Color(0xFFEF4444) else SuccessGreen
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -592,10 +969,10 @@ fun WalletScreen(
                     imageVector = Icons.Default.CheckCircle,
                     contentDescription = null,
                     tint = SuccessGreen,
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(40.dp)
                 )
             },
-            title = { Text("Payout Successful!", fontWeight = FontWeight.Bold) },
+            title = { Text("Payout Request Submitted!", fontWeight = FontWeight.Black) },
             text = { Text(msg) },
             confirmButton = {
                 Button(
@@ -628,13 +1005,14 @@ private fun WalletHistoryPage(
     Column(
         modifier = modifier
             .fillMaxSize()
+            .background(Color(0xFF090D16))
             .testTag("wallet_history_page")
     ) {
         // Dedicated History Page Top Header Bar
         Surface(
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 3.dp,
-            shadowElevation = 2.dp,
+            color = Color(0xFF0F172A),
+            tonalElevation = 4.dp,
+            shadowElevation = 3.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.fillMaxWidth().statusBarsPadding()) {
@@ -650,22 +1028,24 @@ private fun WalletHistoryPage(
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back to Wallet"
+                            contentDescription = "Back to Wallet",
+                            tint = Color.White
                         )
                     }
                     Spacer(modifier = Modifier.width(4.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Transaction & Payout History",
+                            text = "Passbook & Statement",
                             style = MaterialTheme.typography.titleMedium,
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.ExtraBold
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color.White
                         )
                         Text(
-                            text = "${filteredTransactions.size} records shown",
+                            text = "${filteredTransactions.size} transactions recorded",
                             style = MaterialTheme.typography.labelSmall,
                             fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = Color.White.copy(alpha = 0.65f)
                         )
                     }
                 }
@@ -689,18 +1069,25 @@ private fun WalletHistoryPage(
                             label = {
                                 Text(
                                     text = label,
-                                    fontSize = 11.sp,
-                                    fontWeight = if (filterTab == idx) FontWeight.ExtraBold else FontWeight.Medium
+                                    fontSize = 12.sp,
+                                    fontWeight = if (filterTab == idx) FontWeight.Black else FontWeight.Medium
                                 )
                             },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = AmberPrimary,
-                                selectedLabelColor = Color.Black
+                                selectedLabelColor = Color.Black,
+                                containerColor = Color.White.copy(alpha = 0.08f),
+                                labelColor = Color.White.copy(alpha = 0.8f)
+                            ),
+                            border = FilterChipDefaults.filterChipBorder(
+                                enabled = true,
+                                selected = filterTab == idx,
+                                borderColor = if (filterTab == idx) AmberPrimary else Color.White.copy(alpha = 0.12f)
                             )
                         )
                     }
                 }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
             }
         }
 
@@ -713,24 +1100,25 @@ private fun WalletHistoryPage(
             ) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(24.dp)
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ReceiptLong,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                        tint = Color.White.copy(alpha = 0.3f),
                         modifier = Modifier.size(56.dp)
                     )
                     Text(
-                        text = "No transactions found",
+                        text = "No records found",
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
                     )
                     Text(
-                        text = "Complete video tasks or make a UPI withdrawal to see records here.",
+                        text = "Complete video watch tasks or make UPI withdrawals to see entries here.",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                        color = Color.White.copy(alpha = 0.6f)
                     )
                 }
             }
@@ -763,9 +1151,10 @@ private fun WalletHistoryPage(
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("transaction_item_${item.id}"),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp)
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF131B2E)),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                     ) {
                         Row(
                             modifier = Modifier
@@ -780,9 +1169,9 @@ private fun WalletHistoryPage(
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(36.dp)
+                                        .size(40.dp)
                                         .background(
-                                            if (isWithdrawal) MaterialTheme.colorScheme.error.copy(alpha = 0.15f) else SuccessGreen.copy(alpha = 0.15f),
+                                            if (isWithdrawal) Color(0xFFEF4444).copy(alpha = 0.16f) else SuccessGreen.copy(alpha = 0.16f),
                                             CircleShape
                                         ),
                                     contentAlignment = Alignment.Center
@@ -790,16 +1179,17 @@ private fun WalletHistoryPage(
                                     Icon(
                                         imageVector = if (isWithdrawal) Icons.Default.ArrowDownward else Icons.Default.ArrowUpward,
                                         contentDescription = null,
-                                        tint = if (isWithdrawal) MaterialTheme.colorScheme.error else SuccessGreen,
-                                        modifier = Modifier.size(18.dp)
+                                        tint = if (isWithdrawal) Color(0xFFEF4444) else SuccessGreen,
+                                        modifier = Modifier.size(20.dp)
                                     )
                                 }
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column {
                                     Text(
                                         text = item.title,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.SemiBold,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp,
+                                        color = Color.White,
                                         maxLines = 2,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -813,17 +1203,16 @@ private fun WalletHistoryPage(
                                                 text = statusBadge.first,
                                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                                                 style = MaterialTheme.typography.labelSmall,
-                                                fontWeight = FontWeight.Bold,
+                                                fontWeight = FontWeight.Black,
                                                 color = statusBadge.third,
-                                                fontSize = 10.sp
+                                                fontSize = 9.sp
                                             )
                                         }
                                     }
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
                                         text = TimeFormatter.formatTimestamp(item.timestampMillis),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        color = Color.White.copy(alpha = 0.5f),
                                         fontSize = 11.sp
                                     )
                                 }
@@ -833,8 +1222,8 @@ private fun WalletHistoryPage(
                             Text(
                                 text = if (isWithdrawal) "$effectiveCoins Coins" else "+$effectiveCoins Coins",
                                 style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = if (isWithdrawal) MaterialTheme.colorScheme.error else SuccessGreen
+                                fontWeight = FontWeight.Black,
+                                color = if (isWithdrawal) Color(0xFFEF4444) else SuccessGreen
                             )
                         }
                     }

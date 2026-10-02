@@ -13,39 +13,19 @@ android {
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
+    applicationId = "com.aistudio.kingoking.kxmpzq"
     minSdk = 26
     targetSdk = 36
     val autoVersionCode = ((System.currentTimeMillis() / 60000L) - 29000000L).toInt().coerceAtLeast(10)
     versionCode = autoVersionCode
     versionName = "2.0.$autoVersionCode"
 
+    buildConfigField("String", "APP_ROLE", "\"USER\"")
+
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
-  flavorDimensions += "role"
-  productFlavors {
-    create("admin") {
-      dimension = "role"
-      applicationId = "com.example.kingo.admin"
-      resValue("string", "app_name", "Kingo Admin")
-      buildConfigField("String", "APP_ROLE", "\"ADMIN\"")
-    }
-    create("user") {
-      dimension = "role"
-      applicationId = "com.example.kingo.user"
-      resValue("string", "app_name", "Kingo King")
-      buildConfigField("String", "APP_ROLE", "\"USER\"")
-    }
-  }
-
   signingConfigs {
-    create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-      storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
-    }
     create("debugConfig") {
       storeFile = file("${rootDir}/debug.keystore")
       storePassword = "android"
@@ -59,7 +39,6 @@ android {
       isCrunchPngs = false
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      signingConfig = signingConfigs.getByName("release")
     }
     debug { signingConfig = signingConfigs.getByName("debugConfig") }
   }
@@ -79,16 +58,6 @@ android {
   }
 }
 
-// Ensure any leftover src/admin/java or src/user/java directories are removed so all Kotlin code compiles cleanly from src/main, while keeping flavor-specific res/ icons intact
-listOf(
-  "src/admin/java",
-  "src/user/java"
-).forEach { relativePath ->
-  val target = file(relativePath)
-  if (target.exists()) {
-    target.deleteRecursively()
-  }
-}
 
 // Configure the Secrets Gradle Plugin to use .env and .env.example files
 // to match the convention used in Web projects.

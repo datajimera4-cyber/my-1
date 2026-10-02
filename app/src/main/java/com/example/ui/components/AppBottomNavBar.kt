@@ -86,12 +86,12 @@ fun AppBottomNavBar(
     NavigationBar(
         modifier = modifier
             .border(
-                width = 0.6.dp,
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.30f)
+                width = 0.8.dp,
+                color = Color.White.copy(alpha = 0.08f)
             )
             .testTag("app_bottom_nav_bar"),
-        containerColor = MaterialTheme.colorScheme.surface,
-        tonalElevation = 0.dp
+        containerColor = Color(0xFF0F172A),
+        tonalElevation = 6.dp
     ) {
         NAV_TAB_ITEMS.forEach { item ->
             val isSelected = when (item.screen) {
@@ -136,16 +136,16 @@ fun AppBottomNavBar(
                 label = {
                     Text(
                         text = item.title,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        fontWeight = if (isSelected) FontWeight.Black else FontWeight.Medium,
                         fontSize = 11.sp
                     )
                 },
                 colors = NavigationBarItemDefaults.colors(
                     selectedIconColor = Color.Black,
-                    selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                    selectedTextColor = AmberPrimary,
                     indicatorColor = AmberPrimary,
-                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                    unselectedIconColor = Color.White.copy(alpha = 0.55f),
+                    unselectedTextColor = Color.White.copy(alpha = 0.55f)
                 ),
                 modifier = Modifier.testTag(item.testTag)
             )

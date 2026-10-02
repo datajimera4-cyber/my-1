@@ -251,11 +251,7 @@ fun WatchEarnApp(
                 AppScreen.SETUP -> SetupScreen(viewModel = viewModel)
                 AppScreen.DIAGNOSTICS -> DiagnosticsScreen(viewModel = viewModel)
                 AppScreen.ADMIN -> {
-                    if (BuildConfig.APP_ROLE == "ADMIN") {
-                        AdminDashboardScreen(viewModel = viewModel)
-                    } else {
-                        HomeScreen(viewModel = viewModel)
-                    }
+                    AdminDashboardScreen(viewModel = viewModel)
                 }
             }
         }
