@@ -133,12 +133,14 @@ fun AdminDashboardScreen(
     val cloudServerStatus by viewModel.cloudServerStatus.collectAsState()
     val remoteAppUpdate by viewModel.remoteAppUpdate.collectAsState()
     val updateDriveFolderUrl by viewModel.updateDriveFolderUrl.collectAsState()
+    val appDownloadUrl by viewModel.appDownloadUrl.collectAsState()
     val walletBalance by viewModel.walletBalance.collectAsState()
 
     var selectedTabIndex by remember { mutableIntStateOf(0) }
     var showAddTaskDialog by remember { mutableIntStateOf(0).let { mutableStateOf(false) } }
 
     // Dialogs for Admin actions
+    var selectedDetailUserEmail by remember { mutableStateOf<String?>(null) }
     var adjustCoinsUser by remember { mutableStateOf<UserProfile?>(null) }
     var adjustCoinsInput by remember { mutableStateOf("") }
     var activeChatUser by remember { mutableStateOf<Triple<String, String, String>?>(null) } // (userId, userEmail, userName)
@@ -387,9 +389,8 @@ fun AdminDashboardScreen(
                     users = allUsers,
                     tasks = videoTasks,
                     currentBalance = walletBalance,
-                    onAdjustCoins = { user ->
-                        adjustCoinsUser = user
-                        adjustCoinsInput = user.coinsBalance.toString()
+                    onOpenUserDetail = { user ->
+                        selectedDetailUserEmail = user.email
                     },
                     onChatWithUser = { user ->
                         activeChatUser = Triple(user.userId, user.email, user.name.ifBlank { user.userId })
@@ -417,9 +418,14 @@ fun AdminDashboardScreen(
                     cloudServerStatus = cloudServerStatus,
                     remoteAppUpdate = remoteAppUpdate,
                     updateDriveFolderUrl = updateDriveFolderUrl,
+                    appDownloadUrl = appDownloadUrl,
                     onSaveUpdateFolderUrl = { folderUrl ->
                         viewModel.saveUpdateDriveFolderUrl(folderUrl)
                         Toast.makeText(context, "Google Drive 'update' folder synced!", Toast.LENGTH_SHORT).show()
+                    },
+                    onSaveAppDownloadUrl = { downloadUrl ->
+                        viewModel.saveAppDownloadUrl(downloadUrl)
+                        Toast.makeText(context, "App Download Link saved & synced!", Toast.LENGTH_SHORT).show()
                     },
                     onSaveUrl = { viewModel.saveCloudServerUrl(it) },
                     onTestConnection = { onResult -> viewModel.testGoogleDriveConnection(onResult) },
@@ -462,6 +468,25 @@ fun AdminDashboardScreen(
                 )
             },
             onDismiss = { activeChatUser = null }
+        )
+    }
+
+    // User Detail Popup Dialog (shows Coin Balance + Edit Coins button + Task Stats)
+    selectedDetailUserEmail?.let { detailEmail ->
+        val detailUser = allUsers.find { it.email.equals(detailEmail, ignoreCase = true) }
+            ?: UserProfile("user_app", detailEmail, "VIP Watcher", coinsBalance = walletBalance)
+        UserDetailDialog(
+            user = detailUser,
+            tasks = videoTasks,
+            onEditCoins = {
+                adjustCoinsUser = detailUser
+                adjustCoinsInput = detailUser.coinsBalance.toString()
+            },
+            onChatWithUser = {
+                selectedDetailUserEmail = null
+                activeChatUser = Triple(detailUser.userId, detailUser.email, detailUser.name.ifBlank { detailUser.userId })
+            },
+            onDismiss = { selectedDetailUserEmail = null }
         )
     }
 
@@ -1098,7 +1123,7 @@ private fun UsersTabContent(
     users: List<UserProfile>,
     tasks: List<VideoTaskItem>,
     currentBalance: Int,
-    onAdjustCoins: (UserProfile) -> Unit,
+    onOpenUserDetail: (UserProfile) -> Unit,
     onChatWithUser: (UserProfile) -> Unit
 ) {
     val effectiveUsers = if (users.isEmpty()) {
@@ -1109,10 +1134,9 @@ private fun UsersTabContent(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         items(effectiveUsers, key = { it.email }) { user ->
-            // Parse detailed user task completion, likes, comments & transaction history
             val completedIdsSet = remember(user.completedTaskIdsJson, user.taskLocksJson, user.transactionsJson, tasks) {
                 val set = mutableSetOf<String>()
                 try {
@@ -1130,305 +1154,384 @@ private fun UsersTabContent(
                         if (locks.optLong(k, 0L) > 0L) set.add(k)
                     }
                 } catch (_: Exception) {}
-                try {
-                    val txArr = org.json.JSONArray(user.transactionsJson)
-                    for (i in 0 until txArr.length()) {
-                        val txObj = txArr.optJSONObject(i) ?: continue
-                        val txTitle = txObj.optString("title", "")
-                        if (txTitle.contains("Continuous Watch", ignoreCase = true) || txTitle.contains("continuous watch", ignoreCase = true)) {
-                            tasks.forEach { t ->
-                                if (txTitle.contains(t.title, ignoreCase = true)) {
-                                    set.add(t.id)
-                                }
-                            }
-                        }
-                    }
-                } catch (_: Exception) {}
                 set
             }
-
-            val likedTaskIdsSet = remember(user.likedTasksJson) {
-                val set = mutableSetOf<String>()
-                try {
-                    val arr = org.json.JSONArray(user.likedTasksJson)
-                    for (i in 0 until arr.length()) {
-                        val id = arr.optString(i)
-                        if (id.isNotBlank()) set.add(id)
-                    }
-                } catch (_: Exception) {}
-                set
-            }
-
-            val commentCountsMap = remember(user.commentCountsJson) {
-                val map = mutableMapOf<String, Int>()
-                try {
-                    val obj = org.json.JSONObject(user.commentCountsJson)
-                    val keys = obj.keys()
-                    while (keys.hasNext()) {
-                        val k = keys.next()
-                        val count = obj.optInt(k, 0)
-                        if (count > 0) map[k] = count
-                    }
-                } catch (_: Exception) {}
-                map
-            }
-
-            val recentTransactions = remember(user.transactionsJson) {
-                val list = mutableListOf<Triple<String, Int, Long>>()
-                try {
-                    val arr = org.json.JSONArray(user.transactionsJson)
-                    for (i in 0 until minOf(arr.length(), 8)) {
-                        val obj = arr.optJSONObject(i) ?: continue
-                        list.add(
-                            Triple(
-                                obj.optString("title", "Activity"),
-                                obj.optInt("coins", 0),
-                                obj.optLong("timestampMillis", 0L)
-                            )
-                        )
-                    }
-                } catch (_: Exception) {}
-                list
-            }
-
-            val completedTasksList = tasks.filter { completedIdsSet.contains(it.id) }
-            val pendingTasksList = tasks.filter { !completedIdsSet.contains(it.id) }
-            val totalCommentsCount = commentCountsMap.values.sum()
-            val totalCompletedStat = maxOf(user.completedTasksCount, completedTasksList.size)
+            val totalCompletedStat = maxOf(user.completedTasksCount, completedIdsSet.size)
 
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                modifier = Modifier.fillMaxWidth().testTag("admin_user_${user.email}")
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenUserDetail(user) }
+                    .testTag("admin_user_${user.email}")
             ) {
-                Column(
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(42.dp)
-                                .background(AmberPrimary.copy(alpha = 0.2f), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.People, contentDescription = null, tint = AmberDark, modifier = Modifier.size(22.dp))
-                        }
-
-                        Spacer(modifier = Modifier.width(12.dp))
-
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = if (user.name.isNotBlank()) "${user.name} (${user.email})" else user.email,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = buildString {
-                                    append("ID: ${user.userId}")
-                                    if (user.referralCode.isNotBlank()) {
-                                        append(" • Refer Key: ${user.referralCode}")
-                                    }
-                                    if (user.referredByCode.isNotBlank()) {
-                                        append(" (Invited by: ${user.referredByCode})")
-                                    }
-                                },
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = "${user.coinsBalance} Coins (≈ ₹${String.format(Locale.US, "%.2f", user.coinsBalance / com.example.data.COINS_PER_INR.toDouble())})",
-                                fontWeight = FontWeight.ExtraBold,
-                                color = AmberPrimary,
-                                fontSize = 13.sp
-                            )
-                        }
-
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            OutlinedButton(
-                                onClick = { onChatWithUser(user) },
-                                shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                modifier = Modifier.height(36.dp)
-                            ) {
-                                Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null, tint = PrimaryBlue, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Chat", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PrimaryBlue)
-                            }
-                            OutlinedButton(
-                                onClick = { onAdjustCoins(user) },
-                                shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                modifier = Modifier.height(36.dp)
-                            ) {
-                                Text("Coins", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-
-                    // Summary Statistics Strip (Completed, Not Completed, Liked, Commented)
-                    Row(
+                    Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                            .size(42.dp)
+                            .background(AmberPrimary.copy(alpha = 0.2f), CircleShape),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("✅ Done", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("$totalCompletedStat", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp, color = SuccessGreen)
-                        }
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("⏳ Pending", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("${pendingTasksList.size}", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp, color = AmberPrimary)
-                        }
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("👍 Liked", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("${likedTaskIdsSet.size}", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp, color = PrimaryBlue)
-                        }
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("💬 Comments", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("$totalCommentsCount", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp, color = AmberDark)
-                        }
+                        Icon(Icons.Default.People, contentDescription = null, tint = AmberDark, modifier = Modifier.size(22.dp))
                     }
 
-                    // Per-Task Breakdown Table (Which task user completed, didn't complete, liked, commented)
-                    if (tasks.isNotEmpty()) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
-                                .padding(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text(
-                                text = "📊 User Task-by-Task Statistics:",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
-                                color = AmberPrimary
-                            )
-                            tasks.forEach { task ->
-                                val isDone = completedIdsSet.contains(task.id)
-                                val isLiked = likedTaskIdsSet.contains(task.id)
-                                val commentCnt = commentCountsMap[task.id] ?: 0
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(
-                                        text = "• ${task.title}",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .background(
-                                                    if (isDone) SuccessGreen.copy(alpha = 0.18f) else AlertRed.copy(alpha = 0.14f),
-                                                    RoundedCornerShape(4.dp)
-                                                )
-                                                .padding(horizontal = 5.dp, vertical = 2.dp)
-                                        ) {
-                                            Text(
-                                                text = if (isDone) "✓ Completed" else "✗ Not Done",
-                                                fontSize = 9.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = if (isDone) SuccessGreen else AlertRed
-                                            )
-                                        }
-                                        Box(
-                                            modifier = Modifier
-                                                .background(
-                                                    if (isLiked) PrimaryBlue.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surfaceVariant,
-                                                    RoundedCornerShape(4.dp)
-                                                )
-                                                .padding(horizontal = 5.dp, vertical = 2.dp)
-                                        ) {
-                                            Text(
-                                                text = if (isLiked) "👍 Liked" else "👍 No",
-                                                fontSize = 9.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = if (isLiked) PrimaryBlue else MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                        Box(
-                                            modifier = Modifier
-                                                .background(
-                                                    if (commentCnt > 0) AmberPrimary.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant,
-                                                    RoundedCornerShape(4.dp)
-                                                )
-                                                .padding(horizontal = 5.dp, vertical = 2.dp)
-                                        ) {
-                                            Text(
-                                                text = "💬 $commentCnt/2",
-                                                fontSize = 9.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = if (commentCnt > 0) AmberDark else MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (user.name.isNotBlank()) "${user.name} (${user.email})" else user.email,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = buildString {
+                                append("ID: ${user.userId}")
+                                if (user.referralCode.isNotBlank()) {
+                                    append(" • Refer Key: ${user.referralCode}")
                                 }
-                            }
-                        }
+                                append(" • Tasks Done: $totalCompletedStat")
+                            },
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "Tap to view User Details & Edit Coins",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = AmberPrimary
+                        )
                     }
 
-                    // Recent Activity Log for this user
-                    if (recentTransactions.isNotEmpty()) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f), RoundedCornerShape(10.dp))
-                                .padding(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedButton(
+                            onClick = { onChatWithUser(user) },
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier.height(36.dp)
                         ) {
-                            Text(
-                                text = "🕒 Recent User Actions & Coin Log:",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            recentTransactions.forEach { (txTitle, txCoins, _) ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(
-                                        text = txTitle,
-                                        fontSize = 11.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = if (txCoins >= 0) "+${txCoins}c" else "${txCoins}c",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (txCoins >= 0) SuccessGreen else AlertRed
-                                    )
-                                }
-                            }
+                            Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null, tint = PrimaryBlue, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Chat", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PrimaryBlue)
                         }
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun UserDetailDialog(
+    user: UserProfile,
+    tasks: List<VideoTaskItem>,
+    onEditCoins: () -> Unit,
+    onChatWithUser: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val completedIdsSet = remember(user.completedTaskIdsJson, user.taskLocksJson, user.transactionsJson, tasks) {
+        val set = mutableSetOf<String>()
+        try {
+            val arr = org.json.JSONArray(user.completedTaskIdsJson)
+            for (i in 0 until arr.length()) {
+                val id = arr.optString(i)
+                if (id.isNotBlank()) set.add(id)
+            }
+        } catch (_: Exception) {}
+        try {
+            val locks = org.json.JSONObject(user.taskLocksJson)
+            val keys = locks.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                if (locks.optLong(k, 0L) > 0L) set.add(k)
+            }
+        } catch (_: Exception) {}
+        try {
+            val txArr = org.json.JSONArray(user.transactionsJson)
+            for (i in 0 until txArr.length()) {
+                val txObj = txArr.optJSONObject(i) ?: continue
+                val txTitle = txObj.optString("title", "")
+                if (txTitle.contains("Continuous Watch", ignoreCase = true)) {
+                    tasks.forEach { t ->
+                        if (txTitle.contains(t.title, ignoreCase = true)) {
+                            set.add(t.id)
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        set
+    }
+
+    val likedTaskIdsSet = remember(user.likedTasksJson) {
+        val set = mutableSetOf<String>()
+        try {
+            val arr = org.json.JSONArray(user.likedTasksJson)
+            for (i in 0 until arr.length()) {
+                val id = arr.optString(i)
+                if (id.isNotBlank()) set.add(id)
+            }
+        } catch (_: Exception) {}
+        set
+    }
+
+    val commentCountsMap = remember(user.commentCountsJson) {
+        val map = mutableMapOf<String, Int>()
+        try {
+            val obj = org.json.JSONObject(user.commentCountsJson)
+            val keys = obj.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                val count = obj.optInt(k, 0)
+                if (count > 0) map[k] = count
+            }
+        } catch (_: Exception) {}
+        map
+    }
+
+    val recentTransactions = remember(user.transactionsJson) {
+        val list = mutableListOf<Triple<String, Int, Long>>()
+        try {
+            val arr = org.json.JSONArray(user.transactionsJson)
+            for (i in 0 until minOf(arr.length(), 8)) {
+                val obj = arr.optJSONObject(i) ?: continue
+                list.add(
+                    Triple(
+                        obj.optString("title", "Activity"),
+                        obj.optInt("coins", 0),
+                        obj.optLong("timestampMillis", 0L)
+                    )
+                )
+            }
+        } catch (_: Exception) {}
+        list
+    }
+
+    val completedTasksList = tasks.filter { completedIdsSet.contains(it.id) }
+    val pendingTasksList = tasks.filter { !completedIdsSet.contains(it.id) }
+    val totalCommentsCount = commentCountsMap.values.sum()
+    val totalCompletedStat = maxOf(user.completedTasksCount, completedTasksList.size)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Text(
+                    text = if (user.name.isNotBlank()) user.name else user.email,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 16.sp
+                )
+                Text(
+                    text = "${user.email} • ID: ${user.userId}",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Coin Balance & Edit Coins Header inside Popup
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = AmberPrimary.copy(alpha = 0.14f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "Wallet Balance",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "${user.coinsBalance} Coins (≈ ₹${String.format(Locale.US, "%.2f", user.coinsBalance / com.example.data.COINS_PER_INR.toDouble())})",
+                                fontWeight = FontWeight.ExtraBold,
+                                color = AmberDark,
+                                fontSize = 15.sp
+                            )
+                        }
+                        Button(
+                            onClick = onEditCoins,
+                            colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            modifier = Modifier.height(36.dp)
+                        ) {
+                            Icon(Icons.Default.MonetizationOn, contentDescription = null, tint = Color.Black, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Edit Coins", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    }
+                }
+
+                if (user.referralCode.isNotBlank() || user.referredByCode.isNotBlank()) {
+                    Text(
+                        text = buildString {
+                            if (user.referralCode.isNotBlank()) append("Refer Key: ${user.referralCode}")
+                            if (user.referredByCode.isNotBlank()) append(" • Invited by: ${user.referredByCode}")
+                        },
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                // Summary Statistics Strip
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("✅ Done", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("$totalCompletedStat", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp, color = SuccessGreen)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("⏳ Pending", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("${pendingTasksList.size}", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp, color = AmberPrimary)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("👍 Liked", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("${likedTaskIdsSet.size}", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp, color = PrimaryBlue)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("💬 Comments", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("$totalCommentsCount", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp, color = AmberDark)
+                    }
+                }
+
+                if (tasks.isNotEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "📊 User Task-by-Task Statistics:",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            color = AmberPrimary
+                        )
+                        tasks.forEach { task ->
+                            val isDone = completedIdsSet.contains(task.id)
+                            val isLiked = likedTaskIdsSet.contains(task.id)
+                            val commentCnt = commentCountsMap[task.id] ?: 0
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "• ${task.title}",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = if (isDone) "✓ Done" else "✗ Pending",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isDone) SuccessGreen else AlertRed
+                                    )
+                                    Text(
+                                        text = if (isLiked) "👍" else "",
+                                        fontSize = 9.sp
+                                    )
+                                    Text(
+                                        text = "💬$commentCnt/2",
+                                        fontSize = 9.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (recentTransactions.isNotEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f), RoundedCornerShape(10.dp))
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "🕒 Recent User Actions & Coin Log:",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        recentTransactions.forEach { (txTitle, txCoins, _) ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = txTitle,
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (txCoins >= 0) "+${txCoins}c" else "${txCoins}c",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (txCoins >= 0) SuccessGreen else AlertRed
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onChatWithUser,
+                colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue)
+            ) {
+                Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Chat with User", color = Color.White, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        }
+    )
 }
 
 @Composable
@@ -1540,7 +1643,9 @@ private fun GoogleDriveServerTabContent(
     cloudServerStatus: String,
     remoteAppUpdate: com.example.data.AppUpdateInfo?,
     updateDriveFolderUrl: String,
+    appDownloadUrl: String,
     onSaveUpdateFolderUrl: (String) -> Unit,
+    onSaveAppDownloadUrl: (String) -> Unit,
     onSaveUrl: (String) -> Unit,
     onTestConnection: ((Boolean, String) -> Unit) -> Unit,
     onSyncNow: ((Boolean, String) -> Unit) -> Unit
@@ -1549,6 +1654,7 @@ private fun GoogleDriveServerTabContent(
         mutableStateOf(cloudServerUrl.ifBlank { com.example.data.DataStoreManager.DEFAULT_ADMIN_CLOUD_SERVER_URL })
     }
     var updateFolderInput by remember(updateDriveFolderUrl) { mutableStateOf(updateDriveFolderUrl) }
+    var appDownloadInput by remember(appDownloadUrl) { mutableStateOf(appDownloadUrl) }
     var isTesting by remember { mutableStateOf(false) }
     var isSyncing by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
@@ -1845,6 +1951,48 @@ private fun GoogleDriveServerTabContent(
                     Icon(Icons.Default.Sync, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("Save 'update' Folder Link & Check APK", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        // App Download Link (Included in Refer & Share messages) Card
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "App Download Link (For Refer & Share)",
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = AmberPrimary
+                )
+                Text(
+                    text = "Yahan apne Kingo King User APK ka download link (Google Drive / Website link) dalein. Jab bhi koi user apna 6-Digit Refer Key share karega, yeh download link aur unka Refer Key automatic message ke saath jayega.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 16.sp
+                )
+
+                OutlinedTextField(
+                    value = appDownloadInput,
+                    onValueChange = { appDownloadInput = it },
+                    label = { Text("User App Download Link (APK / Drive URL)") },
+                    placeholder = { Text("https://drive.google.com/file/d/...", fontSize = 12.sp) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Button(
+                    onClick = { onSaveAppDownloadUrl(appDownloadInput.trim()) },
+                    colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Check, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Save App Download Link", color = Color.Black, fontWeight = FontWeight.Bold)
                 }
             }
         }

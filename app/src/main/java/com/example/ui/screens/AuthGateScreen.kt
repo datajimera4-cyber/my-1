@@ -45,6 +45,7 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -84,6 +85,7 @@ fun AuthGateScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val pendingReferralCode by viewModel.pendingReferralCode.collectAsState()
 
     var authTabIndex by remember { mutableIntStateOf(0) } // 0 = Sign In, 1 = Create Account
     var isForgotPasswordMode by remember { mutableStateOf(false) }
@@ -92,6 +94,23 @@ fun AuthGateScreen(
     var passwordInput by remember { mutableStateOf("") }
     var nameInput by remember { mutableStateOf("") }
     var referralCodeInput by remember { mutableStateOf("") }
+
+    androidx.compose.runtime.LaunchedEffect(pendingReferralCode, authTabIndex) {
+        if (referralCodeInput.isBlank() && pendingReferralCode.length == 6 && pendingReferralCode.all { it.isDigit() }) {
+            referralCodeInput = pendingReferralCode
+        } else if (referralCodeInput.isBlank() && authTabIndex == 1) {
+            try {
+                val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                val clipText = clipboard?.primaryClip?.getItemAt(0)?.text?.toString() ?: ""
+                val match = Regex("""(?:Refer Key:\s*|code=|\b)(\d{6})\b""", RegexOption.IGNORE_CASE).find(clipText)
+                val extracted = match?.groupValues?.getOrNull(1) ?: ""
+                if (extracted.length == 6) {
+                    referralCodeInput = extracted
+                    viewModel.savePendingReferralCode(extracted)
+                }
+            } catch (_: Exception) {}
+        }
+    }
 
     // Email Verification OTP states (Sign Up & Forgot Password)
     var otpInput by remember { mutableStateOf("") }

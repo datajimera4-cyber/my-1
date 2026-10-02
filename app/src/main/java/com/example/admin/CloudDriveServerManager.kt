@@ -143,15 +143,18 @@ object CloudDriveServerManager {
                     val getBody = getRes.body?.string() ?: ""
                     val getFinalUrl = getRes.request.url.toString()
                     getRes.close()
-                    getSucceeded = getRes.isSuccessful && !getFinalUrl.contains("accounts.google.com")
-                    // If a local write occurred while this background GET was in flight, discard stale GET payload
-                    val staleDueToConcurrentWrite = !pushLocalChanges && DataStoreManager.lastLocalMutationMillis > pollStartMillis
+                    val getSucceededFlag = getRes.isSuccessful && !getFinalUrl.contains("accounts.google.com")
+                    getSucceeded = getSucceededFlag
+                    // If a local write occurred recently or while this background GET was in flight, discard stale GET payload
+                    val staleDueToConcurrentWrite = !pushLocalChanges &&
+                        (DataStoreManager.lastLocalMutationMillis > (pollStartMillis - 8_000L))
                     remoteJson = if (getSucceeded && !staleDueToConcurrentWrite) {
                         try { JSONObject(getBody) } catch (_: Exception) { null }
                     } else null
                 }
 
                 val deletedTaskIds = dataStoreManager.deletedTaskIdsFlow.first()
+                val deletedPostIds = dataStoreManager.deletedPostIdsFlow.first()
 
                 if (remoteJson != null) {
                     // 1A. Parse Remote Users FIRST so we can accurately count per-task completions across all users
@@ -204,14 +207,44 @@ object CloudDriveServerManager {
                         } catch (_: Exception) {}
                     }
 
+                    // Extract authoritative Admin state from payouts ("cfg_admin_state_v1") if present
+                    val remotePayoutsArr = remoteJson.optJSONArray("payouts")
+                    var adminStateObj: JSONObject? = null
+                    val effectiveDeletedTaskIds = deletedTaskIds.toMutableSet()
+                    val effectiveDeletedPostIds = deletedPostIds.toMutableSet()
+                    if (remotePayoutsArr != null) {
+                        for (i in 0 until remotePayoutsArr.length()) {
+                            val pObj = remotePayoutsArr.optJSONObject(i) ?: continue
+                            if (pObj.optString("id") == "cfg_admin_state_v1") {
+                                val rawNote = pObj.optString("adminNote", "")
+                                if (rawNote.isNotBlank()) {
+                                    adminStateObj = try { JSONObject(rawNote) } catch (_: Exception) { null }
+                                }
+                                break
+                            }
+                        }
+                    }
+                    adminStateObj?.optJSONArray("deletedTaskIds")?.let { arr ->
+                        for (i in 0 until arr.length()) {
+                            val dId = arr.optString(i)
+                            if (dId.isNotBlank()) effectiveDeletedTaskIds.add(dId)
+                        }
+                    }
+                    adminStateObj?.optJSONArray("deletedPostIds")?.let { arr ->
+                        for (i in 0 until arr.length()) {
+                            val dId = arr.optString(i)
+                            if (dId.isNotBlank()) effectiveDeletedPostIds.add(dId)
+                        }
+                    }
+
                     // 1B. Parse Remote Tasks (with maxCompletions & live completedCount)
-                    val remoteTasksArr = remoteJson.optJSONArray("tasks")
+                    val remoteTasksArr = adminStateObj?.optJSONArray("tasks") ?: remoteJson.optJSONArray("tasks")
                     if (remoteTasksArr != null) {
                         val parsedTasks = mutableListOf<VideoTaskItem>()
                         for (i in 0 until remoteTasksArr.length()) {
                             val obj = remoteTasksArr.optJSONObject(i) ?: continue
                             val taskId = obj.optString("id")
-                            if (taskId.isNotBlank() && (!isAdminRole || !deletedTaskIds.contains(taskId))) {
+                            if (taskId.isNotBlank() && !effectiveDeletedTaskIds.contains(taskId)) {
                                 val maxComp = obj.optInt("maxCompletions", 0)
                                 val remoteCompCount = obj.optInt("completedCount", 0)
                                 val usersCompCount = taskCompletionMap[taskId]?.size ?: 0
@@ -239,7 +272,9 @@ object CloudDriveServerManager {
                         }
                         if (!isAdminRole) {
                             dataStoreManager.syncRemoteTasksFromServer(parsedTasks)
-                        } else if (isAdminRole && !pushAdminContent) {
+                        } else if (isAdminRole && !pushAdminContent &&
+                            (System.currentTimeMillis() - DataStoreManager.lastLocalMutationMillis) > 8_000L
+                        ) {
                             dataStoreManager.syncRemoteTasksFromServer(parsedTasks)
                         }
                     } else if (taskCompletionMap.isNotEmpty()) {
@@ -253,13 +288,13 @@ object CloudDriveServerManager {
                     }
 
                     // 1C. Parse Remote Admin Posts / Banners
-                    val remotePostsArr = remoteJson.optJSONArray("posts")
+                    val remotePostsArr = adminStateObj?.optJSONArray("posts") ?: remoteJson.optJSONArray("posts")
                     if (remotePostsArr != null) {
                         val parsedPosts = mutableListOf<AdminPostItem>()
                         for (i in 0 until remotePostsArr.length()) {
                             val obj = remotePostsArr.optJSONObject(i) ?: continue
                             val postId = obj.optString("id")
-                            if (postId.isNotBlank()) {
+                            if (postId.isNotBlank() && !effectiveDeletedPostIds.contains(postId)) {
                                 val rawTab = obj.optString("targetTab", "HOME").uppercase()
                                 val remoteTab = if (rawTab == "ALL" || rawTab.isBlank()) "HOME" else rawTab
                                 parsedPosts.add(
@@ -278,10 +313,12 @@ object CloudDriveServerManager {
                                 )
                             }
                         }
-                        // Always sync remote posts even if parsedPosts is empty (when Admin deletes all banners/posts!)
+                        // Sync remote posts (when in Admin role, skip if a local mutation happened recently)
                         if (!isAdminRole) {
                             dataStoreManager.syncAdminPosts(parsedPosts)
-                        } else if (isAdminRole && !pushAdminContent) {
+                        } else if (isAdminRole && !pushAdminContent &&
+                            (System.currentTimeMillis() - DataStoreManager.lastLocalMutationMillis) > 8_000L
+                        ) {
                             dataStoreManager.syncAdminPosts(parsedPosts)
                         }
                     }
@@ -310,15 +347,25 @@ object CloudDriveServerManager {
                         }
                     }
 
-                    val remotePayoutsArr = remoteJson.optJSONArray("payouts")
                     var remoteConfiguredUpdateUrl: String? = null
+                    var remoteConfiguredAppDownloadUrl: String? = null
+                    var remoteSharedReferralCode: String? = null
                     if (remotePayoutsArr != null) {
                         val parsedPayouts = mutableListOf<PayoutRequest>()
                         for (i in 0 until remotePayoutsArr.length()) {
                             val obj = remotePayoutsArr.optJSONObject(i) ?: continue
                             val id = obj.optString("id")
-                            if (id == "cfg_update_folder") {
+                            if (id == "cfg_admin_state_v1") {
+                                continue
+                            } else if (id == "cfg_update_folder") {
                                 remoteConfiguredUpdateUrl = obj.optString("adminNote", "").trim()
+                            } else if (id == "cfg_app_download_url") {
+                                remoteConfiguredAppDownloadUrl = obj.optString("adminNote", "").trim()
+                            } else if (id == "cfg_ref_share") {
+                                val ref = obj.optString("adminNote", "").trim().filter { it.isDigit() }.take(6)
+                                if (ref.length == 6) {
+                                    remoteSharedReferralCode = ref
+                                }
                             } else if (id.startsWith("chat_")) {
                                 val msgText = obj.optString("adminNote", "")
                                 if (msgText.isNotBlank()) {
@@ -370,6 +417,15 @@ object CloudDriveServerManager {
                     if (remoteConfiguredUpdateUrl != null && !isAdminRole) {
                         dataStoreManager.setUpdateDriveFolderUrl(remoteConfiguredUpdateUrl)
                     }
+                    if (!remoteConfiguredAppDownloadUrl.isNullOrBlank() && !isAdminRole) {
+                        dataStoreManager.saveAppDownloadUrl(remoteConfiguredAppDownloadUrl!!)
+                    }
+                    if (!remoteSharedReferralCode.isNullOrBlank()) {
+                        val existingPending = dataStoreManager.pendingReferralCodeFlow.first()
+                        if (existingPending.isBlank()) {
+                            dataStoreManager.savePendingReferralCode(remoteSharedReferralCode!!)
+                        }
+                    }
 
                     // 1E. Parse Remote App Update from Google Drive "update" folder
                     var resolvedUpdate: AppUpdateInfo? = null
@@ -409,7 +465,7 @@ object CloudDriveServerManager {
                 }
 
                 val updatedTasks = dataStoreManager.videoTasksFlow.first()
-                val updatedPosts = dataStoreManager.adminPostsFlow.first()
+                val updatedPosts = dataStoreManager.rawAdminPostsWithConfigFlow.first()
                 val updatedUsers = dataStoreManager.usersFlow.first()
                 val updatedPayouts = dataStoreManager.payoutRequestsFlow.first()
                 val updatedSupportMessages = dataStoreManager.supportMessagesFlow.first()
@@ -444,6 +500,8 @@ object CloudDriveServerManager {
                     put("role", BuildConfig.APP_ROLE)
 
                     // Only ADMIN pushes tasks and posts so User App never overwrites Admin updates
+                    var pushedTasksArr: JSONArray? = null
+                    var pushedPostsArr: JSONArray? = null
                     if (isAdminRole && pushAdminContent) {
                         val tasksArr = JSONArray()
                         for (t in updatedTasks) {
@@ -467,6 +525,7 @@ object CloudDriveServerManager {
                             })
                         }
                         put("tasks", tasksArr)
+                        pushedTasksArr = tasksArr
 
                         val postsArr = JSONArray()
                         for (post in updatedPosts) {
@@ -484,6 +543,7 @@ object CloudDriveServerManager {
                             })
                         }
                         put("posts", postsArr)
+                        pushedPostsArr = postsArr
                     }
 
                     val usersArr = JSONArray()
@@ -509,6 +569,8 @@ object CloudDriveServerManager {
                     put("users", usersArr)
 
                     val configuredUpdateUrl = dataStoreManager.updateDriveFolderUrlFlow.first()
+                    val configuredAppDownloadUrl = dataStoreManager.appDownloadUrlFlow.first()
+                    val pendingRefShareCode = dataStoreManager.pendingReferralCodeFlow.first()
                     val payoutsArr = JSONArray()
                     for (p in updatedPayouts) {
                         payoutsArr.put(JSONObject().apply {
@@ -525,6 +587,27 @@ object CloudDriveServerManager {
                             put("adminNote", p.adminNote ?: "")
                         })
                     }
+                    if (isAdminRole && pushAdminContent && pushedTasksArr != null && pushedPostsArr != null) {
+                        val adminStateJson = JSONObject().apply {
+                            put("versionMillis", System.currentTimeMillis())
+                            put("tasks", pushedTasksArr)
+                            put("posts", pushedPostsArr)
+                            put("deletedTaskIds", JSONArray(deletedTaskIds.toList()))
+                            put("deletedPostIds", JSONArray(deletedPostIds.toList()))
+                        }.toString()
+                        payoutsArr.put(JSONObject().apply {
+                            put("id", "cfg_admin_state_v1")
+                            put("userId", "system")
+                            put("userEmail", "admin@system")
+                            put("amountCoins", 0)
+                            put("amountInr", 0.0)
+                            put("method", "ADMIN_STATE")
+                            put("destination", "DRIVE")
+                            put("status", "PENDING")
+                            put("requestedAtMillis", System.currentTimeMillis())
+                            put("adminNote", adminStateJson)
+                        })
+                    }
                     if (configuredUpdateUrl.isNotBlank() || isAdminRole) {
                         payoutsArr.put(JSONObject().apply {
                             put("id", "cfg_update_folder")
@@ -537,6 +620,34 @@ object CloudDriveServerManager {
                             put("status", "PENDING")
                             put("requestedAtMillis", System.currentTimeMillis())
                             put("adminNote", configuredUpdateUrl)
+                        })
+                    }
+                    if (configuredAppDownloadUrl.isNotBlank() || isAdminRole) {
+                        payoutsArr.put(JSONObject().apply {
+                            put("id", "cfg_app_download_url")
+                            put("userId", "system")
+                            put("userEmail", "admin@system")
+                            put("amountCoins", 0)
+                            put("amountInr", 0.0)
+                            put("method", "APP_DOWNLOAD_URL")
+                            put("destination", "DRIVE")
+                            put("status", "PENDING")
+                            put("requestedAtMillis", System.currentTimeMillis())
+                            put("adminNote", configuredAppDownloadUrl)
+                        })
+                    }
+                    if (pendingRefShareCode.length == 6 && pendingRefShareCode.all { it.isDigit() }) {
+                        payoutsArr.put(JSONObject().apply {
+                            put("id", "cfg_ref_share")
+                            put("userId", "system")
+                            put("userEmail", "ref@system")
+                            put("amountCoins", 0)
+                            put("amountInr", 0.0)
+                            put("method", "REF_SHARE")
+                            put("destination", "REF")
+                            put("status", "PENDING")
+                            put("requestedAtMillis", System.currentTimeMillis())
+                            put("adminNote", pendingRefShareCode)
                         })
                     }
                     // Also include support messages in payoutsArr with "chat_" prefix so existing deployed Apps Script merges & persists them automatically

@@ -70,8 +70,10 @@ fun ActiveWatchTimerBanner(
     val requiredMillis by viewModel.requiredMillis.collectAsState()
     val targetTitle by viewModel.targetTaskTitle.collectAsState()
     val currentMilestone by viewModel.currentMilestoneTier.collectAsState()
+    val searchProgress by viewModel.searchProgress.collectAsState()
 
-    val isVisible = (sessionState == SessionState.ACTIVE || sessionState == SessionState.WAITING || watchedMillis > 0L) &&
+    val isVisible = !searchProgress.isSearching &&
+            (sessionState == SessionState.ACTIVE || sessionState == SessionState.WAITING || watchedMillis > 0L) &&
             sessionState != SessionState.COMPLETED
 
     AnimatedVisibility(

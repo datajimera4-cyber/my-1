@@ -879,16 +879,13 @@ class FloatingTimerOverlayManager(private val context: Context) {
 
     @SuppressLint("SetTextI18n")
     fun showOrUpdateSearchLoadingOverlay(
-        title: String,
-        channel: String,
-        statusText: String = "Searching & opening video..."
+        @Suppress("UNUSED_PARAMETER") title: String,
+        @Suppress("UNUSED_PARAMETER") channel: String,
+        @Suppress("UNUSED_PARAMETER") statusText: String = "Opening..."
     ) {
         runOnMain {
             val existingView = searchLoadingOverlayView
             if (existingView != null) {
-                searchLoadingTitleTextView?.text = title.ifBlank { "Loading Video..." }
-                searchLoadingChannelTextView?.text = if (channel.isNotBlank()) channel else "YouTube"
-                searchLoadingStatusTextView?.text = statusText
                 return@runOnMain
             }
 
@@ -932,19 +929,19 @@ class FloatingTimerOverlayManager(private val context: Context) {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
                 setPadding(
-                    (28 * density).toInt(),
                     (32 * density).toInt(),
                     (28 * density).toInt(),
-                    (32 * density).toInt()
+                    (32 * density).toInt(),
+                    (28 * density).toInt()
                 )
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.RECTANGLE
-                    cornerRadius = 24 * density
+                    cornerRadius = 22 * density
                     setColor(Color.parseColor("#1E293B"))
                     setStroke((1.5f * density).toInt(), Color.parseColor("#33F59E0B"))
                 }
                 layoutParams = FrameLayout.LayoutParams(
-                    (310 * density).toInt(),
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
                     FrameLayout.LayoutParams.WRAP_CONTENT
                 ).apply {
                     gravity = Gravity.CENTER
@@ -955,87 +952,26 @@ class FloatingTimerOverlayManager(private val context: Context) {
                 isIndeterminate = true
                 indeterminateTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#F59E0B"))
                 layoutParams = LinearLayout.LayoutParams(
-                    (48 * density).toInt(),
-                    (48 * density).toInt()
+                    (44 * density).toInt(),
+                    (44 * density).toInt()
                 ).apply {
-                    bottomMargin = (18 * density).toInt()
+                    bottomMargin = (14 * density).toInt()
                 }
             }
             card.addView(progressBar)
 
             val headerTv = TextView(context).apply {
-                text = "Opening Video..."
+                text = "Opening..."
                 setTextColor(Color.WHITE)
-                textSize = 18f
+                textSize = 16.5f
                 typeface = android.graphics.Typeface.DEFAULT_BOLD
                 gravity = Gravity.CENTER
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    bottomMargin = (8 * density).toInt()
-                }
+                )
             }
             card.addView(headerTv)
-
-            val titleTv = TextView(context).apply {
-                text = title.ifBlank { "Loading Video..." }
-                setTextColor(Color.parseColor("#E2E8F0"))
-                textSize = 13.5f
-                maxLines = 2
-                ellipsize = android.text.TextUtils.TruncateAt.END
-                gravity = Gravity.CENTER
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    bottomMargin = (4 * density).toInt()
-                }
-            }
-            searchLoadingTitleTextView = titleTv
-            card.addView(titleTv)
-
-            val channelTv = TextView(context).apply {
-                text = if (channel.isNotBlank()) channel else "YouTube"
-                setTextColor(Color.parseColor("#F59E0B"))
-                textSize = 12f
-                typeface = android.graphics.Typeface.DEFAULT_BOLD
-                maxLines = 1
-                ellipsize = android.text.TextUtils.TruncateAt.END
-                gravity = Gravity.CENTER
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    bottomMargin = (16 * density).toInt()
-                }
-            }
-            searchLoadingChannelTextView = channelTv
-            card.addView(channelTv)
-
-            val statusTv = TextView(context).apply {
-                text = statusText
-                setTextColor(Color.parseColor("#94A3B8"))
-                textSize = 12f
-                gravity = Gravity.CENTER
-                setPadding(
-                    (14 * density).toInt(),
-                    (8 * density).toInt(),
-                    (14 * density).toInt(),
-                    (8 * density).toInt()
-                )
-                background = GradientDrawable().apply {
-                    shape = GradientDrawable.RECTANGLE
-                    cornerRadius = 50 * density
-                    setColor(Color.parseColor("#0F172A"))
-                }
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                )
-            }
-            searchLoadingStatusTextView = statusTv
-            card.addView(statusTv)
 
             root.addView(card)
 

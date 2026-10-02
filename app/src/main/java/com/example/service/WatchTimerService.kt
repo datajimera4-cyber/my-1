@@ -266,11 +266,13 @@ class WatchTimerService : Service() {
                 )
 
                 val isMatched = WatchSessionRepository.matchResult.value != com.example.data.MatchResult.MISMATCH
-                val isSearchStillInProgress = YouTubeLiveSearchService.isServiceConnected &&
-                        YouTubeLiveSearchService.currentPhase != YouTubeLiveSearchService.LiveSearchPhase.IDLE &&
-                        YouTubeLiveSearchService.currentPhase != YouTubeLiveSearchService.LiveSearchPhase.COMPLETED
+                val isSearchStillInProgress = YouTubeLiveSearchService.isServiceConnected && (
+                        !YouTubeLiveSearchService.isWatchPlayerConfirmedOpen ||
+                        (YouTubeLiveSearchService.currentPhase != YouTubeLiveSearchService.LiveSearchPhase.IDLE &&
+                         YouTubeLiveSearchService.currentPhase != YouTubeLiveSearchService.LiveSearchPhase.COMPLETED)
+                )
 
-                // Timer ticks ONLY when YouTube is active in foreground, target video has been clicked/opened, matches, and is playing (not paused)
+                // Timer ticks ONLY when YouTube is active in foreground, target video is confirmed open in Watch Player, matches, and is playing (not paused)
                 val isPlaying = !isAppForeground && isYtForeground && sessionActive && isMatched && !isExplicitlyPaused && !isSearchStillInProgress
 
                 WatchSessionRepository.setPlaybackPlaying(isPlaying)
@@ -284,13 +286,14 @@ class WatchTimerService : Service() {
                 val shouldShowOverlay = sessionActive && isYtForeground && !isAppForeground
 
                 if (shouldShowOverlay) {
-                    val searchOverlayStillActive = YouTubeLiveSearchService.isSearchOverlayActive &&
-                            elapsedSinceLaunch < 20_000L
+                    val searchOverlayStillActive = (YouTubeLiveSearchService.isSearchOverlayActive ||
+                            (YouTubeLiveSearchService.isServiceConnected && !YouTubeLiveSearchService.isWatchPlayerConfirmedOpen)) &&
+                            elapsedSinceLaunch < 35_000L
                     if (searchOverlayStillActive) {
                         floatingOverlayManager.showOrUpdateSearchLoadingOverlay(
                             title = WatchSessionRepository.targetTaskTitle.value ?: "Video Task",
                             channel = WatchSessionRepository.targetTaskAuthor.value ?: "YouTube",
-                            statusText = YouTubeLiveSearchService.searchOverlayStatusText
+                            statusText = "Opening..."
                         )
                     } else {
                         YouTubeLiveSearchService.dismissSearchOverlay()

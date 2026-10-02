@@ -65,6 +65,13 @@ class DataStoreManager(private val context: Context) {
         private val KEY_REMOTE_APP_UPDATE_JSON = stringPreferencesKey("remote_app_update_json")
         private val KEY_INSTALLED_UPDATE_SIGNATURE = stringPreferencesKey("installed_update_signature")
         private val KEY_UPDATE_DRIVE_FOLDER_URL = stringPreferencesKey("update_drive_folder_url")
+        private val KEY_DELETED_POST_IDS = stringPreferencesKey("deleted_post_ids_json")
+        private val KEY_APP_DOWNLOAD_URL = stringPreferencesKey("app_download_url")
+        private val KEY_PENDING_REFERRAL_CODE = stringPreferencesKey("pending_referral_code")
+        private val KEY_LAST_SHARED_REFERRAL_CODE = stringPreferencesKey("last_shared_referral_code")
+
+        const val SYSTEM_CONFIG_APP_LINK_ID = "__system_config_app_download_url__"
+        const val SYSTEM_CONFIG_REF_SHARE_ID = "__system_config_last_referral_share__"
 
         @Volatile
         var lastLocalMutationMillis: Long = 0L
@@ -80,10 +87,57 @@ class DataStoreManager(private val context: Context) {
         } else {
             parseAdminPostsJson(json)
         }
-        list.sortedWith(
-            compareByDescending<AdminPostItem> { it.isPinned }
-                .thenByDescending { if (it.isPinned) it.pinnedAt else 0L }
-        )
+        list.filter { !it.postType.startsWith("CONFIG_") && !it.id.startsWith("__system_config_") }
+            .sortedWith(
+                compareByDescending<AdminPostItem> { it.isPinned }
+                    .thenByDescending { if (it.isPinned) it.pinnedAt else 0L }
+            )
+    }
+
+    val rawAdminPostsWithConfigFlow: Flow<List<AdminPostItem>> = context.dataStore.data.map { prefs ->
+        val json = prefs[KEY_ADMIN_POSTS]
+        val baseList = if (json == null) {
+            getDefaultAdminPosts()
+        } else {
+            parseAdminPostsJson(json)
+        }.filter { !it.postType.startsWith("CONFIG_") && !it.id.startsWith("__system_config_") }.toMutableList()
+
+        val appDownloadUrl = prefs[KEY_APP_DOWNLOAD_URL]?.trim() ?: ""
+        if (appDownloadUrl.isNotBlank()) {
+            baseList.add(
+                AdminPostItem(
+                    id = SYSTEM_CONFIG_APP_LINK_ID,
+                    title = "App Download Link",
+                    message = appDownloadUrl,
+                    targetTab = "NONE",
+                    postType = "CONFIG_APP_LINK",
+                    actionUrl = appDownloadUrl,
+                    imageUrl = "",
+                    createdAt = System.currentTimeMillis(),
+                    isPinned = false,
+                    pinnedAt = 0L
+                )
+            )
+        }
+
+        val lastSharedRef = prefs[KEY_LAST_SHARED_REFERRAL_CODE]?.trim() ?: ""
+        if (lastSharedRef.length == 6 && lastSharedRef.all { it.isDigit() }) {
+            baseList.add(
+                AdminPostItem(
+                    id = SYSTEM_CONFIG_REF_SHARE_ID,
+                    title = lastSharedRef,
+                    message = lastSharedRef,
+                    targetTab = "NONE",
+                    postType = "CONFIG_REF_SHARE",
+                    actionUrl = lastSharedRef,
+                    imageUrl = "",
+                    createdAt = System.currentTimeMillis(),
+                    isPinned = false,
+                    pinnedAt = 0L
+                )
+            )
+        }
+        baseList
     }
 
     val notifiedItemIdsFlow: Flow<Set<String>> = context.dataStore.data.map { prefs ->
@@ -125,6 +179,34 @@ class DataStoreManager(private val context: Context) {
 
     val updateDriveFolderUrlFlow: Flow<String> = context.dataStore.data.map { prefs ->
         prefs[KEY_UPDATE_DRIVE_FOLDER_URL] ?: ""
+    }
+
+    val appDownloadUrlFlow: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_APP_DOWNLOAD_URL] ?: ""
+    }
+
+    val pendingReferralCodeFlow: Flow<String> = context.dataStore.data.map { prefs ->
+        val pending = prefs[KEY_PENDING_REFERRAL_CODE]?.trim() ?: ""
+        if (pending.length == 6 && pending.all { it.isDigit() }) {
+            pending
+        } else {
+            val shared = prefs[KEY_LAST_SHARED_REFERRAL_CODE]?.trim() ?: ""
+            if (shared.length == 6 && shared.all { it.isDigit() }) shared else ""
+        }
+    }
+
+    val deletedPostIdsFlow: Flow<Set<String>> = context.dataStore.data.map { prefs ->
+        val json = prefs[KEY_DELETED_POST_IDS] ?: "[]"
+        try {
+            val arr = JSONArray(json)
+            val set = mutableSetOf<String>()
+            for (i in 0 until arr.length()) {
+                set.add(arr.getString(i))
+            }
+            set
+        } catch (_: Exception) {
+            emptySet()
+        }
     }
 
     val deletedTaskIdsFlow: Flow<Set<String>> = context.dataStore.data.map { prefs ->
@@ -430,8 +512,36 @@ class DataStoreManager(private val context: Context) {
     }
 
     suspend fun setUpdateDriveFolderUrl(url: String) {
+        lastLocalMutationMillis = System.currentTimeMillis()
         context.dataStore.edit { prefs ->
             prefs[KEY_UPDATE_DRIVE_FOLDER_URL] = url.trim()
+        }
+    }
+
+    suspend fun saveAppDownloadUrl(url: String) {
+        lastLocalMutationMillis = System.currentTimeMillis()
+        context.dataStore.edit { prefs ->
+            prefs[KEY_APP_DOWNLOAD_URL] = url.trim()
+        }
+    }
+
+    suspend fun savePendingReferralCode(code: String) {
+        val clean = code.trim().filter { it.isDigit() }.take(6)
+        if (clean.length == 6) {
+            context.dataStore.edit { prefs ->
+                prefs[KEY_PENDING_REFERRAL_CODE] = clean
+            }
+        }
+    }
+
+    suspend fun recordSharedReferralCode(code: String) {
+        val clean = code.trim().filter { it.isDigit() }.take(6)
+        if (clean.length == 6) {
+            lastLocalMutationMillis = System.currentTimeMillis()
+            context.dataStore.edit { prefs ->
+                prefs[KEY_LAST_SHARED_REFERRAL_CODE] = clean
+                prefs[KEY_PENDING_REFERRAL_CODE] = clean
+            }
         }
     }
 
@@ -928,6 +1038,7 @@ class DataStoreManager(private val context: Context) {
         }
 
         var result = Pair(true, "Account created! +50 Coins Welcome Bonus added!")
+        lastLocalMutationMillis = System.currentTimeMillis()
         context.dataStore.edit { prefs ->
             val users = parseUsersJson(prefs[KEY_USERS] ?: "[]").toMutableList()
             if (users.any { it.email.equals(cleanEmail, ignoreCase = true) }) {
@@ -1046,6 +1157,7 @@ class DataStoreManager(private val context: Context) {
     }
 
     suspend fun adminDeleteVideoTask(taskId: String) {
+        lastLocalMutationMillis = System.currentTimeMillis()
         context.dataStore.edit { prefs ->
             val json = prefs[KEY_VIDEO_TASKS]
             val list = if (json == null) getDefaultTasks().toMutableList() else parseVideoTasksJson(json).toMutableList()
@@ -1178,6 +1290,7 @@ class DataStoreManager(private val context: Context) {
     }
 
     suspend fun addVideoTask(task: VideoTaskItem) {
+        lastLocalMutationMillis = System.currentTimeMillis()
         context.dataStore.edit { prefs ->
             val json = prefs[KEY_VIDEO_TASKS]
             val currentList = if (json.isNullOrBlank()) getDefaultTasks().toMutableList() else parseVideoTasksJson(json).toMutableList()
@@ -1188,10 +1301,21 @@ class DataStoreManager(private val context: Context) {
                     .thenByDescending { if (it.isPinned) it.pinnedAt else 0L }
             )
             prefs[KEY_VIDEO_TASKS] = serializeVideoTasksJson(sortedList)
+
+            // Also ensure it is removed from deletedTaskIds if re-added
+            val deletedJson = prefs[KEY_DELETED_TASK_IDS] ?: "[]"
+            val deletedArr = try { JSONArray(deletedJson) } catch (_: Exception) { JSONArray() }
+            val newDeletedArr = JSONArray()
+            for (i in 0 until deletedArr.length()) {
+                val id = deletedArr.optString(i)
+                if (id.isNotBlank() && id != task.id) newDeletedArr.put(id)
+            }
+            prefs[KEY_DELETED_TASK_IDS] = newDeletedArr.toString()
         }
     }
 
     suspend fun togglePinVideoTask(taskId: String): Boolean {
+        lastLocalMutationMillis = System.currentTimeMillis()
         var newPinState = false
         context.dataStore.edit { prefs ->
             val json = prefs[KEY_VIDEO_TASKS]
@@ -1216,6 +1340,7 @@ class DataStoreManager(private val context: Context) {
     }
 
     suspend fun updateVideoTask(updatedTask: VideoTaskItem) {
+        lastLocalMutationMillis = System.currentTimeMillis()
         context.dataStore.edit { prefs ->
             val json = prefs[KEY_VIDEO_TASKS]
             val currentList = if (json.isNullOrBlank()) getDefaultTasks().toMutableList() else parseVideoTasksJson(json).toMutableList()
@@ -1277,6 +1402,7 @@ class DataStoreManager(private val context: Context) {
     }
 
     suspend fun addAdminPost(post: AdminPostItem) {
+        lastLocalMutationMillis = System.currentTimeMillis()
         context.dataStore.edit { prefs ->
             val json = prefs[KEY_ADMIN_POSTS]
             val currentList = if (json == null) getDefaultAdminPosts().toMutableList() else parseAdminPostsJson(json).toMutableList()
@@ -1291,6 +1417,7 @@ class DataStoreManager(private val context: Context) {
     }
 
     suspend fun togglePinAdminPost(postId: String): Boolean {
+        lastLocalMutationMillis = System.currentTimeMillis()
         var newPinState = false
         context.dataStore.edit { prefs ->
             val json = prefs[KEY_ADMIN_POSTS]
@@ -1315,17 +1442,84 @@ class DataStoreManager(private val context: Context) {
     }
 
     suspend fun deleteAdminPost(postId: String) {
+        lastLocalMutationMillis = System.currentTimeMillis()
         context.dataStore.edit { prefs ->
             val json = prefs[KEY_ADMIN_POSTS]
             val currentList = if (json == null) getDefaultAdminPosts().toMutableList() else parseAdminPostsJson(json).toMutableList()
             currentList.removeAll { it.id == postId }
             prefs[KEY_ADMIN_POSTS] = serializeAdminPostsJson(currentList)
+
+            val deletedJson = prefs[KEY_DELETED_POST_IDS] ?: "[]"
+            val deletedArr = try { JSONArray(deletedJson) } catch (_: Exception) { JSONArray() }
+            var exists = false
+            for (i in 0 until deletedArr.length()) {
+                if (deletedArr.optString(i) == postId) {
+                    exists = true
+                    break
+                }
+            }
+            if (!exists) {
+                deletedArr.put(postId)
+                prefs[KEY_DELETED_POST_IDS] = deletedArr.toString()
+            }
         }
     }
 
     suspend fun syncAdminPosts(posts: List<AdminPostItem>) {
         context.dataStore.edit { prefs ->
-            prefs[KEY_ADMIN_POSTS] = serializeAdminPostsJson(posts)
+            // Extract any system config items carried in adminPosts
+            posts.firstOrNull { it.id == SYSTEM_CONFIG_APP_LINK_ID || it.postType == "CONFIG_APP_LINK" }?.let { cfg ->
+                val link = cfg.actionUrl.ifBlank { cfg.message }.trim()
+                if (link.isNotBlank()) {
+                    prefs[KEY_APP_DOWNLOAD_URL] = link
+                }
+            }
+            posts.firstOrNull { it.id == SYSTEM_CONFIG_REF_SHARE_ID || it.postType == "CONFIG_REF_SHARE" }?.let { refCfg ->
+                val code = refCfg.actionUrl.ifBlank { refCfg.title }.trim().filter { it.isDigit() }.take(6)
+                if (code.length == 6) {
+                    prefs[KEY_LAST_SHARED_REFERRAL_CODE] = code
+                    if (prefs[KEY_PENDING_REFERRAL_CODE].isNullOrBlank()) {
+                        prefs[KEY_PENDING_REFERRAL_CODE] = code
+                    }
+                }
+            }
+
+            val deletedJson = prefs[KEY_DELETED_POST_IDS] ?: "[]"
+            val deletedIds = mutableSetOf<String>()
+            try {
+                val arr = JSONArray(deletedJson)
+                for (i in 0 until arr.length()) deletedIds.add(arr.optString(i))
+            } catch (_: Exception) {}
+
+            val currentJson = prefs[KEY_ADMIN_POSTS]
+            val localList = if (currentJson == null) getDefaultAdminPosts() else parseAdminPostsJson(currentJson)
+
+            val cleanRemote = posts.filter {
+                !it.postType.startsWith("CONFIG_") &&
+                    !it.id.startsWith("__system_config_") &&
+                    (com.example.BuildConfig.APP_ROLE != "ADMIN" || !deletedIds.contains(it.id))
+            }
+
+            val remoteIds = cleanRemote.map { it.id }.toSet()
+            val merged = cleanRemote.toMutableList()
+            val now = System.currentTimeMillis()
+            // Preserve local admin posts that were just created or when in Admin role and not deleted
+            for (localPost in localList) {
+                if (localPost.postType.startsWith("CONFIG_") || localPost.id.startsWith("__system_config_")) continue
+                if (!remoteIds.contains(localPost.id) && !deletedIds.contains(localPost.id)) {
+                    val isRecent = (now - localPost.createdAt) < 120_000L
+                    if (com.example.BuildConfig.APP_ROLE == "ADMIN" || isRecent) {
+                        merged.add(0, localPost)
+                    }
+                }
+            }
+
+            val sorted = merged.sortedWith(
+                compareByDescending<AdminPostItem> { it.isPinned }
+                    .thenByDescending { if (it.isPinned) it.pinnedAt else 0L }
+                    .thenByDescending { it.createdAt }
+            )
+            prefs[KEY_ADMIN_POSTS] = serializeAdminPostsJson(sorted)
         }
     }
 
@@ -1736,26 +1930,47 @@ class DataStoreManager(private val context: Context) {
             val localList = if (currentJson.isNullOrBlank()) getDefaultTasks() else parseVideoTasksJson(currentJson)
             val localMap = localList.associateBy { it.id }
 
+            val deletedJson = prefs[KEY_DELETED_TASK_IDS] ?: "[]"
+            val deletedIds = mutableSetOf<String>()
+            try {
+                val arr = JSONArray(deletedJson)
+                for (i in 0 until arr.length()) deletedIds.add(arr.optString(i))
+            } catch (_: Exception) {}
+
             // Merge remote authoritative task metadata with local user's personal lock/completion state
-            val merged = remoteTasks.map { remote ->
-                val local = localMap[remote.id]
-                if (local != null) {
-                    remote.copy(
-                        isCompleted = local.isCompleted,
-                        watchedMillis = local.watchedMillis,
-                        lockedUntilMillis = local.lockedUntilMillis,
-                        selectedDurationSeconds = remote.selectedDurationSeconds,
-                        maxCompletions = if (remote.maxCompletions > 0) remote.maxCompletions else local.maxCompletions,
-                        completedCount = maxOf(remote.completedCount, local.completedCount)
-                    )
-                } else {
-                    remote
+            val merged = remoteTasks
+                .filter { com.example.BuildConfig.APP_ROLE != "ADMIN" || !deletedIds.contains(it.id) }
+                .map { remote ->
+                    val local = localMap[remote.id]
+                    if (local != null) {
+                        remote.copy(
+                            isCompleted = local.isCompleted,
+                            watchedMillis = local.watchedMillis,
+                            lockedUntilMillis = local.lockedUntilMillis,
+                            selectedDurationSeconds = remote.selectedDurationSeconds,
+                            maxCompletions = if (remote.maxCompletions > 0) remote.maxCompletions else local.maxCompletions,
+                            completedCount = maxOf(remote.completedCount, local.completedCount)
+                        )
+                    } else {
+                        remote
+                    }
+                }.toMutableList()
+
+            // In Admin app, never let a stale remote poll erase a task that Admin added locally (unless Admin deleted it)
+            if (com.example.BuildConfig.APP_ROLE == "ADMIN") {
+                val remoteIds = merged.map { it.id }.toSet()
+                for (localTask in localList) {
+                    if (!remoteIds.contains(localTask.id) && !deletedIds.contains(localTask.id)) {
+                        merged.add(0, localTask)
+                    }
                 }
-            }.filter { !it.isCompletionLimitReached }.sortedWith(
+            }
+
+            val finalTasks = merged.filter { !it.isCompletionLimitReached }.sortedWith(
                 compareByDescending<VideoTaskItem> { it.isPinned }
                     .thenByDescending { if (it.isPinned) it.pinnedAt else 0L }
             )
-            prefs[KEY_VIDEO_TASKS] = serializeVideoTasksJson(merged)
+            prefs[KEY_VIDEO_TASKS] = serializeVideoTasksJson(finalTasks)
         }
     }
 

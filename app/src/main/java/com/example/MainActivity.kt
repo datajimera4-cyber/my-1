@@ -72,6 +72,12 @@ class MainActivity : ComponentActivity() {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     val viewModel: MainViewModel = viewModel()
                     val context = LocalContext.current
+                    LaunchedEffect(intent?.data) {
+                        val codeParam = intent?.data?.getQueryParameter("code")?.trim() ?: ""
+                        if (codeParam.length == 6 && codeParam.all { it.isDigit() }) {
+                            viewModel.savePendingReferralCode(codeParam)
+                        }
+                    }
                     var isOnline by remember { mutableStateOf(isInternetAvailable(context)) }
                     var forceNoInternetPopup by remember { mutableStateOf(!isOnline) }
 

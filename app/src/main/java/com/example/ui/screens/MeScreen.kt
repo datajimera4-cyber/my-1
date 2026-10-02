@@ -109,6 +109,7 @@ fun MeScreen(
     val allUsers by viewModel.allUsers.collectAsState()
     val transactions by viewModel.transactions.collectAsState()
     val supportMessages by viewModel.supportMessages.collectAsState()
+    val appDownloadUrl by viewModel.appDownloadUrl.collectAsState()
 
     var showChangePasswordDialog by remember { mutableStateOf(false) }
     var showSupportChatDialog by remember { mutableStateOf(false) }
@@ -715,6 +716,7 @@ fun MeScreen(
                                     ) {
                                         OutlinedButton(
                                             onClick = {
+                                                viewModel.recordSharedReferralCode(myReferralCode)
                                                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
                                                 clipboard?.setPrimaryClip(ClipData.newPlainText("Kingo Refer Key", myReferralCode))
                                                 Toast.makeText(context, "Refer Key $myReferralCode copied!", Toast.LENGTH_SHORT).show()
@@ -742,8 +744,16 @@ fun MeScreen(
 
                                         Button(
                                             onClick = {
-                                                val shareMsg = "👑 Join Kingo King & earn real rewards!\n\n" +
-                                                    "Use my 6-Digit Refer Key: $myReferralCode while signing up to get +50 Invite Coins + 50 First-Time Sign Up Bonus (+100 Coins instant start)!"
+                                                viewModel.recordSharedReferralCode(myReferralCode)
+                                                val downloadLine = if (appDownloadUrl.isNotBlank()) {
+                                                    "\n📲 Download Kingo King App:\n$appDownloadUrl\n"
+                                                } else ""
+                                                val shareMsg = "👑 Join Kingo King & earn real rewards!$downloadLine\n" +
+                                                    "🔑 My 6-Digit Refer Key: $myReferralCode\n" +
+                                                    "🔗 Auto-Apply Invite Link: kingoking://refer?code=$myReferralCode\n\n" +
+                                                    "Sign up with my 6-Digit Refer Key ($myReferralCode) to get +50 Invite Coins + 50 First-Time Sign Up Bonus (+100 Coins instant start)!"
+                                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                                clipboard?.setPrimaryClip(ClipData.newPlainText("Kingo Invite", shareMsg))
                                                 val sendIntent = Intent(Intent.ACTION_SEND).apply {
                                                     type = "text/plain"
                                                     putExtra(Intent.EXTRA_TEXT, shareMsg)

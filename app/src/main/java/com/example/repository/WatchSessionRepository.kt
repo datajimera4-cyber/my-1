@@ -281,8 +281,15 @@ object WatchSessionRepository {
     /**
      * Called by WatchListenerService or WatchTimerService when YouTube media metadata is read
      */
-    fun onMediaMetadataChanged(title: String?, artist: String?) {
+    fun onMediaMetadataChanged(title: String?, artist: String?, fromConfirmedWatchPlayer: Boolean = false) {
         if (title.isNullOrBlank()) return
+        if (!fromConfirmedWatchPlayer &&
+            com.example.service.YouTubeLiveSearchService.isServiceConnected &&
+            !com.example.service.YouTubeLiveSearchService.isWatchPlayerConfirmedOpen
+        ) {
+            // Ignore inline auto-play search preview metadata while still searching or opening the Watch Player
+            return
+        }
         val changed = title != _currentMediaTitle.value || artist != _currentMediaArtist.value
         _mediaSessionDetected.value = true
         _currentMediaTitle.value = title

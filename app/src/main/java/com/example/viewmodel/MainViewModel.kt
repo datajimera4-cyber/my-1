@@ -111,6 +111,55 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val updateDriveFolderUrl: StateFlow<String> = dataStoreManager.updateDriveFolderUrlFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, "")
 
+    val appDownloadUrl: StateFlow<String> = dataStoreManager.appDownloadUrlFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, "")
+
+    val pendingReferralCode: StateFlow<String> = dataStoreManager.pendingReferralCodeFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, "")
+
+    fun saveAppDownloadUrl(url: String, onResult: ((Boolean, String) -> Unit)? = null) {
+        viewModelScope.launch {
+            dataStoreManager.saveAppDownloadUrl(url.trim())
+            val srvUrl = cloudServerUrl.value.ifBlank { DataStoreManager.DEFAULT_CLOUD_SERVER_URL }
+            if (srvUrl.isNotBlank()) {
+                val res = com.example.admin.CloudDriveServerManager.syncData(
+                    serverUrl = srvUrl,
+                    dataStoreManager = dataStoreManager,
+                    pushAdminContent = true,
+                    pushLocalChanges = true,
+                    pullRemoteFirst = false
+                )
+                onResult?.invoke(res.first, if (res.first) "App Download Link saved & synced to all users!" else res.second)
+            } else {
+                onResult?.invoke(true, "Saved App Download Link locally.")
+            }
+        }
+    }
+
+    fun recordSharedReferralCode(code: String) {
+        viewModelScope.launch {
+            dataStoreManager.recordSharedReferralCode(code)
+            val srvUrl = cloudServerUrl.value.ifBlank { DataStoreManager.DEFAULT_CLOUD_SERVER_URL }
+            if (srvUrl.isNotBlank()) {
+                try {
+                    com.example.admin.CloudDriveServerManager.syncData(
+                        serverUrl = srvUrl,
+                        dataStoreManager = dataStoreManager,
+                        pushAdminContent = false,
+                        pushLocalChanges = true,
+                        pullRemoteFirst = false
+                    )
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    fun savePendingReferralCode(code: String) {
+        viewModelScope.launch {
+            dataStoreManager.savePendingReferralCode(code)
+        }
+    }
+
     fun markAppUpdateInstalled(signature: String) {
         viewModelScope.launch {
             dataStoreManager.setInstalledUpdateSignature(signature)
@@ -278,7 +327,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             while (true) {
                 dataStoreManager.unlockExpiredTasks()
-                val url = cloudServerUrl.value
+                val url = cloudServerUrl.value.ifBlank { DataStoreManager.DEFAULT_CLOUD_SERVER_URL }
                 if (url.isNotBlank()) {
                     try {
                         com.example.admin.CloudDriveServerManager.syncData(
@@ -289,7 +338,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     } catch (_: Exception) {}
                 }
-                delay(1_500L)
+                delay(1_000L)
             }
         }
 
@@ -521,7 +570,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     thumbnailUrl = cleanedTask.thumbnailUrl
                 )
             }
-            val url = cloudServerUrl.value
+            val url = cloudServerUrl.value.ifBlank { DataStoreManager.DEFAULT_CLOUD_SERVER_URL }
             if (url.isNotBlank()) {
                 try {
                     com.example.admin.CloudDriveServerManager.syncData(
@@ -1298,17 +1347,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 videoUrl
             }
 
-            // Ensure oEmbed metadata is loaded for the exact target URL
-            val fetchedOEmbed = OEmbedFetcher.fetchOEmbed(effectiveUrl)
-            if (fetchedOEmbed is OEmbedResult.Success) {
-                _oEmbedState.value = fetchedOEmbed
-            }
+            // Show clean "Opening..." overlay immediately so the user sees instant feedback
+            WatchSessionRepository.updateSearchProgress(
+                com.example.data.SearchProgressState(
+                    isSearching = true,
+                    stepText = "Opening..."
+                )
+            )
 
             val taskTitleCandidate = currentTask?.title?.takeIf {
                 it.isNotBlank() && it != "YouTube Video" && !it.startsWith("YouTube Video (") && it != "YouTube Video Task"
             }
             val taskChannelCandidate = currentTask?.channelName?.takeIf {
                 it.isNotBlank() && it != "YouTube Creator" && it != "YouTube Channel"
+            }
+
+            // Only wait for oEmbed network fetch if the task does not already have a valid title
+            val fetchedOEmbed = if (taskTitleCandidate == null) {
+                OEmbedFetcher.fetchOEmbed(effectiveUrl).also {
+                    if (it is OEmbedResult.Success) {
+                        _oEmbedState.value = it
+                    }
+                }
+            } else {
+                _oEmbedState.value
             }
 
             val oEmbedSuccess = (fetchedOEmbed as? OEmbedResult.Success) ?: (_oEmbedState.value as? OEmbedResult.Success)
@@ -1319,8 +1381,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 it.isNotBlank() && it != "YouTube Creator" && it != "YouTube Channel"
             }
 
-            val title: String = oEmbedTitleCandidate ?: taskTitleCandidate ?: currentTask?.title ?: "YouTube Video Task"
-            val author: String = oEmbedAuthorCandidate ?: taskChannelCandidate ?: currentTask?.channelName ?: ""
+            val title: String = taskTitleCandidate ?: oEmbedTitleCandidate ?: currentTask?.title ?: "YouTube Video Task"
+            val author: String = taskChannelCandidate ?: oEmbedAuthorCandidate ?: currentTask?.channelName ?: ""
 
             if (currentTask != null && oEmbedTitleCandidate != null && taskTitleCandidate == null) {
                 dataStoreManager.updateVideoTask(
@@ -1335,7 +1397,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // NEVER use the video URL to open or play the video in YouTube!
             // Instead, open YouTube via its standard Home Launcher Intent and let YouTubeLiveSearchService
             // locate & play the video via Browse Features or YouTube Search (0% External source).
-            WatchSessionRepository.updateSearchProgress(com.example.data.SearchProgressState(isSearching = false))
             WatchSessionRepository.addLog("Opening YouTube app for organic search/browse: \"$title\" ($author)", LogType.INFO)
 
             val extractedHandle = com.example.util.TitleMatcher.extractChannelHandle(oEmbedSuccess?.authorUrl)
@@ -1365,6 +1426,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 "YouTube launched cleanly! Auto-searching \"$title\" inside YouTube...",
                 LogType.SUCCESS
             )
+
+            // Keep in-app "Opening..." overlay visible during activity transition, then clear in-app state
+            delay(1200L)
+            WatchSessionRepository.updateSearchProgress(com.example.data.SearchProgressState(isSearching = false))
         }
     }
 
