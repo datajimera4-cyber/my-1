@@ -416,6 +416,12 @@ object CloudDriveServerManager {
 
                 // Fast path: if only pulling updates (e.g., background poll or initial login fetch), return immediately after GET!
                 if (!pushLocalChanges) {
+                    if (getSucceeded) {
+                        com.example.service.NotificationChannels.checkAndDispatchAdminNotifications(
+                            context = dataStoreManager.appContext,
+                            dataStoreManager = dataStoreManager
+                        )
+                    }
                     return@withLock if (getSucceeded) {
                         dataStoreManager.setCloudServerStatus(
                             "Live Connected (${updatedTasks.size} tasks, ${updatedUsers.size} users)"

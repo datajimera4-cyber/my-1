@@ -18,6 +18,7 @@ import java.util.UUID
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "watchearn_prefs")
 
 class DataStoreManager(private val context: Context) {
+    val appContext: Context = context.applicationContext
 
     companion object {
         // =========================================================================

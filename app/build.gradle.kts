@@ -15,8 +15,9 @@ android {
   defaultConfig {
     minSdk = 26
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0"
+    val autoVersionCode = ((System.currentTimeMillis() / 60000L) - 29000000L).toInt().coerceAtLeast(10)
+    versionCode = autoVersionCode
+    versionName = "2.0.$autoVersionCode"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

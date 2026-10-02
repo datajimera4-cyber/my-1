@@ -440,7 +440,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     }
                 } else {
-                    val myEmail = currentUser.value?.email?.lowercase() ?: "guest@watchearn.com"
+                    val myEmail = dataStoreManager.currentUserEmailFlow.first()?.lowercase() ?: currentUser.value?.email?.lowercase() ?: "guest@watchearn.com"
                     val newReplies = msgs.filter { m ->
                         m.senderRole == "ADMIN" && m.userEmail.equals(myEmail, ignoreCase = true) && !notified.contains(m.id)
                     }
@@ -454,6 +454,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     }
                 }
+            }
+        }
+
+        // Centralized watcher for ALL Admin Updates (Pinned/Updated tasks, Pinned posts, Payout status, App APK updates)
+        viewModelScope.launch {
+            dataStoreManager.remoteAppUpdateFlow.collectLatest {
+                com.example.service.NotificationChannels.checkAndDispatchAdminNotifications(
+                    context = getApplication(),
+                    dataStoreManager = dataStoreManager
+                )
             }
         }
     }
@@ -1333,9 +1343,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             WatchSessionRepository.updateSearchProgress(com.example.data.SearchProgressState(isSearching = false))
             WatchSessionRepository.addLog("Opening YouTube app for organic search/browse: \"$title\" ($author)", LogType.INFO)
 
+            val extractedHandle = com.example.util.TitleMatcher.extractChannelHandle(oEmbedSuccess?.authorUrl)
+
             YouTubeLiveSearchService.armSearchTrigger(
                 title = title,
-                channel = author
+                channel = author,
+                channelHandle = extractedHandle
             )
 
             WatchSessionRepository.startTask(
@@ -1365,8 +1378,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun resumeVideoInYouTube(context: Context) {
         val title = targetTaskTitle.value ?: videoTasks.value.find { it.id == selectedTaskId.value }?.title ?: ""
         val author = WatchSessionRepository.targetTaskAuthor.value ?: videoTasks.value.find { it.id == selectedTaskId.value }?.channelName ?: ""
+        val handle = com.example.util.TitleMatcher.extractChannelHandle((_oEmbedState.value as? OEmbedResult.Success)?.authorUrl)
         if (title.isNotBlank()) {
-            YouTubeLiveSearchService.armSearchTrigger(title = title, channel = author)
+            YouTubeLiveSearchService.armSearchTrigger(title = title, channel = author, channelHandle = handle)
         }
         try {
             val openIntent = PermissionHelper.openYouTubeAppHomeIntent(context)
@@ -1479,6 +1493,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 WatchSessionRepository.addLog(
                     "Withdrawal request submitted: $coins coins (₹$formatted INR) to $method: $destination",
                     LogType.SUCCESS
+                )
+                com.example.service.NotificationChannels.sendAdminUpdateNotification(
+                    context = getApplication(),
+                    title = "⏳ Withdrawal Request Submitted (₹$formatted)",
+                    body = "Your payout request of $coins Coins (₹$formatted INR) via $method has been sent to Admin for approval."
                 )
                 onComplete(true, "Payout request for $coins Coins (₹$formatted INR) via $method submitted! Your balance has been deducted and sent to the Admin Panel for approval.")
                 val url = cloudServerUrl.value

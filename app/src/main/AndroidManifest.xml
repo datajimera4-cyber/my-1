@@ -24,6 +24,7 @@
 
     <!-- Install downloaded APK updates from Google Drive update folder -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
 
     <!-- Queries package for YouTube intent resolution -->
     <queries>

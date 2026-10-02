@@ -137,12 +137,14 @@ object OEmbedFetcher {
                     ?.trim() ?: ""
                 val authorMatch = Regex("\"ownerChannelName\":\"(.*?)\"").find(html)
                 val authorName = authorMatch?.groupValues?.getOrNull(1)?.trim() ?: "YouTube Creator"
+                val handleMatch = Regex("\"(?:canonicalBaseUrl|vanityChannelUrl|ownerProfileUrl)\":\"(?:https?://(?:www\\.)?youtube\\.com)?(/+@[^\"/]+)\"").find(html)
+                val extractedAuthorUrl = handleMatch?.groupValues?.getOrNull(1)?.let { "https://www.youtube.com$it" } ?: ""
 
                 if (rawTitle.isNotBlank() && !rawTitle.equals("YouTube", ignoreCase = true)) {
                     return OEmbedResult.Success(
                         title = rawTitle,
                         authorName = authorName,
-                        authorUrl = "",
+                        authorUrl = extractedAuthorUrl,
                         thumbnailUrl = fallbackThumb
                     )
                 }

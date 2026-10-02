@@ -184,4 +184,14 @@ object TitleMatcher {
             url.trim()
         }
     }
+
+    /**
+     * Extracts the unique @handle (e.g. "@newchannel") from an oEmbed author_url
+     * such as "https://www.youtube.com/@newchannel".
+     */
+    fun extractChannelHandle(authorUrl: String?): String? {
+        if (authorUrl.isNullOrBlank()) return null
+        val match = Regex("(@[a-zA-Z0-9_\\-.]+)").find(authorUrl.trim())
+        return match?.groupValues?.getOrNull(1)?.takeIf { it.length >= 2 }
+    }
 }

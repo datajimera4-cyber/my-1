@@ -6,21 +6,33 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.example.MainActivity
 import com.example.R
+import com.example.data.DataStoreManager
+import com.example.data.PayoutStatus
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 
 object NotificationChannels {
 
     const val CHANNEL_TIMER_ID = "channel_watch_timer"
     const val CHANNEL_ALERT_ID = "channel_watch_alert"
     const val CHANNEL_COMPLETION_ID = "channel_watch_completion"
-    const val CHANNEL_ADMIN_UPDATES_ID = "channel_admin_updates"
+    const val CHANNEL_ADMIN_UPDATES_ID = "channel_kingo_admin_push_v2"
 
     const val NOTIFICATION_TIMER_ID = 1001
     const val NOTIFICATION_ALERT_ID = 1002
     const val NOTIFICATION_COMPLETION_ID = 1003
+
+    private val notifyMutex = Mutex()
+    private val inMemoryDispatchedKeys: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     fun createChannels(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -62,18 +74,28 @@ object NotificationChannels {
                 enableVibration(true)
             }
 
-            // 4. Instant Admin New Task & Post Alerts Channel (High Importance Heads-Up)
+            // 4. Instant Admin Push Notifications Channel (High Importance Heads-Up + Sound + Vibration)
+            val defaultSoundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            val audioAttributes = AudioAttributes.Builder()
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                .build()
+
             val adminUpdatesChannel = NotificationChannel(
                 CHANNEL_ADMIN_UPDATES_ID,
-                "New Tasks & Admin Announcements",
+                "Kingo King Live Push Notifications",
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Instant notifications when Admin posts a new video task, banner, or alert"
+                description = "Instant push notifications for new tasks, posts, withdrawals, wallet updates & app updates"
                 enableVibration(true)
-                vibrationPattern = longArrayOf(0, 250, 150, 250)
+                vibrationPattern = longArrayOf(0, 300, 150, 300)
                 lightColor = Color.parseColor("#F59E0B")
                 enableLights(true)
                 setShowBadge(true)
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+                if (defaultSoundUri != null) {
+                    setSound(defaultSoundUri, audioAttributes)
+                }
             }
 
             notificationManager.createNotificationChannels(
@@ -86,9 +108,16 @@ object NotificationChannels {
         context: Context,
         title: String,
         body: String,
-        notificationId: Int = (System.currentTimeMillis() % 100000).toInt() + 2000
+        dedupKey: String? = null,
+        allowOnAdminApp: Boolean = false,
+        notificationId: Int = ((dedupKey?.hashCode()?.let { Math.abs(it) } ?: (System.currentTimeMillis() % 100000).toInt()) % 80000) + 2000
     ) {
-        if (com.example.BuildConfig.APP_ROLE == "ADMIN") return
+        if (!allowOnAdminApp && com.example.BuildConfig.APP_ROLE == "ADMIN") return
+        if (!dedupKey.isNullOrBlank()) {
+            if (!inMemoryDispatchedKeys.add(dedupKey)) {
+                return
+            }
+        }
         try {
             createChannels(context)
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
@@ -105,12 +134,15 @@ object NotificationChannels {
             )
 
             val notification = NotificationCompat.Builder(context, CHANNEL_ADMIN_UPDATES_ID)
-                .setSmallIcon(R.mipmap.ic_launcher)
+                .setSmallIcon(R.drawable.ic_stat_kingo_notification)
+                .setColor(Color.parseColor("#F59E0B"))
                 .setContentTitle(title)
                 .setContentText(body)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(body))
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setCategory(NotificationCompat.CATEGORY_PROMO)
+                .setDefaults(NotificationCompat.DEFAULT_ALL)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setCategory(NotificationCompat.CATEGORY_MESSAGE)
                 .setAutoCancel(true)
                 .setContentIntent(pendingIntent)
                 .build()
@@ -118,4 +150,241 @@ object NotificationChannels {
             notificationManager.notify(notificationId, notification)
         } catch (_: Exception) {}
     }
+
+    /**
+     * Centralized real-time notification evaluator that checks DataStore for ANY new Admin action:
+     * - New or Updated/Pinned Video Tasks
+     * - New or Updated/Pinned Admin Posts / Banners / Urgent Alerts
+     * - Withdrawal Request Submitted / Approved / Payment Done / Rejected & Refunded
+     * - Admin Wallet Balance Adjustment & 10% Referral Bonuses
+     * - Support Chat Replies
+     * - Mandatory App Update Available
+     * Runs both when the app is in the foreground (MainViewModel) and in the background (YouTubeLiveSearchService).
+     */
+    suspend fun checkAndDispatchAdminNotifications(
+        context: Context,
+        dataStoreManager: DataStoreManager
+    ) {
+        notifyMutex.withLock {
+            try {
+                val isAdminApp = com.example.BuildConfig.APP_ROLE == "ADMIN"
+                val notified = dataStoreManager.notifiedItemIdsFlow.first()
+                inMemoryDispatchedKeys.addAll(notified)
+                val newlyNotifiedKeys = mutableSetOf<String>()
+
+                if (!isAdminApp) {
+                    // 1. Check Video Tasks (New tasks + Pinned/Updated tasks)
+                    val defaultTaskIds = setOf("default_rick", "default_android15", "default_kotlin_course", "default_lofi_live")
+                    val tasks = dataStoreManager.videoTasksFlow.first()
+                    for (t in tasks) {
+                        if (defaultTaskIds.contains(t.id)) continue
+                        if (!notified.contains(t.id) && !inMemoryDispatchedKeys.contains(t.id)) {
+                            newlyNotifiedKeys.add(t.id)
+                            val pinKey = "task_pin_${t.id}_${t.pinnedAt}"
+                            if (t.isPinned && t.pinnedAt > 0L) newlyNotifiedKeys.add(pinKey)
+                            val updateKey = "task_upd_${t.id}_${t.rewardCoins}_${t.title.hashCode()}"
+                            newlyNotifiedKeys.add(updateKey)
+                            sendAdminUpdateNotification(
+                                context = context,
+                                title = "🎬 New Watch Task Added! (+${t.rewardCoins} Coins)",
+                                body = "\"${t.title}\" by ${t.channelName} is now live. Watch & earn coins now!",
+                                dedupKey = t.id
+                            )
+                        } else {
+                            // Check if Admin pinned this existing task
+                            if (t.isPinned && t.pinnedAt > 0L) {
+                                val pinKey = "task_pin_${t.id}_${t.pinnedAt}"
+                                if (!notified.contains(pinKey) && !inMemoryDispatchedKeys.contains(pinKey)) {
+                                    newlyNotifiedKeys.add(pinKey)
+                                    sendAdminUpdateNotification(
+                                        context = context,
+                                        title = "📌 Featured Task Pinned! (+${t.rewardCoins} Coins)",
+                                        body = "Admin pinned \"${t.title}\" to the top of your Tasks list!",
+                                        dedupKey = pinKey
+                                    )
+                                }
+                            }
+                            // Check if Admin updated reward coins or title of this task
+                            val updateKey = "task_upd_${t.id}_${t.rewardCoins}_${t.title.hashCode()}"
+                            if (!notified.contains(updateKey) && !inMemoryDispatchedKeys.contains(updateKey)) {
+                                newlyNotifiedKeys.add(updateKey)
+                                sendAdminUpdateNotification(
+                                    context = context,
+                                    title = "🔄 Watch Task Updated (+${t.rewardCoins} Coins)",
+                                    body = "\"${t.title}\" (${t.channelName}) has been updated by Admin.",
+                                    dedupKey = updateKey
+                                )
+                            }
+                        }
+                    }
+
+                    // 2. Check Admin Posts / Banners / Urgent Alerts (New + Pinned/Updated)
+                    val defaultPostIds = setOf("default_welcome_banner")
+                    val posts = dataStoreManager.adminPostsFlow.first()
+                    for (p in posts) {
+                        if (defaultPostIds.contains(p.id)) continue
+                        if (!notified.contains(p.id) && !inMemoryDispatchedKeys.contains(p.id)) {
+                            newlyNotifiedKeys.add(p.id)
+                            if (p.isPinned && p.pinnedAt > 0L) {
+                                newlyNotifiedKeys.add("post_pin_${p.id}_${p.pinnedAt}")
+                            }
+                            val prefix = when (p.postType.uppercase()) {
+                                "ALERT" -> "🚨 Urgent Admin Alert"
+                                "BANNER" -> "📢 New Offer Banner"
+                                else -> "📌 New Admin Post"
+                            }
+                            sendAdminUpdateNotification(
+                                context = context,
+                                title = "$prefix: ${p.title}",
+                                body = p.message.ifBlank { "Tap to view the latest update in ${p.targetTab} tab!" },
+                                dedupKey = p.id
+                            )
+                        } else if (p.isPinned && p.pinnedAt > 1700000000000L) {
+                            val pinKey = "post_pin_${p.id}_${p.pinnedAt}"
+                            if (!notified.contains(pinKey) && !inMemoryDispatchedKeys.contains(pinKey)) {
+                                newlyNotifiedKeys.add(pinKey)
+                                sendAdminUpdateNotification(
+                                    context = context,
+                                    title = "📌 Pinned Announcement: ${p.title}",
+                                    body = p.message.ifBlank { "Check out the pinned announcement from Admin!" },
+                                    dedupKey = pinKey
+                                )
+                            }
+                        }
+                    }
+
+                    // 3. Check Payout / Withdrawal Requests (APPROVED / COMPLETED / REJECTED)
+                    val currentEmail = dataStoreManager.currentUserEmailFlow.first()?.trim()?.lowercase()
+                    val payouts = dataStoreManager.payoutRequestsFlow.first()
+                    for (req in payouts) {
+                        if (!currentEmail.isNullOrBlank() && !req.userEmail.equals(currentEmail, ignoreCase = true)) {
+                            continue
+                        }
+                        if (req.status != PayoutStatus.PENDING) {
+                            val statusNotifyKey = "payout_${req.id}_${req.status.name}"
+                            if (!notified.contains(statusNotifyKey) && !inMemoryDispatchedKeys.contains(statusNotifyKey)) {
+                                newlyNotifiedKeys.add(statusNotifyKey)
+                                val safeCoins = if (req.amountCoins > 0) req.amountCoins else (req.amountInr * 100).toInt()
+                                val inrStr = String.format(Locale.US, "%.2f", req.amountInr)
+                                when (req.status) {
+                                    PayoutStatus.APPROVED -> {
+                                        sendAdminUpdateNotification(
+                                            context = context,
+                                            title = "✅ Withdrawal Approved ($safeCoins Coins = ₹$inrStr)",
+                                            body = "Admin approved your ₹$inrStr withdrawal via ${req.method}. Payment will be marked Done once transferred!",
+                                            dedupKey = statusNotifyKey
+                                        )
+                                    }
+                                    PayoutStatus.COMPLETED -> {
+                                        sendAdminUpdateNotification(
+                                            context = context,
+                                            title = "🎉 Payment Done! ₹$inrStr Sent",
+                                            body = "Your withdrawal of $safeCoins Coins (₹$inrStr) has been paid to ${req.method} (${req.destination}).",
+                                            dedupKey = statusNotifyKey
+                                        )
+                                    }
+                                    PayoutStatus.REJECTED -> {
+                                        sendAdminUpdateNotification(
+                                            context = context,
+                                            title = "❌ Withdrawal Declined (+$safeCoins Coins Refunded)",
+                                            body = "${req.adminNote ?: "Declined by Admin"} • Coins returned to your wallet.",
+                                            dedupKey = statusNotifyKey
+                                        )
+                                    }
+                                    else -> {}
+                                }
+                            }
+                        }
+                    }
+
+                    // 4. Check Wallet Transactions for Admin Coin Updates, Referral Bonuses & Payout Updates
+                    val txList = dataStoreManager.transactionsFlow.first()
+                    for (tx in txList) {
+                        val isAdminCoin = tx.id.startsWith("admin_coin_") || tx.title.contains("Admin Balance Update")
+                        val isRefBonus = tx.id.startsWith("ref_withdraw_bonus_") || tx.title.contains("Referral Withdraw Bonus")
+                        if ((isAdminCoin || isRefBonus) && !notified.contains(tx.id) && !inMemoryDispatchedKeys.contains(tx.id)) {
+                            newlyNotifiedKeys.add(tx.id)
+                            val sign = if (tx.coins >= 0) "+${tx.coins}" else "${tx.coins}"
+                            if (isRefBonus) {
+                                sendAdminUpdateNotification(
+                                    context = context,
+                                    title = "🤝 Referral Bonus Earned ($sign Coins)!",
+                                    body = tx.title,
+                                    dedupKey = tx.id
+                                )
+                            } else {
+                                sendAdminUpdateNotification(
+                                    context = context,
+                                    title = "👑 Wallet Updated by Admin ($sign Coins)",
+                                    body = "Your Kingo King wallet balance has been updated by Admin!",
+                                    dedupKey = tx.id
+                                )
+                            }
+                        }
+                    }
+
+                    // 5. Check Mandatory App Update Availability
+                    val appUpdate = dataStoreManager.remoteAppUpdateFlow.first()
+                    val installedSig = dataStoreManager.installedUpdateSignatureFlow.first()
+                    if (appUpdate != null && appUpdate.hasUpdate &&
+                        (appUpdate.fileId.isNotBlank() || appUpdate.downloadUrl.isNotBlank()) &&
+                        appUpdate.signature != installedSig
+                    ) {
+                        val updKey = "app_update_${appUpdate.signature}"
+                        if (!notified.contains(updKey) && !inMemoryDispatchedKeys.contains(updKey)) {
+                            newlyNotifiedKeys.add(updKey)
+                            sendAdminUpdateNotification(
+                                context = context,
+                                title = "🚀 New App Update Available!",
+                                body = "A new version (${appUpdate.fileName}) is ready. Tap to download & update Kingo King now!",
+                                dedupKey = updKey
+                            )
+                        }
+                    }
+                }
+
+                // 6. Check Support Chat Messages (Admin replies to User, or User queries to Admin)
+                val msgs = dataStoreManager.supportMessagesFlow.first()
+                if (isAdminApp) {
+                    val newIncoming = msgs.filter { m ->
+                        m.senderRole == "USER" && !notified.contains(m.id) && !inMemoryDispatchedKeys.contains(m.id)
+                    }
+                    if (newIncoming.isNotEmpty()) {
+                        for (m in newIncoming) newlyNotifiedKeys.add(m.id)
+                        val latest = newIncoming.last()
+                        sendAdminUpdateNotification(
+                            context = context,
+                            title = "💬 Support Query from ${latest.userName} (${latest.userId})",
+                            body = latest.message,
+                            dedupKey = latest.id,
+                            allowOnAdminApp = true
+                        )
+                    }
+                } else {
+                    val myEmail = dataStoreManager.currentUserEmailFlow.first()?.trim()?.lowercase() ?: "guest@watchearn.com"
+                    val newReplies = msgs.filter { m ->
+                        m.senderRole == "ADMIN" &&
+                                m.userEmail.equals(myEmail, ignoreCase = true) &&
+                                !notified.contains(m.id) &&
+                                !inMemoryDispatchedKeys.contains(m.id)
+                    }
+                    if (newReplies.isNotEmpty()) {
+                        for (m in newReplies) newlyNotifiedKeys.add(m.id)
+                        val latest = newReplies.last()
+                        sendAdminUpdateNotification(
+                            context = context,
+                            title = "💬 Admin Support Reply",
+                            body = latest.message,
+                            dedupKey = latest.id
+                        )
+                    }
+                }
+
+                if (newlyNotifiedKeys.isNotEmpty()) {
+                    dataStoreManager.markItemsNotified(newlyNotifiedKeys)
+                }
+            } catch (_: Exception) {}
+        }
+    }
 }
+

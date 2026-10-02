@@ -18,8 +18,9 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.SecurityUpdateGood
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.WarningAmber
@@ -35,6 +36,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -65,6 +67,7 @@ import com.example.ui.theme.AmberPrimary
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
 import com.example.ui.theme.SuccessGreen
+import com.example.util.ApkCompatibilityReport
 import com.example.util.ApkUpdateInstaller
 import kotlinx.coroutines.launch
 import java.io.File
@@ -93,22 +96,52 @@ fun MandatoryUpdateDialog(
     var totalMb by remember { mutableFloatStateOf(0f) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var downloadedApkFile by remember { mutableStateOf<File?>(null) }
+    var compatibilityReport by remember { mutableStateOf<ApkCompatibilityReport?>(null) }
     var waitingForInstallPermission by remember { mutableStateOf(false) }
+    var installAttemptedInSession by remember { mutableStateOf(false) }
+    var showReplaceExistingHelper by remember { mutableStateOf(false) }
 
     val animatedProgress by animateFloatAsState(
         targetValue = (progressPercent / 100f).coerceIn(0f, 1f),
         label = "apk_download_progress"
     )
 
-    // Automatically launch installer when returning from "Install Unknown Apps" settings
-    DisposableEffect(lifecycleOwner, waitingForInstallPermission, downloadedApkFile) {
+    // If this app instance was already updated after the Drive APK was uploaded, mark installed immediately
+    LaunchedEffect(updateInfo.signature) {
+        if (ApkUpdateInstaller.didAppUpdateComplete(context, updateInfo)) {
+            onMarkUpdateInstalled(updateInfo.signature)
+        }
+    }
+
+    // Handle returning from "Install Unknown Apps" settings OR returning from system PackageInstaller
+    DisposableEffect(lifecycleOwner, waitingForInstallPermission, downloadedApkFile, installAttemptedInSession) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME && waitingForInstallPermission) {
-                val apkFile = downloadedApkFile
-                if (apkFile != null && apkFile.exists() && ApkUpdateInstaller.canRequestPackageInstalls(context)) {
-                    waitingForInstallPermission = false
+            if (event == Lifecycle.Event.ON_RESUME) {
+                if (ApkUpdateInstaller.didAppUpdateComplete(context, updateInfo)) {
                     onMarkUpdateInstalled(updateInfo.signature)
-                    ApkUpdateInstaller.launchApkInstaller(context, apkFile)
+                    return@LifecycleEventObserver
+                }
+                val apkFile = downloadedApkFile
+                if (waitingForInstallPermission && apkFile != null && apkFile.exists() && ApkUpdateInstaller.canRequestPackageInstalls(context)) {
+                    waitingForInstallPermission = false
+                    installAttemptedInSession = true
+                    val report = compatibilityReport ?: ApkUpdateInstaller.inspectApkCompatibility(context, apkFile)
+                    compatibilityReport = report
+                    if (report.requiresUninstallToReplace) {
+                        showReplaceExistingHelper = true
+                        errorMessage = "Old installed version has a different signature/version. Tap 'Replace Old App & Install New' below to replace it cleanly!"
+                        ApkUpdateInstaller.replaceConflictingAppAndInstall(
+                            context = context,
+                            apkFile = apkFile,
+                            targetPackageName = report.archivePackageName.ifBlank { context.packageName }
+                        )
+                    } else {
+                        ApkUpdateInstaller.launchApkInstaller(context, apkFile, updateInfo.signature)
+                    }
+                } else if (installAttemptedInSession && apkFile != null && apkFile.exists()) {
+                    // User returned from PackageInstaller and the package wasn't replaced yet (e.g., "App not installed" due to old conflicting install)
+                    showReplaceExistingHelper = true
+                    errorMessage = "If Android showed 'App not installed' because an older version is already installed, tap 'Replace Old App & Install New' below!"
                 }
             }
         }
@@ -124,17 +157,48 @@ fun MandatoryUpdateDialog(
         exitProcess(0)
     }
 
+    fun executeInstallForDownloadedApk(apkFile: File) {
+        if (!ApkUpdateInstaller.canRequestPackageInstalls(context)) {
+            waitingForInstallPermission = true
+            errorMessage = "Please allow 'Install unknown apps' permission on the next screen to install the update."
+            ApkUpdateInstaller.openInstallUnknownAppsSettings(context)
+            return
+        }
+        val report = ApkUpdateInstaller.inspectApkCompatibility(context, apkFile)
+        compatibilityReport = report
+
+        // If the downloaded APK is the exact same version & signature already installed and up-to-date, mark installed
+        if (!report.hasSignatureConflict &&
+            report.installedVersionCode > 0L &&
+            report.archiveVersionCode == report.installedVersionCode &&
+            ApkUpdateInstaller.wasInstallAttemptedForSignature(context, updateInfo.signature)
+        ) {
+            onMarkUpdateInstalled(updateInfo.signature)
+            return
+        }
+
+        installAttemptedInSession = true
+        if (report.requiresUninstallToReplace) {
+            showReplaceExistingHelper = true
+            errorMessage = "Existing app conflict detected. Uninstalling old version first — your new update is saved in Downloads/KingoKing_Update.apk!"
+            ApkUpdateInstaller.replaceConflictingAppAndInstall(
+                context = context,
+                apkFile = apkFile,
+                targetPackageName = report.archivePackageName.ifBlank { context.packageName }
+            )
+        } else {
+            val launched = ApkUpdateInstaller.launchApkInstaller(context, apkFile, updateInfo.signature)
+            if (!launched) {
+                showReplaceExistingHelper = true
+                errorMessage = "Tap 'Install Update' or 'Replace Old App & Install New' below to complete installation."
+            }
+        }
+    }
+
     fun triggerInstallOrDownload() {
         val existingFile = downloadedApkFile
         if (existingFile != null && existingFile.exists()) {
-            if (!ApkUpdateInstaller.canRequestPackageInstalls(context)) {
-                waitingForInstallPermission = true
-                errorMessage = "Please allow 'Install unknown apps' permission on the next screen to install the update."
-                ApkUpdateInstaller.openInstallUnknownAppsSettings(context)
-                return
-            }
-            onMarkUpdateInstalled(updateInfo.signature)
-            ApkUpdateInstaller.launchApkInstaller(context, existingFile)
+            executeInstallForDownloadedApk(existingFile)
             return
         }
 
@@ -154,17 +218,7 @@ fun MandatoryUpdateDialog(
             isDownloading = false
             result.onSuccess { apkFile ->
                 downloadedApkFile = apkFile
-                if (ApkUpdateInstaller.canRequestPackageInstalls(context)) {
-                    onMarkUpdateInstalled(updateInfo.signature)
-                    val launched = ApkUpdateInstaller.launchApkInstaller(context, apkFile)
-                    if (!launched) {
-                        errorMessage = "Tap 'Install Update' below to complete installation."
-                    }
-                } else {
-                    waitingForInstallPermission = true
-                    errorMessage = "Please enable 'Allow from this source' to install the downloaded update."
-                    ApkUpdateInstaller.openInstallUnknownAppsSettings(context)
-                }
+                executeInstallForDownloadedApk(apkFile)
             }.onFailure { err ->
                 errorMessage = err.message ?: "Failed to download update from Google Drive."
             }
@@ -294,7 +348,7 @@ fun MandatoryUpdateDialog(
                             overflow = TextOverflow.Ellipsis
                         )
                         val sizeText = if (updateInfo.fileSize > 0L) {
-                            String.format(Locale.US, "%.1f MB • Official Google Drive Update", updateInfo.fileSize / (1024.0 * 1024.0))
+                            String.format(Locale.US, "%.1f MB • Saved to Downloads/KingoKing_Update.apk", updateInfo.fileSize / (1024.0 * 1024.0))
                         } else {
                             "Official Google Drive Update Package"
                         }
@@ -394,7 +448,44 @@ fun MandatoryUpdateDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(22.dp))
+                // 1-Tap Clean Replacement Button when an older conflicting APK is installed on the phone
+                val readyApk = downloadedApkFile
+                if (readyApk != null && readyApk.exists() && (showReplaceExistingHelper || compatibilityReport?.requiresUninstallToReplace == true)) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Button(
+                        onClick = {
+                            val targetPkg = compatibilityReport?.archivePackageName?.ifBlank { context.packageName } ?: context.packageName
+                            ApkUpdateInstaller.replaceConflictingAppAndInstall(
+                                context = context,
+                                apkFile = readyApk,
+                                targetPackageName = targetPkg
+                            )
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("replace_existing_app_button"),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = EmeraldGreen,
+                            contentColor = Color.Black
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Autorenew,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Replace Old App & Install New",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(18.dp))
 
                 // Action Buttons: Cancel (closes app) & Update (downloads and installs)
                 Row(
