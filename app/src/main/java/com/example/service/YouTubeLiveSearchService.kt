@@ -61,6 +61,11 @@ class YouTubeLiveSearchService : AccessibilityService() {
         var targetVideoId: String? = null
 
         @Volatile
+        var targetVideoDurationSeconds: Int = 0
+
+        private val rejectedSameTitleDurations = java.util.Collections.synchronizedSet(mutableSetOf<Int>())
+
+        @Volatile
         var hasClickedTarget: Boolean = false
 
         @Volatile
@@ -243,13 +248,16 @@ class YouTubeLiveSearchService : AccessibilityService() {
             channel: String?,
             videoUrl: String? = null,
             videoId: String? = null,
-            channelHandle: String? = null
+            channelHandle: String? = null,
+            videoDurationSeconds: Int = 0
         ) {
             targetSearchTitle = title
             targetSearchChannel = channel
             targetChannelHandle = channelHandle
-            targetVideoUrl = null
-            targetVideoId = null
+            targetVideoUrl = videoUrl
+            targetVideoId = videoId?.trim()?.takeIf { it.isNotBlank() } ?: TitleMatcher.extractVideoId(videoUrl)
+            targetVideoDurationSeconds = videoDurationSeconds
+            rejectedSameTitleDurations.clear()
             hasClickedTarget = false
             isWatchPlayerConfirmedOpen = false
             scrollAttempts = 0
@@ -272,7 +280,10 @@ class YouTubeLiveSearchService : AccessibilityService() {
             searchOverlayStartedAtMillis = System.currentTimeMillis()
             searchDriverHandler.removeCallbacks(searchDriverRunnable)
             searchDriverHandler.postDelayed(searchDriverRunnable, 400L)
-            WatchSessionRepository.addLog("Organic YouTube Search/Browse armed for: \"$title\"", LogType.INFO)
+            WatchSessionRepository.addLog(
+                "Organic YouTube Search/Browse armed for: \"$title\" [ID: ${targetVideoId ?: "N/A"}, Duration: ${if (videoDurationSeconds > 0) "${videoDurationSeconds}s" else "auto"}]",
+                LogType.INFO
+            )
         }
 
         fun disarm() {
@@ -284,6 +295,8 @@ class YouTubeLiveSearchService : AccessibilityService() {
             targetChannelHandle = null
             targetVideoUrl = null
             targetVideoId = null
+            targetVideoDurationSeconds = 0
+            rejectedSameTitleDurations.clear()
             hasClickedTarget = false
             scrollAttempts = 0
             lastClickTime = 0L
@@ -1001,19 +1014,20 @@ class YouTubeLiveSearchService : AccessibilityService() {
                             }
                         }
 
-                        // Stage B (Scroll 5): Search with @handle + Title (or exact video title) inside YouTube search bar
-                        if (scrollAttempts == 5 && !hasSearchedWithHandleOrQuotes && !hasOpenedChannelPage) {
+                        // Stage B (Scroll 4): Search using Admin link's exact videoId + Title (or @handle + Title)
+                        if (scrollAttempts == 4 && !hasSearchedWithHandleOrQuotes && !hasOpenedChannelPage) {
                             hasSearchedWithHandleOrQuotes = true
+                            val cleanVid = targetVideoId?.trim().orEmpty()
                             val cleanHandle = targetChannelHandle?.trim().orEmpty()
-                            val refinedQuery = if (cleanHandle.startsWith("@") && cleanHandle.length >= 3) {
-                                "$cleanHandle $titleToFind"
-                            } else {
-                                titleToFind.trim()
+                            val refinedQuery = when {
+                                cleanVid.length == 11 -> "$titleToFind $cleanVid"
+                                cleanHandle.startsWith("@") && cleanHandle.length >= 3 -> "$cleanHandle $titleToFind"
+                                else -> titleToFind.trim()
                             }
                             scrollAttempts++
                             triggerInAppSearchWithQuery(
                                 queryText = refinedQuery,
-                                reasonLog = "YouTube Search: Refining search with \"$refinedQuery\""
+                                reasonLog = "YouTube Search: Refining search with Admin Video ID \"$refinedQuery\""
                             )
                             return
                         }
@@ -1703,7 +1717,29 @@ class YouTubeLiveSearchService : AccessibilityService() {
                         hasVideoCardViewId ||
                         (normExtracted == normTarget && normTarget.length >= 10)
 
-                if (!isAdOrSponsored && !isLikelyChannelProfileRow && hasRequiredCardSignals && matchesChannelOnCard) {
+                // Verify that the candidate card matches the exact video from the Admin's YouTube link (targetVideoId):
+                // When a channel has multiple videos with the same title, each video has its own specific duration (and videoId).
+                val cleanVid = targetVideoId?.trim().orEmpty()
+                val cardHasExplicitVideoId = cleanVid.length == 11 && fullCardText.contains(cleanVid, ignoreCase = false)
+                val cardDurationSecs = extractCardDurationSeconds(fullCardText)
+                val expectedDurationSecs = targetVideoDurationSeconds
+
+                val isRejectedDuplicateDuration = cardDurationSecs > 0 && rejectedSameTitleDurations.contains(cardDurationSecs)
+                val matchesAdminVideoIdDuration = cardHasExplicitVideoId ||
+                        (!isRejectedDuplicateDuration && (
+                            expectedDurationSecs <= 0 ||
+                            cardDurationSecs <= 0 ||
+                            kotlin.math.abs(cardDurationSecs - expectedDurationSecs) <= 3
+                        ))
+
+                if (!isAdOrSponsored && !isLikelyChannelProfileRow && hasRequiredCardSignals && matchesChannelOnCard && !matchesAdminVideoIdDuration) {
+                    WatchSessionRepository.addLog(
+                        "Skipped same-title video (${cardDurationSecs}s != target ${expectedDurationSecs}s for Admin link ID ${cleanVid.ifEmpty { "N/A" }}). Searching for exact target video...",
+                        LogType.INFO
+                    )
+                }
+
+                if (!isAdOrSponsored && !isLikelyChannelProfileRow && hasRequiredCardSignals && matchesChannelOnCard && matchesAdminVideoIdDuration) {
                     val tapX = nodeRect.centerX().takeIf { it in (screenWidth * 0.12f).toInt()..(screenWidth * 0.84f).toInt() }
                         ?: (screenWidth * 0.44f).toInt()
                     val tapY = nodeRect.centerY().coerceIn((screenHeight * 0.16f).toInt(), (screenHeight * 0.88f).toInt())
@@ -2017,8 +2053,92 @@ class YouTubeLiveSearchService : AccessibilityService() {
         }
     }
 
+    /**
+     * Extracts a video card's duration in seconds from its accessibility description or badge text
+     * (e.g. "3 minutes, 45 seconds", "3 मिनट, 45 सेकंड", or "3:45" / "1:02:15").
+     */
+    private fun extractCardDurationSeconds(cardText: String): Int {
+        if (cardText.isBlank()) return 0
+        // 1. Check explicit H:MM:SS or MM:SS badge
+        val colonMatch = Regex("\\b(?:(\\d{1,2}):)?(\\d{1,2}):(\\d{2})\\b").find(cardText)
+        if (colonMatch != null) {
+            val h = colonMatch.groupValues[1].toIntOrNull() ?: 0
+            val m = colonMatch.groupValues[2].toIntOrNull() ?: 0
+            val s = colonMatch.groupValues[3].toIntOrNull() ?: 0
+            val total = h * 3600 + m * 60 + s
+            if (total > 0) return total
+        }
+
+        // 2. Check spoken accessibility duration (English & Hindi: "X hours, Y minutes, Z seconds")
+        val lower = cardText.lowercase()
+        val hoursMatch = Regex("\\b(\\d+)\\s*(?:hours?|hrs?|घंटे|घंटा)\\b").find(lower)
+        val minsMatch = Regex("\\b(\\d+)\\s*(?:minutes?|mins?|मिनट)\\b").find(lower)
+        val secsMatch = Regex("\\b(\\d+)\\s*(?:seconds?|secs?|सेकंड)\\b").find(lower)
+        // Avoid matching "X minutes ago" / "X seconds ago" upload timestamps
+        val isAgoTimestampOnly = (minsMatch != null || secsMatch != null) &&
+                Regex("\\b\\d+\\s*(?:minutes?|mins?|seconds?|secs?)\\s+ago\\b").containsMatchIn(lower) &&
+                !Regex("\\b\\d+\\s*(?:minutes?|mins?|मिनट)\\s*,?\\s*\\d+\\s*(?:seconds?|secs?|सेकंड)\\b").containsMatchIn(lower)
+        if (!isAgoTimestampOnly && (hoursMatch != null || minsMatch != null || secsMatch != null)) {
+            val h = hoursMatch?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
+            val m = minsMatch?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
+            val s = secsMatch?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
+            val total = h * 3600 + m * 60 + s
+            if (total > 0) return total
+        }
+        return 0
+    }
+
+    /**
+     * Extracts the total video duration in seconds from the Watch Player's timebar/scrubber
+     * (e.g. "0:03 / 3:45" or "0 minutes 3 seconds of 3 minutes 45 seconds").
+     */
+    private fun extractWatchPlayerTotalDurationSeconds(entries: List<UiNodeEntry>): Int {
+        for (e in entries) {
+            for (raw in listOf(e.text, e.desc)) {
+                val s = raw.trim()
+                if (s.isEmpty()) continue
+                val slashMatch = Regex("\\b\\d{1,2}:\\d{2}(?::\\d{2})?\\s*/\\s*(?:(\\d{1,2}):)?(\\d{1,2}):(\\d{2})\\b").find(s)
+                if (slashMatch != null) {
+                    val h = slashMatch.groupValues[1].toIntOrNull() ?: 0
+                    val m = slashMatch.groupValues[2].toIntOrNull() ?: 0
+                    val sec = slashMatch.groupValues[3].toIntOrNull() ?: 0
+                    val total = h * 3600 + m * 60 + sec
+                    if (total > 0) return total
+                }
+                val ofMatch = Regex("\\b(?:of|में से)\\s+(.+)$", RegexOption.IGNORE_CASE).find(s)
+                if (ofMatch != null) {
+                    val tailSecs = extractCardDurationSeconds(ofMatch.groupValues[1])
+                    if (tailSecs > 0) return tailSecs
+                }
+            }
+        }
+        return 0
+    }
+
     private fun confirmWatchPlayerOpened() {
         if (isWatchPlayerConfirmedOpen) return
+        val root = getYouTubeRootNode() ?: try { rootInActiveWindow } catch (_: Exception) { null }
+        if (root != null && targetVideoDurationSeconds > 0) {
+            val entries = mutableListOf<UiNodeEntry>()
+            collectScreenNodes(root, entries)
+            val playerTotalSecs = extractWatchPlayerTotalDurationSeconds(entries)
+            if (playerTotalSecs > 0 && kotlin.math.abs(playerTotalSecs - targetVideoDurationSeconds) > 3) {
+                // Opened a different video with the same title! Go back and continue searching for the exact targetVideoId
+                rejectedSameTitleDurations.add(playerTotalSecs)
+                hasClickedTarget = false
+                isWatchPlayerConfirmedOpen = false
+                currentPhase = LiveSearchPhase.FIND_AND_CLICK_VIDEO
+                WatchSessionRepository.addLog(
+                    "Opened video duration (${playerTotalSecs}s) != Admin link videoId duration (${targetVideoDurationSeconds}s). Returning to search exact target video...",
+                    LogType.WARNING
+                )
+                performGlobalAction(GLOBAL_ACTION_BACK)
+                lastSearchActionTimestamp = System.currentTimeMillis()
+                searchDriverHandler.removeCallbacks(searchDriverRunnable)
+                searchDriverHandler.postDelayed(searchDriverRunnable, 650L)
+                return
+            }
+        }
         isWatchPlayerConfirmedOpen = true
         isSearchOverlayActive = false
         currentPhase = LiveSearchPhase.COMPLETED
@@ -2030,8 +2150,8 @@ class YouTubeLiveSearchService : AccessibilityService() {
         val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
         mainHandler.postDelayed({
             try {
-                val root = getYouTubeRootNode() ?: rootInActiveWindow
-                if (root != null) verifyActiveYouTubeVideo(root)
+                val r = getYouTubeRootNode() ?: rootInActiveWindow
+                if (r != null) verifyActiveYouTubeVideo(r)
             } catch (_: Exception) {}
         }, 600L)
     }

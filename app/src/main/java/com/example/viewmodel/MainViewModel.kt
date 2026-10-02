@@ -27,6 +27,7 @@ import com.example.data.PayoutStatus
 import com.example.data.PayoutRequest
 import com.example.data.WatchDurationTier
 import com.example.data.WATCH_DURATION_TIERS
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -1382,11 +1383,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 it.isNotBlank() && it != "YouTube Creator" && it != "YouTube Channel"
             }
 
-            // Fetch fresh oEmbed for this exact video URL so we always have
-            // the exact YouTube title, channel name, and @handle for THIS video
-            val fetchTimeoutMs = if (taskTitleCandidate != null) 1800L else 4500L
+            val extractedVideoId = com.example.util.TitleMatcher.extractVideoId(effectiveUrl)
+            // Fetch fresh oEmbed and exact video duration for this exact videoId in parallel
+            val fetchTimeoutMs = if (taskTitleCandidate != null) 2000L else 4500L
+            var exactVideoDurationSecs = 0
             val fetchedOEmbed = kotlinx.coroutines.withTimeoutOrNull(fetchTimeoutMs) {
-                OEmbedFetcher.fetchOEmbed(effectiveUrl)
+                val oEmbedDeferred = async { OEmbedFetcher.fetchOEmbed(effectiveUrl) }
+                val durationDeferred = async { OEmbedFetcher.fetchVideoExactDurationSeconds(extractedVideoId) }
+                exactVideoDurationSecs = durationDeferred.await()
+                oEmbedDeferred.await()
             }
             if (fetchedOEmbed is OEmbedResult.Success) {
                 _oEmbedState.value = fetchedOEmbed
@@ -1414,18 +1419,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
 
-            // Strictly use the video URL ONLY for fetching Title, Channel Name, and Thumbnail above.
+            // Strictly use the video URL ONLY for fetching Title, Channel Name, Video ID, and Duration above.
             // NEVER use the video URL to open or play the video in YouTube!
             // Instead, open YouTube via its standard Home Launcher Intent and let YouTubeLiveSearchService
-            // locate & play the video via Browse Features or YouTube Search (0% External source).
-            WatchSessionRepository.addLog("Opening YouTube app for organic search/browse: \"$title\" ($author)", LogType.INFO)
+            // locate & play the exact video matching targetVideoId via Browse Features or YouTube Search.
+            WatchSessionRepository.addLog(
+                "Opening YouTube app for organic search/browse: \"$title\" ($author) [ID: ${extractedVideoId ?: "N/A"}]",
+                LogType.INFO
+            )
 
             val extractedHandle = com.example.util.TitleMatcher.extractChannelHandle(oEmbedSuccess?.authorUrl)
 
             YouTubeLiveSearchService.armSearchTrigger(
                 title = title,
                 channel = author,
-                channelHandle = extractedHandle
+                videoUrl = effectiveUrl,
+                videoId = extractedVideoId,
+                channelHandle = extractedHandle,
+                videoDurationSeconds = exactVideoDurationSecs
             )
 
             WatchSessionRepository.startTask(

@@ -116,6 +116,55 @@ object OEmbedFetcher {
         }
     }
 
+    /**
+     * Fetches the exact video duration in seconds ("lengthSeconds") for a specific 11-char YouTube videoId
+     * so that multiple videos with the same title on the same channel can be strictly distinguished.
+     */
+    suspend fun fetchVideoExactDurationSeconds(videoId: String?): Int = withContext(Dispatchers.IO) {
+        val cleanId = videoId?.trim().orEmpty()
+        if (cleanId.length != 11) return@withContext 0
+        var connection: HttpURLConnection? = null
+        return@withContext try {
+            val watchUrl = URL("https://www.youtube.com/watch?v=$cleanId")
+            connection = (watchUrl.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 2_500
+                readTimeout = 2_500
+                setRequestProperty(
+                    "User-Agent",
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
+                )
+            }
+            if (connection.responseCode == HttpURLConnection.HTTP_OK) {
+                val reader = BufferedReader(InputStreamReader(connection.inputStream))
+                val sb = StringBuilder()
+                val buf = CharArray(8192)
+                var totalRead = 0
+                val lengthRegex = Regex("\"lengthSeconds\"\\s*:\\s*\"(\\d+)\"")
+                val approxMsRegex = Regex("\"approxDurationMs\"\\s*:\\s*\"(\\d+)\"")
+                while (totalRead < 350_000) {
+                    val n = reader.read(buf)
+                    if (n <= 0) break
+                    sb.append(buf, 0, n)
+                    totalRead += n
+                    val m = lengthRegex.find(sb)
+                    if (m != null) {
+                        val secs = m.groupValues[1].toIntOrNull() ?: 0
+                        if (secs > 0) return@withContext secs
+                    }
+                }
+                val approxMatch = approxMsRegex.find(sb)
+                val approxMs = approxMatch?.groupValues?.getOrNull(1)?.toLongOrNull() ?: 0L
+                if (approxMs > 0L) return@withContext ((approxMs + 500L) / 1000L).toInt()
+            }
+            0
+        } catch (_: Exception) {
+            0
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
     private fun tryFetchWatchPageMetadata(watchUrl: String, fallbackThumb: String): OEmbedResult {
         var connection: HttpURLConnection? = null
         return try {
